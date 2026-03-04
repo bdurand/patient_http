@@ -161,13 +161,13 @@ Use `PatientHttp::RequestHelper` when you want a simpler API for creating and di
 
 This module allows you to use the same interface for making HTTP requests while swapping out the underlying queueing mechanism for handling responses asynchronously. By registering a custom handler, you can integrate with any job queue system (Sidekiq, Solid Queue, etc.) without changing your application code that makes HTTP requests. This decouples your request interface from your async processing infrastructure.
 
-1. Register a request handler once. The handler receives keyword arguments (`request`, `callback`, `callback_args`, `raise_error_responses`) and is responsible for dispatching the request through your app's queue/processor integration.
+1. Register a request handler once with `PatientHttp.register_handler`. The handler receives keyword arguments (`request`, `callback`, `callback_args`, `raise_error_responses`) and is responsible for dispatching the request through your app's queue/processor integration.
 2. Include `PatientHttp::RequestHelper` in your class.
 3. Optionally define a `request_template` for shared `base_url`, headers, and timeout.
 4. Call `async_get`, `async_post`, `async_put`, `async_patch`, `async_delete`, or `async_request`.
 
 ```ruby
-PatientHttp::RequestHelper.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
   # Example integration point. Adapt this to your app.
   # Build a RequestTask and enqueue it to your processor.
   task = PatientHttp::RequestTask.new(
@@ -209,15 +209,17 @@ class ApiClient
 end
 ```
 
-You can also call the `async_*` methods directly on `RequestHelper` if you don't want to include the module:
+You can also call HTTP methods directly on the `PatientHttp` module without including `RequestHelper`:
 
 ```ruby
-PatientHttp::RequestHelper.async_get(
+PatientHttp.get(
   "https://api.example.com/users/123",
   callback: FetchUserCallback,
   callback_args: {user_id: 123}
 )
 ```
+
+The `PatientHttp` module provides `get`, `post`, `put`, `patch`, `delete`, and `request` class methods that build a request and dispatch it through the registered handler.
 
 If you are using the [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) gem or the [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gem, the appropriate handler will automatically be registered for you.
 

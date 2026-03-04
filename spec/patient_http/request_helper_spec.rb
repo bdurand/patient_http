@@ -4,147 +4,7 @@ require "spec_helper"
 
 RSpec.describe PatientHttp::RequestHelper do
   after do
-    described_class.unregister_handler
-  end
-
-  describe ".register_handler" do
-    it "raises when neither a callable nor a block is provided" do
-      expect {
-        described_class.register_handler
-      }.to raise_error(ArgumentError, "Must provide a callable object or a block")
-    end
-
-    it "raises when both callable and block are provided" do
-      callable = proc { |request:, callback:, callback_args: nil, raise_error_responses: nil| }
-
-      expect {
-        described_class.register_handler(callable) { |request:, callback:, callback_args: nil, raise_error_responses: nil| nil }
-      }.to raise_error(ArgumentError, "Cannot provide both a callable object and a block")
-    end
-
-    it "raises when callable does not respond to call" do
-      expect {
-        described_class.register_handler(Object.new)
-      }.to raise_error(ArgumentError, "Handler must be a callable object or a block")
-    end
-
-    it "raises when handler does not accept required keyword arguments" do
-      handler = proc { |other_param: nil| }
-
-      expect {
-        described_class.register_handler(handler)
-      }.to raise_error(ArgumentError, /Handler must accept keyword arguments: request, callback, callback_args, raise_error_responses/)
-    end
-
-    it "raises when handler is missing some required keyword arguments" do
-      handler = proc { |request:, callback:| }
-
-      expect {
-        described_class.register_handler(handler)
-      }.to raise_error(ArgumentError, /Missing: callback_args, raise_error_responses/)
-    end
-
-    it "accepts handlers with keyword rest parameter" do
-      handler = proc { |**kwargs| }
-
-      expect {
-        described_class.register_handler(handler)
-      }.not_to raise_error
-    end
-
-    it "accepts handlers with all required keyword arguments" do
-      handler = proc { |request:, callback:, callback_args:, raise_error_responses:| }
-
-      expect {
-        described_class.register_handler(handler)
-      }.not_to raise_error
-    end
-
-    it "accepts handlers with all required keyword arguments with defaults" do
-      handler = proc { |request:, callback:, callback_args: nil, raise_error_responses: nil| }
-
-      expect {
-        described_class.register_handler(handler)
-      }.not_to raise_error
-    end
-
-    it "raises when handler accepts positional parameters" do
-      handler = proc { |context, request:, callback:, callback_args: nil, raise_error_responses: nil| }
-
-      expect {
-        described_class.register_handler(handler)
-      }.to raise_error(ArgumentError, /Handler must not accept positional parameters/)
-    end
-
-    it "raises when handler has extra required keyword parameters" do
-      handler = proc { |request:, callback:, callback_args:, raise_error_responses:, extra_param:| }
-
-      expect {
-        described_class.register_handler(handler)
-      }.to raise_error(ArgumentError, /Handler must not have extra required keyword parameters.*Found: extra_param/)
-    end
-
-    it "accepts handlers with optional keyword parameters beyond the required ones" do
-      handler = proc { |request:, callback:, callback_args: nil, raise_error_responses: nil, extra_param: nil| }
-
-      expect {
-        described_class.register_handler(handler)
-      }.not_to raise_error
-    end
-
-    it "registers a callable object" do
-      request = instance_double(PatientHttp::Request)
-      callback = "TestCallback"
-      callable = proc { |request:, callback:, callback_args: nil, raise_error_responses: nil| }
-
-      described_class.register_handler(callable)
-      described_class.execute(request: request, callback: callback)
-    end
-
-    it "registers a block" do
-      request = instance_double(PatientHttp::Request)
-      callback = "TestCallback"
-      captured_request = nil
-      captured_callback = nil
-
-      described_class.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
-        captured_request = request
-        captured_callback = callback
-      end
-
-      described_class.execute(request: request, callback: callback)
-
-      expect(captured_request).to be(request)
-      expect(captured_callback).to eq(callback)
-    end
-  end
-
-  describe ".execute" do
-    it "raises when no handler is registered" do
-      expect {
-        described_class.execute(request: instance_double(PatientHttp::Request), callback: "TestCallback")
-      }.to raise_error(
-        RuntimeError,
-        "No request handler registered; you must register a PatientHttp::RequestHelper handler before executing requests"
-      )
-    end
-
-    it "calls the registered handler with keyword arguments" do
-      request = instance_double(PatientHttp::Request)
-      callback = "TestCallback"
-      captured_request = nil
-      captured_callback = nil
-      handler = lambda { |request:, callback:, callback_args: nil, raise_error_responses: nil|
-        captured_request = request
-        captured_callback = callback
-      }
-
-      described_class.register_handler(handler)
-
-      described_class.execute(request: request, callback: callback)
-      expect(captured_request).to be(request)
-      expect(captured_callback).to eq(callback)
-    end
+    PatientHttp.unregister_handler
   end
 
   describe "class-level request helpers" do
@@ -154,7 +14,7 @@ RSpec.describe PatientHttp::RequestHelper do
       captured_callback_args = nil
       captured_raise_error_responses = nil
 
-      described_class.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+      PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
         captured_request = request
         captured_callback = callback
         captured_callback_args = callback_args
@@ -185,7 +45,7 @@ RSpec.describe PatientHttp::RequestHelper do
     it "merges template headers with per-request headers" do
       captured_request = nil
 
-      described_class.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+      PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
         captured_request = request
       end
 
@@ -207,7 +67,7 @@ RSpec.describe PatientHttp::RequestHelper do
 
       before do
         @captured_request = nil
-        described_class.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+        PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
           @captured_request = request
         end
       end
@@ -249,7 +109,7 @@ RSpec.describe PatientHttp::RequestHelper do
       captured_request = nil
       captured_callback = nil
 
-      described_class.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+      PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
         captured_request = request
         captured_callback = callback
       end
@@ -265,7 +125,7 @@ RSpec.describe PatientHttp::RequestHelper do
     it "accepts callback as a class name string" do
       captured_callback = nil
 
-      described_class.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+      PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
         captured_callback = callback
       end
 
@@ -278,7 +138,7 @@ RSpec.describe PatientHttp::RequestHelper do
     describe "HTTP method helpers" do
       before do
         @captured_request = nil
-        described_class.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+        PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
           @captured_request = request
         end
         @service = TestService.new
