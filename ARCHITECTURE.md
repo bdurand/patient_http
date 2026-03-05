@@ -95,7 +95,7 @@ Key benefits:
 Example:
 ```ruby
 # Register a handler once (typically in an initializer)
-PatientHttp::RequestHelper.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
   task = PatientHttp::RequestTask.new(
     request: request,
     task_handler: MyTaskHandler.new,

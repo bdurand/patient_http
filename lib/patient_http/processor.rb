@@ -8,9 +8,6 @@ module PatientHttp
     # Timing constants for the reactor loop
     DEQUEUE_TIMEOUT = 1.0 # Seconds to wait when dequeueing requests
 
-    # HTTP redirect status codes that should be followed
-    FOLLOWABLE_REDIRECT_STATUSES = [301, 302, 303, 307, 308].freeze
-
     # @return [Configuration] the configuration object for the processor
     attr_reader :config
 
@@ -110,16 +107,19 @@ module PatientHttp
     # @raise [MaxCapacityError] if at max capacity
     # @return [void]
     def enqueue(task)
-      raise NotRunningError.new("Cannot enqueue request: processor is #{state}") unless running?
+      @tasks_lock.synchronize do
+        raise NotRunningError.new("Cannot enqueue request: processor is #{state}") unless running?
 
-      # Check capacity - raise error if at max connections
-      if inflight_count >= @config.max_connections
-        notify_observers { |observer| observer.capacity_exceeded }
-        raise MaxCapacityError.new("Cannot enqueue request: already at max capacity (#{@config.max_connections} connections)")
+        # Check capacity - raise error if at max connections
+        total = @queue.size + @pending_tasks.size + @inflight_requests.size
+        if total >= @config.max_connections
+          notify_observers { |observer| observer.capacity_exceeded }
+          raise MaxCapacityError.new("Cannot enqueue request: already at max capacity (#{@config.max_connections} connections)")
+        end
+
+        task.enqueued!
+        @queue.push(task)
       end
-
-      task.enqueued!
-      @queue.push(task)
     end
 
     # Get the current processor state.
@@ -180,14 +180,25 @@ module PatientHttp
       end
     end
 
-    # Get the number of in-flight requests.
+    # Get the number of in-flight requests (actively executing HTTP calls).
     #
-    # Unlike {#idle?}, this method does not require the tasks lock because
-    # it reads a single atomic value from a thread-safe Concurrent::Hash.
+    # This does not include queued or pending tasks. For the total pipeline
+    # count used by the capacity check, see {#total_count}.
     #
     # @return [Integer]
     def inflight_count
       @inflight_requests.size
+    end
+
+    # Get the total number of tasks in the pipeline (queued + pending + in-flight).
+    #
+    # This is the count used by {#enqueue} for capacity enforcement.
+    #
+    # @return [Integer]
+    def total_count
+      @tasks_lock.synchronize do
+        @queue.size + @pending_tasks.size + @inflight_requests.size
+      end
     end
 
     # Get the IDs of in-flight requests.
@@ -201,7 +212,7 @@ module PatientHttp
 
     # Add an observer for processor events.
     #
-    # @param observer [ProcessObserver] the observer to add
+    # @param observer [ProcessorObserver] the observer to add
     # @return [void]
     def observe(observer)
       @tasks_lock.synchronize do

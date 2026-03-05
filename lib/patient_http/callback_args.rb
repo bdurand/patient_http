@@ -105,11 +105,11 @@ module PatientHttp
     #
     # @param key [String, Symbol] the key to access
     # @return [Object] the value
-    # @raise [ArgumentError] if the key does not exist
+    # @raise [KeyError] if the key does not exist
     def [](key)
       string_key = key.to_s
       unless @data.include?(string_key)
-        raise ArgumentError.new("Argument '#{key}' not found. Available keys: #{@data.keys.join(", ")}")
+        raise KeyError.new("key not found: #{key.inspect}. Available keys: #{@data.keys.join(", ")}")
       end
 
       @data[string_key]

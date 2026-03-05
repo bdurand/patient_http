@@ -61,8 +61,6 @@ module PatientHttp
       shutdown_timeout: 23,
       logger: nil,
       max_response_size: 1024 * 1024,
-      heartbeat_interval: 60,
-      orphan_threshold: 300,
       user_agent: "PatientHttp",
       raise_error_responses: false,
       max_redirects: 5,

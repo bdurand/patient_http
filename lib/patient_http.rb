@@ -29,6 +29,9 @@ module PatientHttp
 
   class ResponseTooLargeError < StandardError; end
 
+  # HTTP redirect status codes that should be followed
+  FOLLOWABLE_REDIRECT_STATUSES = [301, 302, 303, 307, 308].freeze
+
   VERSION = File.read(File.join(__dir__, "../VERSION")).strip
 
   # Autoload utility modules
@@ -89,7 +92,7 @@ module PatientHttp
     # The handler will receive keyword arguments: request, callback, callback_args,
     # and raise_error_responses. It should return the request id for the enqueued request.
     #
-    # @param callable [#call, nil] A callable object that will handle requests
+    # @param callable [#call, nil] A callable object that will handle requests.
     # @yield [request, callback, callback_args, raise_error_responses] If a block is given,
     #   it will be used as the request handler
     # @raise [ArgumentError] if neither a callable nor a block is provided, or if both are provided

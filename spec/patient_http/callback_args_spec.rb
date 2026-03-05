@@ -157,16 +157,16 @@ RSpec.describe PatientHttp::CallbackArgs do
       expect(args["user_id"]).to eq(123)
     end
 
-    it "raises ArgumentError for non-existent key" do
+    it "raises KeyError for non-existent key" do
       expect do
         args[:missing]
-      end.to raise_error(ArgumentError, /Argument 'missing' not found/)
+      end.to raise_error(KeyError, /key not found: :missing/)
     end
 
     it "includes available keys in error message" do
       expect do
         args[:missing]
-      end.to raise_error(ArgumentError, /Available keys:.*user_id.*name/)
+      end.to raise_error(KeyError, /Available keys:.*user_id.*name/)
     end
   end
 

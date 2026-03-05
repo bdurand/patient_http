@@ -70,6 +70,7 @@ module PatientHttp
     # @param max_size [Integer, nil] Optional payload size threshold in bytes.
     #   The JSON payload will only be stored externally if it exceeds this size.
     #   If the JSON payload does not exceed the threshold, the original hash is returned.
+    #   When nil (the default), the payload is always stored externally.
     # @return [Hash] Reference hash if stored, original hash if not
     # @raise [PayloadStoreNotFoundError] If no payload store is configured
     def store(data, max_size: nil)

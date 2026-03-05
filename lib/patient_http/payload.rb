@@ -33,7 +33,7 @@ module PatientHttp
       #
       # @param value [String] the value to encode
       # @param mimetype [String, nil] the MIME type of the content
-      # @return [Array<Symbol, String>, nil] [encoding, encoded_value] or nil if value is nil
+      # @return [Array(Symbol, String, String), nil] [encoding, encoded_value, charset] or nil if value is nil
       def encode(value, mimetype)
         return nil if value.nil?
 

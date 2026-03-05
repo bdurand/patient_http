@@ -487,13 +487,13 @@ RSpec.describe PatientHttp::Processor do
         signal_queue << task
       }
       processor.run do
-        # Enqueue multiple requests
-        3.times { |_i| processor.enqueue(create_request_task) }
+        # Enqueue requests up to max_connections
+        config.max_connections.times { |_i| processor.enqueue(create_request_task) }
 
-        # Wait for all 3 to complete
-        3.times { signal_queue.pop }
+        # Wait for all to complete
+        config.max_connections.times { signal_queue.pop }
 
-        expect(fiber_count.value).to eq(3)
+        expect(fiber_count.value).to eq(config.max_connections)
       end
     end
 
@@ -539,12 +539,24 @@ RSpec.describe PatientHttp::Processor do
     end
 
     it "checks capacity before spawning fibers when at limit" do
+      processor = described_class.new(config)
       processor.run do
-        allow(processor).to receive(:inflight_count).and_return(config.max_connections)
+        # Directly populate inflight_requests to simulate at-capacity state
+        lock = processor.instance_variable_get(:@tasks_lock)
+        inflight = processor.instance_variable_get(:@inflight_requests)
+        lock.synchronize do
+          config.max_connections.times do |i|
+            inflight["fake-#{i}"] = create_request_task
+          end
+        end
+
         expect do
           processor.enqueue(create_request_task)
         end.to raise_error(PatientHttp::MaxCapacityError,
           /already at max capacity/)
+
+        # Clean up fake entries so processor can stop cleanly
+        lock.synchronize { inflight.clear }
       end
     end
   end

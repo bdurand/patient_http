@@ -192,7 +192,7 @@ If you are using the [patient_http-sidekiq](https://github.com/bdurand/patient_h
 
 Use `PatientHttp::RequestHelper` when you want a simple API for creating and dispatching async HTTP requests directly from your class.
 
-1, Register a request handler with `PatientHttp.register_handler` that defines how requests are dispatched to your job queue or background processing system.
+1. Register a request handler with `PatientHttp.register_handler` that defines how requests are dispatched to your job queue or background processing system.
 2. Include `PatientHttp::RequestHelper` in your class.
 3. Optionally define a `request_template` for shared `base_url`, headers, and timeout.
 4. Call `async_get`, `async_post`, `async_put`, `async_patch`, `async_delete`, or `async_request`.
@@ -335,6 +335,34 @@ config.register_payload_store(:s3, adapter: :s3, bucket: bucket)
 ```
 
 Options: `bucket:` (required), `key_prefix:` (default: `"patient_http/payloads/"`)
+
+#### ActiveRecord Store
+
+For database-backed storage with transactional guarantees:
+
+```ruby
+config.register_payload_store(:database, adapter: :active_record)
+```
+
+This requires a database migration. Copy the migration from the gem:
+
+```ruby
+# db/migrate/XXXXXX_create_patient_http_payloads.rb
+class CreatePatientHttpPayloads < ActiveRecord::Migration[7.0]
+  def change
+    create_table :patient_http_payloads, id: false do |t|
+      t.string :key, null: false, limit: 36
+      t.text :data, null: false
+      t.timestamps
+    end
+
+    add_index :patient_http_payloads, :key, unique: true
+    add_index :patient_http_payloads, :created_at
+  end
+end
+```
+
+Options: `model:` (optional, defaults to built-in `PatientHttp::PayloadStore::ActiveRecordStore::Payload`)
 
 #### Custom Stores
 
