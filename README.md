@@ -270,22 +270,22 @@ def on_error(error, callback)
 end
 ```
 
-When deserializing, use the class methods to reconstruct the objects:
+When deserializing, use the `load` class methods to reconstruct the objects:
 
 ```ruby
-response = PatientHttp::Response.from_json(json_data)
-error = PatientHttp::HttpError.from_json(json_data)
+response = PatientHttp::Response.load(json_data)
+error = PatientHttp::HttpError.load(json_data)
 ```
 
 The `Response` object includes the HTTP status code, headers, body, and callback arguments. Error objects (`HttpError`, `RedirectError`, `RequestError`) include the error message, context about the request, and callback arguments.
 
-Response bodies are automatically encoded for JSON serialization. Binary content is Base64 encoded, and large text content is gzipped and then Base64 encoded to reduce payload size.
+Response bodies are automatically encoded for JSON serialization. Binary content is Base64 encoded, and large text content is gzipped and then Base64 encoded to reduce payload size. Decoding is handled transparently when you access the `body` or `json` methods on the `Response` object.
 
 ### Payload Stores
 
 For large request/response payloads, you can configure external storage to keep serialized JSON payloads small. Payloads exceeding the configured threshold are automatically stored externally and fetched on demand.
 
-If you are using a job queue or background processing system, this allows you to handle large responses without hitting size limits or memory constraints on queue message payloads.
+If you are using a job queue or background processing system, this allows you to handle large requests or responses without hitting size limits or memory constraints on queue message payloads. The use of external storage is transparent to your application code.
 
 ```ruby
 # Register a payload store (see below for options; the file adapter should only be used for development/testing)
@@ -419,7 +419,7 @@ config = PatientHttp::Configuration.new(
   # Maximum redirects to follow (default: 5, 0 disables)
   max_redirects: 5,
 
-  # Maximum host clients to pool (default: 100)
+  # Maximum host maintain persistent connections for (default: 100)
   connection_pool_size: 100,
 
   # Connection timeout in seconds (default: nil, uses request_timeout)
@@ -500,7 +500,9 @@ processor.observe(MetricsObserver.new)
 
 ## Testing
 
-Use `SynchronousExecutor` to execute requests synchronously in tests:
+Use `SynchronousExecutor` to execute requests synchronously in tests. This class can be used in place of the async processor for testing your request handling logic without needing to start the full async infrastructure.
+
+It is integrated automatically in the [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) and [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gems.
 
 ```ruby
 task = PatientHttp::RequestTask.new(
