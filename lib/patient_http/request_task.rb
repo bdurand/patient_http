@@ -29,7 +29,10 @@ module PatientHttp
     attr_reader :redirects
 
     # @return [Response, nil] The HTTP response, set on success
-    attr_reader :response, :error
+    attr_reader :response
+
+    # @return [Exception, nil] The error, set on failure
+    attr_reader :error
 
     # Initializes a new RequestTask.
     #

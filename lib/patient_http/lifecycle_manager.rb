@@ -25,7 +25,6 @@ module PatientHttp
       @state = Concurrent::AtomicReference.new(:stopped)
       @shutdown_barrier = Concurrent::Event.new
       @reactor_ready = Concurrent::Event.new
-      @lock = Mutex.new
     end
 
     # Get the current state.
@@ -74,12 +73,9 @@ module PatientHttp
     #
     # @return [Boolean] true if transition was successful
     def start!
-      @lock.synchronize do
-        return false if starting? || running? || stopping?
+      return false if starting? || running? || stopping?
 
-        @state.set(:starting)
-      end
-
+      @state.set(:starting)
       @shutdown_barrier.reset
       @reactor_ready.reset
       true
@@ -96,12 +92,9 @@ module PatientHttp
     #
     # @return [Boolean] true if transition was successful
     def drain!
-      @lock.synchronize do
-        return false unless running?
+      return false unless running?
 
-        @state.set(:draining)
-      end
-
+      @state.set(:draining)
       true
     end
 
@@ -109,21 +102,23 @@ module PatientHttp
     #
     # @return [Boolean] true if transition was successful
     def stop!
-      @lock.synchronize do
-        return false if stopped? || stopping? || starting?
+      return false if stopped? || stopping? || starting?
 
-        @state.set(:stopping)
-        @shutdown_barrier.set
-      end
-
+      @state.set(:stopping)
+      @shutdown_barrier.set
       true
     end
 
     # Transition to stopped state.
     #
+    # Also signals the reactor_ready event to unblock any thread
+    # waiting in {#wait_for_reactor} in case the reactor failed
+    # before it could signal readiness.
+    #
     # @return [void]
     def stopped!
       @state.set(:stopped)
+      @reactor_ready.set
     end
 
     # Signal that the reactor is ready.

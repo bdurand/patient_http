@@ -56,6 +56,7 @@ module PatientHttp
   autoload :ProcessorObserver, File.join(__dir__, "patient_http/processor_observer")
   autoload :RecursiveRedirectError, File.join(__dir__, "patient_http/redirect_error")
   autoload :RedirectError, File.join(__dir__, "patient_http/redirect_error")
+  autoload :RedirectHelper, File.join(__dir__, "patient_http/redirect_helper")
   autoload :Request, File.join(__dir__, "patient_http/request")
   autoload :RequestError, File.join(__dir__, "patient_http/request_error")
   autoload :RequestHelper, File.join(__dir__, "patient_http/request_helper")
@@ -70,6 +71,7 @@ module PatientHttp
 
   @testing = ENV["RAILS_ENV"] == "test"
   @handler = nil
+  @handler_mutex = Mutex.new
 
   class << self
     # Check if running in testing mode.
@@ -108,7 +110,7 @@ module PatientHttp
 
       validate_handler_parameters!(handler)
 
-      @handler = handler
+      @handler_mutex.synchronize { @handler = handler }
     end
 
     # Registers a request handler, raising an error if one is already registered.
@@ -125,8 +127,10 @@ module PatientHttp
     # @raise [ArgumentError] if the handler does not support the required keyword arguments
     # @return [#call] the registered handler
     def register_handler!(callable = nil, &block)
-      if @handler
-        raise "A PatientHttp handler is already registered. Unregister the existing handler before registering a new one."
+      @handler_mutex.synchronize do
+        if @handler
+          raise "A PatientHttp handler is already registered. Unregister the existing handler before registering a new one."
+        end
       end
 
       register_handler(callable, &block)
@@ -138,7 +142,9 @@ module PatientHttp
     #   the current handler
     # @return [void]
     def unregister_handler(handler = nil)
-      @handler = nil if @handler == handler || handler.nil?
+      @handler_mutex.synchronize do
+        @handler = nil if @handler == handler || handler.nil?
+      end
     end
 
     # Executes the registered request handler with the given request parameters.
@@ -151,11 +157,13 @@ module PatientHttp
     # @raise [RuntimeError] if no handler is registered
     # @return [Object] return value from the registered request handler
     def execute(request:, callback:, callback_args: nil, raise_error_responses: nil)
-      unless @handler
+      handler = @handler_mutex.synchronize { @handler }
+
+      unless handler
         raise "No request handler registered; you must register a PatientHttp handler before executing requests"
       end
 
-      @handler.call(
+      handler.call(
         request: request,
         callback: callback,
         callback_args: callback_args,
