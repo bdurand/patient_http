@@ -66,6 +66,8 @@ module PatientHttp
     # @param timeout [Numeric, nil] how long to wait for in-flight requests (seconds)
     # @return [void]
     def stop(timeout: nil)
+      timeout ||= @config.shutdown_timeout
+
       # Atomically transition to stopping state under lock to ensure consistency
       # with other state-checking operations
       @tasks_lock.synchronize do
@@ -76,7 +78,7 @@ module PatientHttp
       @queue.push(nil)
 
       # Wait for in-flight requests to complete
-      if timeout && timeout > 0
+      if timeout > 0
         deadline = monotonic_time + timeout
         sleep(LifecycleManager::POLL_INTERVAL) while !idle? && monotonic_time < deadline
       end
@@ -269,7 +271,7 @@ module PatientHttp
       wait_for_running
       yield
     ensure
-      stop
+      stop(timeout: 0)
       wait_for_idle
     end
 
