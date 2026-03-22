@@ -132,7 +132,9 @@ module PatientHttp
       @data.include?(key.to_s)
     end
 
-    # Convert to a hash with symbol keys.
+    # Convert to a hash with symbol keys (shallow).
+    #
+    # Only top-level keys are symbolized. Nested hash keys remain as strings.
     #
     # @return [Hash] hash with symbol keys
     def to_h

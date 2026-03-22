@@ -4,6 +4,7 @@ module PatientHttp
   # Core processor that handles async HTTP requests in a dedicated thread
   class Processor
     include TimeHelper
+    include RedirectHelper
 
     # Timing constants for the reactor loop
     DEQUEUE_TIMEOUT = 1.0 # Seconds to wait when dequeueing requests
@@ -65,6 +66,8 @@ module PatientHttp
     # @param timeout [Numeric, nil] how long to wait for in-flight requests (seconds)
     # @return [void]
     def stop(timeout: nil)
+      timeout ||= @config.shutdown_timeout
+
       # Atomically transition to stopping state under lock to ensure consistency
       # with other state-checking operations
       @tasks_lock.synchronize do
@@ -75,7 +78,7 @@ module PatientHttp
       @queue.push(nil)
 
       # Wait for in-flight requests to complete
-      if timeout && timeout > 0
+      if timeout > 0
         deadline = monotonic_time + timeout
         sleep(LifecycleManager::POLL_INTERVAL) while !idle? && monotonic_time < deadline
       end
@@ -85,6 +88,11 @@ module PatientHttp
       @reactor_thread.join(1) if @reactor_thread&.alive?
       @reactor_thread.kill if @reactor_thread&.alive?
       @reactor_thread = nil
+
+      # Drain any items left in the queue after the reactor has exited.
+      # This must happen after the reactor thread is done to avoid consuming
+      # the nil sentinel that wakes the reactor.
+      reenqueue_remaining_queue_items
 
       notify_observers { |observer| observer.stop }
     end
@@ -263,7 +271,7 @@ module PatientHttp
       wait_for_running
       yield
     ensure
-      stop
+      stop(timeout: 0)
       wait_for_idle
     end
 
@@ -406,25 +414,6 @@ module PatientHttp
       )
     end
 
-    # Check if a redirect response should be followed.
-    #
-    # @param task [RequestTask] the request task
-    # @param response_data [Hash] the response data with status, headers, body
-    # @return [Boolean] true if the redirect should be followed
-    def should_follow_redirect?(task, response_data)
-      status = response_data[:status]
-      return false unless FOLLOWABLE_REDIRECT_STATUSES.include?(status)
-
-      # Check if redirects are enabled for this task
-      return false if task.max_redirects == 0
-
-      # Check for Location header
-      location = response_data[:headers]["location"]
-      return false if location.nil? || location.empty?
-
-      true
-    end
-
     # Handle a redirect response.
     #
     # @param task [RequestTask] the request task
@@ -433,10 +422,9 @@ module PatientHttp
     def handle_redirect(task, response_data)
       status = response_data[:status]
       location = response_data[:headers]["location"]
-      redirect_url = resolve_redirect_url(task.request.url, location)
 
       # Check for redirect errors
-      error = check_too_many_redirects(task, location) || check_recursive_redirect(task, redirect_url)
+      error = check_redirect_error(task, response_data)
       if error
         notify_observers { |observer| observer.request_error(error) }
         handle_error(task, error)
@@ -448,58 +436,8 @@ module PatientHttp
       redirect_task.enqueued!
       @queue.push(redirect_task)
 
+      redirect_url = resolve_redirect_url(task.request.url, location)
       @config.logger&.debug("[PatientHttp] Request #{task.id} redirected (#{status}) to #{redirect_url}")
-    end
-
-    # Check if the redirect count has exceeded the maximum.
-    #
-    # @param task [RequestTask] the request task
-    # @param location [String] the redirect location URL
-    # @return [TooManyRedirectsError, nil] error if exceeded, nil otherwise
-    def check_too_many_redirects(task, location)
-      return nil if task.redirects.size < task.max_redirects
-
-      TooManyRedirectsError.new(
-        url: location,
-        http_method: task.request.http_method,
-        duration: task.duration,
-        request_id: task.id,
-        redirects: task.redirects + [task.request.url],
-        callback_args: task.callback_args.to_h
-      )
-    end
-
-    # Check if the redirect URL has already been visited (redirect loop).
-    #
-    # @param task [RequestTask] the request task
-    # @param redirect_url [String] the resolved redirect URL
-    # @return [RecursiveRedirectError, nil] error if loop detected, nil otherwise
-    def check_recursive_redirect(task, redirect_url)
-      visited_urls = task.redirects + [task.request.url]
-      return nil unless visited_urls.include?(redirect_url)
-
-      RecursiveRedirectError.new(
-        url: redirect_url,
-        http_method: task.request.http_method,
-        duration: task.duration,
-        request_id: task.id,
-        redirects: visited_urls,
-        callback_args: task.callback_args.to_h
-      )
-    end
-
-    # Resolve a redirect URL, handling relative URLs.
-    #
-    # @param base_url [String] The base URL
-    # @param location [String] The Location header value
-    # @return [String] The resolved absolute URL
-    def resolve_redirect_url(base_url, location)
-      base_uri = URI.parse(base_url)
-      redirect_uri = URI.parse(location)
-
-      return location if redirect_uri.absolute?
-
-      base_uri.merge(redirect_uri).to_s
     end
 
     # Handle error response.
@@ -538,7 +476,7 @@ module PatientHttp
     end
 
     def reenqueue_pending_requests
-      # Re-enqueue any remaining in-flight and pending tasks
+      # Re-enqueue any remaining in-flight, pending, and queued tasks
       tasks_to_reenqueue = []
       @tasks_lock.synchronize do
         # Now that we have the lock again, atomically transition to stopped and clear collections
@@ -548,7 +486,26 @@ module PatientHttp
         @pending_tasks.clear
       end
 
-      # Re-enqueue each incomplete task
+      reenqueue_tasks(tasks_to_reenqueue)
+    end
+
+    def reenqueue_remaining_queue_items
+      tasks_to_reenqueue = []
+
+      # Drain remaining items from the queue (skip nil sentinels from stop)
+      until @queue.empty?
+        begin
+          task = @queue.pop(true)
+          tasks_to_reenqueue << task if task
+        rescue ThreadError
+          break
+        end
+      end
+
+      reenqueue_tasks(tasks_to_reenqueue)
+    end
+
+    def reenqueue_tasks(tasks_to_reenqueue)
       tasks_to_reenqueue.each do |task|
         task.retry
         notify_observers { |observer| observer.request_end(task) }

@@ -1012,7 +1012,7 @@ RSpec.describe PatientHttp::Processor do
       processor.enqueue(request)
 
       # Stop with timeout
-      processor.stop
+      processor.stop(timeout: 2)
 
       # Should have completed the request (still no in-flight after stop)
       expect(processor.inflight_count).to eq(0)

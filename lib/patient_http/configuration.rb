@@ -58,7 +58,7 @@ module PatientHttp
     def initialize(
       max_connections: 256,
       request_timeout: 60,
-      shutdown_timeout: 23,
+      shutdown_timeout: 30,
       logger: nil,
       max_response_size: 1024 * 1024,
       user_agent: "PatientHttp",

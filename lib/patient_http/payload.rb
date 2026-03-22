@@ -97,6 +97,12 @@ module PatientHttp
 
       # Return the value as a UTF-8 encoded string if possible. If the value cannot
       # be converted to UTF-8, return it in the response charset or ASCII-8BIT.
+      #
+      # Encoding strategy:
+      # 1. Force-encode to the response charset
+      # 2. Try to transcode to UTF-8 for storage efficiency
+      # 3. If transcoding fails, keep the charset encoding
+      # 4. If force-encoding itself fails, fall back to ASCII-8BIT
       def text_value(value, charset)
         text = force_encoding(value, charset)
         unless text.encoding == Encoding::UTF_8

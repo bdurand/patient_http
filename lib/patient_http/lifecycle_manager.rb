@@ -5,10 +5,6 @@ module PatientHttp
   #
   # Handles state transitions and provides predicates for checking the current state.
   # Thread-safe state management using Concurrent::AtomicReference.
-  #
-  # @note State transition methods (start!, stop!, drain!) use a read-then-write pattern.
-  #   Callers must provide external synchronization (e.g., via Mutex) when calling
-  #   these methods from multiple threads to prevent race conditions.
   class LifecycleManager
     include TimeHelper
 
@@ -78,10 +74,10 @@ module PatientHttp
         return false if starting? || running? || stopping?
 
         @state.set(:starting)
+        @shutdown_barrier.reset
+        @reactor_ready.reset
       end
 
-      @shutdown_barrier.reset
-      @reactor_ready.reset
       true
     end
 
@@ -121,9 +117,14 @@ module PatientHttp
 
     # Transition to stopped state.
     #
+    # Also signals the reactor_ready event to unblock any thread
+    # waiting in {#wait_for_reactor} in case the reactor failed
+    # before it could signal readiness.
+    #
     # @return [void]
     def stopped!
       @state.set(:stopped)
+      @reactor_ready.set
     end
 
     # Signal that the reactor is ready.

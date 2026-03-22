@@ -404,8 +404,8 @@ config = PatientHttp::Configuration.new(
   # Default timeout for HTTP requests in seconds (default: 60)
   request_timeout: 60,
 
-  # Timeout for graceful shutdown in seconds (default: 23)
-  shutdown_timeout: 23,
+  # Timeout for graceful shutdown in seconds (default: 30)
+  shutdown_timeout: 30,
 
   # Maximum response body size in bytes (default: 1MB)
   max_response_size: 1024 * 1024,
@@ -419,7 +419,7 @@ config = PatientHttp::Configuration.new(
   # Maximum redirects to follow (default: 5, 0 disables)
   max_redirects: 5,
 
-  # Maximum host maintain persistent connections for (default: 100)
+  # Maximum number of hosts to maintain persistent connections for (default: 100)
   connection_pool_size: 100,
 
   # Connection timeout in seconds (default: nil, uses request_timeout)
