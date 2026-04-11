@@ -3,6 +3,7 @@
 require "async"
 require "async/http"
 require "concurrent"
+require "monitor"
 require "json"
 require "uri"
 require "zlib"
@@ -71,7 +72,7 @@ module PatientHttp
 
   @testing = %w[RAILS_ENV RACK_ENV APP_ENV].any? { |var| ENV[var] == "test" }
   @handler = nil
-  @handler_mutex = Mutex.new
+  @handler_mutex = Monitor.new
 
   class << self
     # Check if running in testing mode.
@@ -131,16 +132,8 @@ module PatientHttp
         if @handler
           raise "A PatientHttp handler is already registered. Unregister the existing handler before registering a new one."
         end
-      end
 
-      handler = register_handler(callable, &block)
-
-      @handler_mutex.synchronize do
-        unless handler == @handler
-          raise "A PatientHttp handler is already registered. Unregister the existing handler before registering a new one."
-        end
-
-        handler
+        register_handler(callable, &block)
       end
     end
 

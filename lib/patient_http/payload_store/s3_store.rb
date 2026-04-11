@@ -39,15 +39,13 @@ module PatientHttp
         @key_prefix = key_prefix || "patient_http/payloads/"
       end
 
-      # Store data as JSON in S3.
+      # Store pre-serialized JSON string directly in S3.
       #
       # @param key [String] Unique key (appended to key_prefix)
-      # @param data [Hash] Data to store
+      # @param json [String] Pre-serialized JSON string
       # @return [String] The key
-      def store(key, data)
+      def store_json(key, json)
         full_key = key_with_prefix(key)
-        json = JSON.generate(data)
-
         @bucket.object(full_key).put(body: json, content_type: "application/json")
         key
       end

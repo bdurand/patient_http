@@ -135,7 +135,7 @@ RSpec.describe PatientHttp::Processor do
               inflight.delete("fake-id")
               processor.instance_variable_get(:@idle_condition).broadcast
             end
-          end
+          end.join
 
           start_time = Time.now
           processor.stop(timeout: 0.5)
