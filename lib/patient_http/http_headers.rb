@@ -55,6 +55,15 @@ module PatientHttp
       new_headers
     end
 
+    # Returns a new HttpHeaders without the specified keys (case-insensitive).
+    #
+    # @param keys [Array<String, Symbol>] header names to exclude
+    # @return [HttpHeaders] new instance without the specified headers
+    def except(*keys)
+      normalized = keys.map { |k| k.to_s.downcase }
+      self.class.new(@headers.except(*normalized))
+    end
+
     # Converts to a regular hash with lowercase keys.
     #
     # @return [Hash] hash representation

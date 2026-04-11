@@ -446,5 +446,75 @@ RSpec.describe PatientHttp::RequestTask do
         expect(redirect_task.request.url).to eq("https://other.example.com/path")
       end
     end
+
+    context "with sensitive headers on cross-origin redirects" do
+      let(:request_with_auth) do
+        PatientHttp::Request.new(
+          :get,
+          "https://api.example.com/users",
+          headers: {
+            "Authorization" => "Bearer secret-token",
+            "Cookie" => "session=abc123",
+            "Accept" => "application/json"
+          }
+        )
+      end
+
+      it "preserves all headers on same-origin redirect" do
+        task = described_class.new(
+          request: request_with_auth,
+          task_handler: task_handler,
+          callback: callback
+        )
+
+        redirect_task = task.redirect_task(location: "https://api.example.com/new-path", status: 302)
+
+        expect(redirect_task.request.headers["authorization"]).to eq("Bearer secret-token")
+        expect(redirect_task.request.headers["cookie"]).to eq("session=abc123")
+        expect(redirect_task.request.headers["accept"]).to eq("application/json")
+      end
+
+      it "strips authorization and cookie headers on cross-origin redirect (different host)" do
+        task = described_class.new(
+          request: request_with_auth,
+          task_handler: task_handler,
+          callback: callback
+        )
+
+        redirect_task = task.redirect_task(location: "https://other.example.com/path", status: 302)
+
+        expect(redirect_task.request.headers["authorization"]).to be_nil
+        expect(redirect_task.request.headers["cookie"]).to be_nil
+        expect(redirect_task.request.headers["accept"]).to eq("application/json")
+      end
+
+      it "strips sensitive headers on cross-origin redirect (scheme change)" do
+        task = described_class.new(
+          request: request_with_auth,
+          task_handler: task_handler,
+          callback: callback
+        )
+
+        redirect_task = task.redirect_task(location: "http://api.example.com/path", status: 302)
+
+        expect(redirect_task.request.headers["authorization"]).to be_nil
+        expect(redirect_task.request.headers["cookie"]).to be_nil
+        expect(redirect_task.request.headers["accept"]).to eq("application/json")
+      end
+
+      it "strips sensitive headers on cross-origin redirect (different port)" do
+        task = described_class.new(
+          request: request_with_auth,
+          task_handler: task_handler,
+          callback: callback
+        )
+
+        redirect_task = task.redirect_task(location: "https://api.example.com:8443/path", status: 302)
+
+        expect(redirect_task.request.headers["authorization"]).to be_nil
+        expect(redirect_task.request.headers["cookie"]).to be_nil
+        expect(redirect_task.request.headers["accept"]).to eq("application/json")
+      end
+    end
   end
 end

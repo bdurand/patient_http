@@ -59,6 +59,13 @@ RSpec.describe PatientHttp::Payload do
         expect(encoded.encoding).to eq(Encoding::US_ASCII)
         expect(charset).to eq(Encoding::UTF_8.name)
       end
+
+      it "produces valid gzip output for large compressible text" do
+        value = "repeat " * 1000
+        _encoding, encoded, _charset = described_class.encode(value, "text/plain")
+        compressed = encoded.unpack1("m0")
+        expect(Zlib.gunzip(compressed)).to eq(value)
+      end
     end
 
     context "with binary mimetype" do
@@ -112,7 +119,7 @@ RSpec.describe PatientHttp::Payload do
 
     it "decodes :gzipped" do
       value = "compressible text " * 100
-      gzipped = Zlib::Deflate.deflate(value)
+      gzipped = Zlib.gzip(value)
       encoded = [gzipped].pack("m0")
       decoded = described_class.decode(encoded, :gzipped, Encoding::UTF_8.name)
       expect(decoded).to eq(value)

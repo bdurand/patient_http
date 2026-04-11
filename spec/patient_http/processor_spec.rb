@@ -125,10 +125,20 @@ RSpec.describe PatientHttp::Processor do
 
       context "with timeout" do
         it "waits for in-flight requests to complete" do
-          allow(processor).to receive(:idle?).and_return(false, false, false, true)
+          # Simulate an in-flight request that completes quickly
+          inflight = processor.instance_variable_get(:@inflight_requests)
+          inflight["fake-id"] = double("task")
+
+          Thread.new do
+            sleep 0.05
+            processor.instance_variable_get(:@tasks_lock).synchronize do
+              inflight.delete("fake-id")
+              processor.instance_variable_get(:@idle_condition).broadcast
+            end
+          end
 
           start_time = Time.now
-          processor.stop(timeout: 0.2)
+          processor.stop(timeout: 0.5)
           elapsed = Time.now - start_time
 
           # Should wait but not exceed timeout significantly
@@ -136,7 +146,9 @@ RSpec.describe PatientHttp::Processor do
         end
 
         it "does not wait longer than timeout" do
-          allow(processor).to receive(:idle?).and_return(false)
+          # Simulate an in-flight request that never completes
+          inflight = processor.instance_variable_get(:@inflight_requests)
+          inflight["fake-id"] = double("task", retry: nil, id: "fake-id")
 
           start_time = Time.now
           processor.stop(timeout: 0.2)

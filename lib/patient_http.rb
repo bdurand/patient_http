@@ -69,7 +69,7 @@ module PatientHttp
   autoload :TaskHandler, File.join(__dir__, "patient_http/task_handler")
   autoload :TooManyRedirectsError, File.join(__dir__, "patient_http/redirect_error")
 
-  @testing = ENV["RAILS_ENV"] == "test"
+  @testing = %w[RAILS_ENV RACK_ENV APP_ENV].any? { |var| ENV[var] == "test" }
   @handler = nil
   @handler_mutex = Mutex.new
 
@@ -133,7 +133,15 @@ module PatientHttp
         end
       end
 
-      register_handler(callable, &block)
+      handler = register_handler(callable, &block)
+
+      @handler_mutex.synchronize do
+        unless handler == @handler
+          raise "A PatientHttp handler is already registered. Unregister the existing handler before registering a new one."
+        end
+
+        handler
+      end
     end
 
     # Unregisters the current request handler.
