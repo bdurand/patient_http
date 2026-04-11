@@ -3,6 +3,7 @@
 require "async"
 require "async/http"
 require "concurrent"
+require "monitor"
 require "json"
 require "uri"
 require "zlib"
@@ -69,9 +70,9 @@ module PatientHttp
   autoload :TaskHandler, File.join(__dir__, "patient_http/task_handler")
   autoload :TooManyRedirectsError, File.join(__dir__, "patient_http/redirect_error")
 
-  @testing = ENV["RAILS_ENV"] == "test"
+  @testing = %w[RAILS_ENV RACK_ENV APP_ENV].any? { |var| ENV[var] == "test" }
   @handler = nil
-  @handler_mutex = Mutex.new
+  @handler_mutex = Monitor.new
 
   class << self
     # Check if running in testing mode.
@@ -131,9 +132,9 @@ module PatientHttp
         if @handler
           raise "A PatientHttp handler is already registered. Unregister the existing handler before registering a new one."
         end
-      end
 
-      register_handler(callable, &block)
+        register_handler(callable, &block)
+      end
     end
 
     # Unregisters the current request handler.

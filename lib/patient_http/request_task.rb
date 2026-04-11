@@ -7,6 +7,9 @@ module PatientHttp
   class RequestTask
     include TimeHelper
 
+    # Headers that are sensitive to origin and should be stripped on cross-origin redirects
+    SENSITIVE_HEADERS = %w[authorization cookie].freeze
+
     # @return [String] Unique UUID for tracking the task
     attr_reader :id
 
@@ -210,11 +213,18 @@ module PatientHttp
       # Resolve the redirect URL (handle relative URLs)
       redirect_url = resolve_redirect_url(location)
 
+      # Strip sensitive headers on cross-origin redirects to prevent credential leakage
+      redirect_headers = if cross_origin?(request.url, redirect_url)
+        request.headers.except(*SENSITIVE_HEADERS)
+      else
+        request.headers
+      end
+
       # Create a new request for the redirect
       redirect_request = Request.new(
         redirect_method,
         redirect_url,
-        headers: request.headers,
+        headers: redirect_headers,
         body: redirect_body,
         timeout: request.timeout,
         max_redirects: request.max_redirects
@@ -259,6 +269,20 @@ module PatientHttp
     end
 
     private
+
+    # Check if two URLs have different origins (scheme + host + port).
+    #
+    # @param original_url [String] The original request URL
+    # @param target_url [String] The redirect target URL
+    # @return [Boolean] true if the origins differ
+    def cross_origin?(original_url, target_url)
+      original = URI.parse(original_url)
+      target = URI.parse(target_url)
+
+      original.scheme != target.scheme ||
+        original.host != target.host ||
+        original.port != target.port
+    end
 
     # Resolve a redirect URL, handling relative URLs.
     #

@@ -30,15 +30,15 @@ module PatientHttp
         FileUtils.mkdir_p(@directory)
       end
 
-      # Store data as a JSON file.
+      # Store pre-serialized JSON string directly to a file.
       #
       # @param key [String] Unique key (used as filename)
-      # @param data [Hash] Data to store
+      # @param json [String] Pre-serialized JSON string
       # @return [String] The key
-      def store(key, data)
+      def store_json(key, json)
         path = file_path(key)
         @mutex.synchronize do
-          File.write(path, JSON.generate(data))
+          File.write(path, json)
         end
         key
       end
@@ -77,7 +77,9 @@ module PatientHttp
       # @param key [String] The key to check
       # @return [Boolean] true if the payload exists
       def exists?(key)
-        File.exist?(file_path(key))
+        @mutex.synchronize do
+          File.exist?(file_path(key))
+        end
       end
 
       private

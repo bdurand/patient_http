@@ -55,6 +55,16 @@ module PatientHttp
       new_headers
     end
 
+    # Returns a new HttpHeaders without the specified keys (case-insensitive).
+    #
+    # @param keys [Array<String, Symbol>] header names to exclude
+    # @return [HttpHeaders] new instance without the specified headers
+    def except(*keys)
+      normalized = keys.map { |k| k.to_s.downcase }
+      filtered_headers = @headers.reject { |key, _value| normalized.include?(key) } # rubocop:disable Style/HashExcept
+      self.class.new(filtered_headers)
+    end
+
     # Converts to a regular hash with lowercase keys.
     #
     # @return [Hash] hash representation

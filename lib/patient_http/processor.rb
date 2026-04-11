@@ -28,6 +28,7 @@ module PatientHttp
       @inflight_requests = Concurrent::Hash.new
       @pending_tasks = Concurrent::Hash.new
       @tasks_lock = Mutex.new
+      @idle_condition = ConditionVariable.new
       @testing_callback = nil
       @http_client = Client.new(self)
       @observers = []
@@ -77,10 +78,19 @@ module PatientHttp
       # Interrupt the reactor's queue wait by pushing a sentinel value
       @queue.push(nil)
 
-      # Wait for in-flight requests to complete
+      # Wait for in-flight and pending requests to complete.
+      # Queue items are not checked here — they will be re-enqueued by
+      # reenqueue_remaining_queue_items after the reactor thread exits.
       if timeout > 0
         deadline = monotonic_time + timeout
-        sleep(LifecycleManager::POLL_INTERVAL) while !idle? && monotonic_time < deadline
+        @tasks_lock.synchronize do
+          loop do
+            break if @pending_tasks.empty? && @inflight_requests.empty?
+            remaining = deadline - monotonic_time
+            break if remaining <= 0
+            @idle_condition.wait(@tasks_lock, remaining)
+          end
+        end
       end
 
       reenqueue_pending_requests
@@ -391,6 +401,9 @@ module PatientHttp
 
       @tasks_lock.synchronize do
         @inflight_requests.delete(task.id)
+        if @pending_tasks.empty? && @inflight_requests.empty?
+          @idle_condition.broadcast
+        end
       end
       notify_observers { |observer| observer.request_end(task) }
     end

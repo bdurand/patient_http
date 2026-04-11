@@ -77,11 +77,11 @@ module PatientHttp
       store = config.payload_store
       raise PayloadStoreNotFoundError.new("No payload store configured") unless store
 
-      json_size = data.to_json.bytesize
-      return data if max_size && json_size <= max_size
+      json = JSON.generate(data)
+      return data if max_size && json.bytesize <= max_size
 
       key = store.generate_key
-      store.store(key, data)
+      store.store_json(key, json)
 
       {
         REFERENCE_KEY => {

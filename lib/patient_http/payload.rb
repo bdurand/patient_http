@@ -43,7 +43,7 @@ module PatientHttp
           if value.bytesize < 4096
             [:text, value, value.encoding.name]
           else
-            gzipped = Zlib::Deflate.deflate(value)
+            gzipped = Zlib.gzip(value)
             if gzipped.bytesize < value.bytesize
               [:gzipped, [gzipped].pack("m0"), value.encoding.name]
             else
@@ -70,7 +70,7 @@ module PatientHttp
         when :binary
           encoded_value.unpack1("m")
         when :gzipped
-          Zlib::Inflate.inflate(encoded_value.unpack1("m"))
+          Zlib.gunzip(encoded_value.unpack1("m"))
         end
 
         force_encoding(decoded_value, charset)

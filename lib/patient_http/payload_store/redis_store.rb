@@ -38,17 +38,15 @@ module PatientHttp
         @key_prefix = key_prefix || "patient_http:payloads:"
       end
 
-      # Store data as JSON in Redis.
+      # Store pre-serialized JSON string directly in Redis.
       #
       # @param key [String] Unique key (appended to key_prefix)
-      # @param data [Hash] Data to store
+      # @param json [String] Pre-serialized JSON string
       # @return [String] The key
-      def store(key, data)
+      def store_json(key, json)
         full_key = key_with_prefix(key)
-        json = JSON.generate(data)
 
         if @ttl
-          # Convert seconds to milliseconds for fractional second precision
           ttl_ms = (@ttl * 1000).round
           @redis.set(full_key, json, px: ttl_ms)
         else

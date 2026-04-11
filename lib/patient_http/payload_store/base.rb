@@ -100,9 +100,22 @@ module PatientHttp
       # @param key [String] Unique key for this data
       # @param data [Hash] The data to store (will be serialized as JSON)
       # @return [String] The key
-      # @raise [NotImplementedError] Subclasses must implement this method
       def store(key, data)
-        raise NotImplementedError, "#{self.class.name} must implement #store"
+        json = JSON.generate(data)
+        store_json(key, json)
+      end
+
+      # Store pre-serialized JSON data with the given key.
+      #
+      # Subclasses that serialize in #store should override this to write
+      # the string directly, avoiding double serialization.
+      #
+      # @param key [String] Unique key for this data
+      # @param json [String] Pre-serialized JSON string
+      # @return [String] The key
+      # @raise [NotImplementedError] Subclasses must implement this method
+      def store_json(key, json)
+        raise NotImplementedError, "#{self.class.name} must implement #store_json"
       end
 
       # Fetch data by key.

@@ -18,6 +18,7 @@ module PatientHttp
       @config = config
       @on_complete = on_complete
       @on_error = on_error
+      @proxy_client = nil
     end
 
     # Execute the request synchronously.
@@ -32,6 +33,8 @@ module PatientHttp
 
           loop do
             http_client&.close
+            @proxy_client&.close
+            @proxy_client = nil
             http_client = create_http_client
             timeout = @task.request.timeout || @config.request_timeout
 
@@ -113,6 +116,8 @@ module PatientHttp
           invoke_callback(error, :error)
         ensure
           http_client&.close
+          @proxy_client&.close
+          @proxy_client = nil
         end
       end
     end
@@ -144,9 +149,9 @@ module PatientHttp
 
       proxy_endpoint = Async::HTTP::Endpoint.parse(@config.proxy_url)
       proxy_endpoint = configure_endpoint(proxy_endpoint) if @config.connection_timeout
-      proxy_client = Async::HTTP::Client.new(proxy_endpoint)
+      @proxy_client = Async::HTTP::Client.new(proxy_endpoint)
 
-      proxy = proxy_client.proxy(endpoint)
+      proxy = @proxy_client.proxy(endpoint)
       Async::HTTP::Client.new(proxy.wrap_endpoint(endpoint), retries: @config.retries)
     end
 

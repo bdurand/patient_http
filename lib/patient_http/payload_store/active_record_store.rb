@@ -47,13 +47,12 @@ module PatientHttp
         @model = model || Payload
       end
 
-      # Store data as JSON in the database.
+      # Store pre-serialized JSON string directly in the database.
       #
       # @param key [String] Unique key (used as primary key)
-      # @param data [Hash] Data to store
+      # @param json [String] Pre-serialized JSON string
       # @return [String] The key
-      def store(key, data)
-        json = JSON.generate(data)
+      def store_json(key, json)
         now = Time.current
 
         @model.with_connection do
