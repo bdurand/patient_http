@@ -13,6 +13,9 @@ module PatientHttp
   #     json: {name: "John", email: "john@example.com"}
   #   )
   class Request
+    UNDEFINED = Object.new.freeze
+    private_constant :UNDEFINED
+
     # Valid HTTP methods
     VALID_METHODS = %i[get post put patch delete].freeze
 
@@ -24,9 +27,6 @@ module PatientHttp
 
     # @return [HttpHeaders] Request headers
     attr_reader :headers
-
-    # @return [String, nil] Request body
-    attr_reader :body
 
     # @return [Numeric, nil] Overall timeout in seconds
     attr_reader :timeout
@@ -44,7 +44,7 @@ module PatientHttp
           hash["http_method"].to_sym,
           hash["url"],
           headers: hash["headers"],
-          body: hash["body"],
+          body: Payload.load(hash["body"])&.value,
           timeout: hash["timeout"],
           max_redirects: hash["max_redirects"]
         )
@@ -91,6 +91,18 @@ module PatientHttp
       end
 
       validate!
+
+      encoding, encoded_body, charset = Payload.encode(@body, @headers["content-type"])
+      @payload = Payload.new(encoding, encoded_body, charset) unless @body.nil?
+      @body = UNDEFINED
+    end
+
+    # Returns the request body, decoding it from the payload if necessary.
+    #
+    # @return [String, nil] The decoded request body or nil if there was no body.
+    def body
+      @body = @payload&.value if @body.equal?(UNDEFINED)
+      @body
     end
 
     # Serialize to JSON hash.
@@ -101,7 +113,7 @@ module PatientHttp
         "http_method" => @http_method.to_s,
         "url" => @url.to_s,
         "headers" => @headers.to_h,
-        "body" => @body,
+        "body" => @payload&.as_json,
         "timeout" => @timeout,
         "max_redirects" => @max_redirects
       }

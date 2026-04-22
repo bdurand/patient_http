@@ -155,7 +155,7 @@ RSpec.describe PatientHttp::Request do
         "http_method" => "post",
         "url" => "https://api.example.com/data",
         "headers" => {"content-type" => "application/json"},
-        "body" => '{"key":"value"}',
+        "body" => {"encoding" => "text", "value" => '{"key":"value"}', "charset" => "UTF-8"},
         "timeout" => 15,
         "max_redirects" => 5
       )
