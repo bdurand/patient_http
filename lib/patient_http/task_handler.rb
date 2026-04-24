@@ -26,8 +26,6 @@ module PatientHttp
   class TaskHandler
     attr_writer :encryptor
 
-    # @param encryptor [Encryptor, nil] Encryptor to use at job queue boundaries.
-    #   Defaults to a no-op encryptor if not provided.
     def initialize
       @encryptor = nil
     end
