@@ -394,6 +394,47 @@ config.register_payload_store(:custom, adapter: :my_store, **options)
 
 Multiple stores can be registered for migration purposes. The last registered store is used for new writes; all registered stores remain available for reads.
 
+## Encryption
+
+When using PatientHttp with a job queue system, request and response data is serialized into the queue (Redis, database, etc.). If this data contains sensitive information, you should encrypt it.
+
+Configure encryption once on the `Configuration` object; all serialization boundaries handled by `TaskHandler` will apply it automatically.
+
+### Using an encryption key
+
+The simplest option is `encryption_key=`, which sets up [ActiveSupport::MessageEncryptor](https://api.rubyonrails.org/classes/ActiveSupport/MessageEncryptor.html) automatically using AES-256-GCM:
+
+```ruby
+config = PatientHttp::Configuration.new
+config.encryption_key = ENV["PATIENT_HTTP_ENCRYPTION_KEY"]
+```
+
+To support key rotation, pass an array — the first key encrypts new data, and all keys attempt decryption:
+
+```ruby
+config.encryption_key = [ENV["PATIENT_HTTP_ENCRYPTION_KEY"], ENV["PATIENT_HTTP_OLD_KEY"]]
+```
+
+### Using custom callables
+
+For custom encryption libraries, provide callables that accept and return raw bytes (String):
+
+```ruby
+config.encryption { |bytes| MyEncryption.encrypt(bytes) }
+config.decryption { |bytes| MyEncryption.decrypt(bytes) }
+```
+
+Or pass any object that responds to `#call`:
+
+```ruby
+config.encryption(->(bytes) { MyEncryption.encrypt(bytes) })
+config.decryption(->(bytes) { MyEncryption.decrypt(bytes) })
+```
+
+### How it works
+
+Encrypted data is stored as `{"__encrypted__" => true, "value" => "<base64>"}`. The `Encryptor` JSON-serializes the original hash, passes the bytes to your callable, and Base64-encodes the result. Decryption reverses the process. Hashes without the `"__encrypted__"` key are passed through unchanged, so un-encrypted historical data continues to work while you roll out encryption.
+
 ## Configuration
 
 ```ruby

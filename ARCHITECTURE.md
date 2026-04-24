@@ -17,7 +17,7 @@ PatientHttp provides a mechanism to offload HTTP requests from application threa
 The heart of the system - runs in a dedicated thread with its own Fiber reactor. Manages the async HTTP request queue and handles concurrent request execution using the `async` gem.
 
 ### TaskHandler
-Abstract base class that defines the integration point between the pool and your application. Implementations handle completion callbacks, error callbacks, and job retry operations. This abstraction allows the pool to work with any job system (Sidekiq, Resque, custom queues, etc.).
+Abstract base class that defines the integration point between the pool and your application. Implementations handle completion callbacks, error callbacks, and job retry operations. Accepts an `Encryptor` at construction time; concrete implementations use it to encrypt serialized `Response`/`Error` data before passing it to the job queue. This abstraction allows the pool to work with any job system (Sidekiq, Resque, custom queues, etc.).
 
 ### Request/RequestTemplate
 `Request` is an immutable value object representing an HTTP request. `RequestTemplate` provides a builder for creating requests with shared configuration (base URL, headers, timeout).
@@ -39,6 +39,9 @@ Internal HTTP client that handles connection pooling, HTTP/2 support, and reques
 
 ### LifecycleManager
 Manages processor state transitions (stopped → starting → running → draining → stopping) with thread-safe state machines.
+
+### Encryptor
+Handles encryption and decryption of serialized payloads at the job queue boundary. Wraps user-provided encryption/decryption callables (which operate on raw bytes) with JSON serialization and Base64 encoding. Instantiated from `Configuration#encryptor` and injected into `TaskHandler` at construction time. Encrypted data is enveloped as `{"__encrypted__" => true, "value" => "<base64>"}` to allow transparent no-op pass-through when no encryption is configured.
 
 ### ExternalStorage/PayloadStore
 Optional external storage for large request/response payloads. Supports file, Redis, S3, and custom adapters.

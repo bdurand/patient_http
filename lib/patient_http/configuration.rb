@@ -67,8 +67,16 @@ module PatientHttp
       connection_pool_size: 100,
       connection_timeout: nil,
       proxy_url: nil,
-      retries: 3
+      retries: 3,
+      encryption_key: nil
     )
+      # Initialize payload store configuration
+      @payload_stores = {}
+      @default_payload_store_name = nil
+      @payload_store_mutex = Mutex.new
+
+      @encryptor = nil
+
       self.max_connections = max_connections
       self.request_timeout = request_timeout
       self.shutdown_timeout = shutdown_timeout
@@ -81,11 +89,7 @@ module PatientHttp
       self.connection_timeout = connection_timeout
       self.proxy_url = proxy_url
       self.retries = retries
-
-      # Initialize payload store configuration
-      @payload_stores = {}
-      @default_payload_store_name = nil
-      @payload_store_mutex = Mutex.new
+      self.encryption_key = encryption_key
     end
 
     # Get the logger to use to report pool events. Default is to log errors to STDERR.
@@ -145,6 +149,59 @@ module PatientHttp
     def retries=(value)
       validate_non_negative_integer(:retries, value)
       @retries = value
+    end
+
+    # Set the encryption callable for encrypting payloads before serialization.
+    #
+    # @param callable [#call, nil] An object that responds to #call, taking data and returning encrypted data
+    # @yield [data] A block that takes data and returns encrypted data
+    # @raise [ArgumentError] If both callable and block are provided, or if callable doesn't respond to #call
+    def encryption(callable = nil, &block)
+      @encryption = resolve_callable(:encryption, callable, &block)
+      @encryptor = nil
+    end
+
+    # Set the decryption callable for decrypting payloads after deserialization.
+    #
+    # @param callable [#call, nil] An object that responds to #call, taking data and returning decrypted data
+    # @yield [data] A block that takes data and returns decrypted data
+    # @raise [ArgumentError] If both callable and block are provided, or if callable doesn't respond to #call
+    def decryption(callable = nil, &block)
+      @decryption = resolve_callable(:decryption, callable, &block)
+      @encryptor = nil
+    end
+
+    def encryption_key=(keys)
+      keys = Array(keys).map(&:to_s).reject(&:empty?)
+      if keys.empty?
+        @encryption = nil
+        @decryption = nil
+        return
+      end
+
+      unless defined?(ActiveSupport::MessageEncryptor)
+        raise ArgumentError.new("ActiveSupport::MessageEncryptor is required for encryption_key")
+      end
+
+      key_length = ActiveSupport::MessageEncryptor.key_len
+      key_generator = lambda do |key|
+        salt = SecureRandom.random_bytes(key_length)
+        ActiveSupport::KeyGenerator.new(key).generate_key(salt, key_length)
+      end
+
+      encryptor = ActiveSupport::MessageEncryptor.new(key_generator.call(keys.first), cipher: "aes-256-gcm")
+      keys[1..].each { |key| encryptor.rotate(key_generator.call(key)) }
+
+      @encryption = ->(data) { encryptor.encrypt_and_sign(data) }
+      @decryption = ->(data) { encryptor.decrypt_and_verify(data) }
+    end
+
+    # Return an Encryptor instance. If encryption and decryption are not set, then
+    # this will be an empty Encryptor that returns data unchanged.
+    #
+    # @return [Encryptor] the encryptor instance
+    def encryptor
+      @encryptor ||= Encryptor.new(encryption: @encryption, decryption: @decryption)
     end
 
     # Register a payload store for external storage of large payloads.
@@ -237,6 +294,18 @@ module PatientHttp
     end
 
     private
+
+    def resolve_callable(name, callable = nil, &block)
+      if callable && block
+        raise ArgumentError, "#{name} accepts either a callable argument or a block, not both"
+      end
+
+      if callable && !callable.respond_to?(:call)
+        raise ArgumentError, "#{name} callable must respond to #call"
+      end
+
+      callable || block
+    end
 
     def validate_positive(attribute, value)
       return if value.is_a?(Numeric) && value > 0
