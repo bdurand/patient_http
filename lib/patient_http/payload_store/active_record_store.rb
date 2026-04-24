@@ -33,6 +33,8 @@ module PatientHttp
       class Payload < ::ActiveRecord::Base
         self.table_name = "patient_http_payloads"
         self.primary_key = "key"
+
+        scope :older_than, ->(time) { where(created_at: nil...time) }
       end
 
       # @return [Class] The ActiveRecord model class used for storage
