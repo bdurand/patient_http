@@ -7,6 +7,11 @@ module PatientHttp
   # including connection limits, timeouts, and other HTTP client settings.
   # It has no dependencies on any job system.
   class Configuration
+    # Salt used for generating encryption keys. This is a fixed value to ensure
+    # consistent key generation across instances and must never be changed.
+    SALT = "patient_http_payload_encryption"
+    private_constant :SALT
+
     # @return [Integer] Maximum number of concurrent connections
     attr_reader :max_connections
 
@@ -185,15 +190,14 @@ module PatientHttp
 
       key_length = ActiveSupport::MessageEncryptor.key_len
       key_generator = lambda do |key|
-        salt = SecureRandom.random_bytes(key_length)
-        ActiveSupport::KeyGenerator.new(key).generate_key(salt, key_length)
+        ActiveSupport::KeyGenerator.new(key).generate_key(SALT, key_length)
       end
 
       encryptor = ActiveSupport::MessageEncryptor.new(key_generator.call(keys.first), cipher: "aes-256-gcm")
       keys[1..].each { |key| encryptor.rotate(key_generator.call(key)) }
 
-      @encryption = ->(data) { encryptor.encrypt_and_sign(data) }
-      @decryption = ->(data) { encryptor.decrypt_and_verify(data) }
+      encryption { |data| encryptor.encrypt_and_sign(data) }
+      decryption { |data| encryptor.decrypt_and_verify(data) }
     end
 
     # Return an Encryptor instance. If encryption and decryption are not set, then

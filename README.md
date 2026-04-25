@@ -398,7 +398,9 @@ Multiple stores can be registered for migration purposes. The last registered st
 
 When using PatientHttp with a job queue system, request and response data is serialized into the queue (Redis, database, etc.). If this data contains sensitive information, you should encrypt it.
 
-Configure encryption once on the `Configuration` object; all serialization boundaries handled by `TaskHandler` will apply it automatically.
+PatientHttp provides encryption helpers through the `Configuration` object, but it is up to the `TaskHandler` implementation to ensure that serialized data is actually encrypted. If you are using an integration gem like [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) or [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue), the `TaskHandler` provided by the gem handles encryption automatically — you just need to configure the encryption key or callables on the `Configuration` object.
+
+If you are writing a custom `TaskHandler`, you are responsible for passing the encryptor from the `Configuration` to your handler and calling `encryptor.encrypt` / `encryptor.decrypt` explicitly wherever your handler serializes or deserializes data.
 
 ### Using an encryption key
 
@@ -429,6 +431,48 @@ Or pass any object that responds to `#call`:
 ```ruby
 config.encryption(->(bytes) { MyEncryption.encrypt(bytes) })
 config.decryption(->(bytes) { MyEncryption.decrypt(bytes) })
+```
+
+### Wiring encryption into a custom TaskHandler
+
+If you are writing your own `TaskHandler` (rather than using one from an integration gem), you must wire in encryption yourself. `Configuration#encryptor` returns an `Encryptor` built from the configured callables. Pass it to your handler and call `encrypt`/`decrypt` at every serialization boundary:
+
+```ruby
+class MyTaskHandler < PatientHttp::TaskHandler
+  def initialize(job_id)
+    @job_id = job_id
+  end
+
+  def on_complete(response, callback)
+    # Encrypt the serialized response before enqueuing
+    encrypted = encryptor.encrypt(response.as_json)
+    MyJobSystem.enqueue(callback, :on_complete, encrypted)
+  end
+
+  def on_error(error, callback)
+    encrypted = encryptor.encrypt(error.as_json)
+    MyJobSystem.enqueue(callback, :on_error, encrypted)
+  end
+
+  def retry
+    MyJobSystem.enqueue_job(@job_id)
+  end
+end
+
+# Pass the encryptor from your configuration to the handler
+handler = MyTaskHandler.new("job-123")
+handler.encryptor = config.encryptor
+```
+
+In your callback, decrypt before processing:
+
+```ruby
+class FetchDataCallback
+  def on_complete(data)
+    response = PatientHttp::Response.load(encryptor.decrypt(data))
+    # ...
+  end
+end
 ```
 
 ### How it works

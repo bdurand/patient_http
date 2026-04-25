@@ -3,8 +3,6 @@
 require "spec_helper"
 
 RSpec.describe PatientHttp::Encryptor do
-  let(:secret_key) { "test-secret-key-for-encryption!!" }
-
   let(:encryption) { ->(data) { data.bytes.map { |b| b ^ 0x42 }.pack("C*") } }
   let(:decryption) { ->(data) { data.bytes.map { |b| b ^ 0x42 }.pack("C*") } }
 
