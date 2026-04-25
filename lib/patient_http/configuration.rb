@@ -186,7 +186,12 @@ module PatientHttp
       end
 
       unless defined?(ActiveSupport::MessageEncryptor)
-        raise ArgumentError.new("ActiveSupport::MessageEncryptor is required for encryption_key")
+        begin
+          require "active_support/key_generator"
+          require "active_support/message_encryptor"
+        rescue LoadError
+          raise ArgumentError.new("ActiveSupport::MessageEncryptor is required for encryption_key")
+        end
       end
 
       key_length = ActiveSupport::MessageEncryptor.key_len
