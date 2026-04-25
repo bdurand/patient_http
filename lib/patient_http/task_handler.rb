@@ -24,12 +24,6 @@ module PatientHttp
   #     end
   #   end
   class TaskHandler
-    attr_writer :encryptor
-
-    def initialize
-      @encryptor = nil
-    end
-
     # Trigger the completion callback with the response.
     #
     # @param response [Response] the HTTP response object
@@ -56,10 +50,6 @@ module PatientHttp
     # @return [String] the new job ID
     def retry
       raise NotImplementedError, "#{self.class}#retry must be implemented"
-    end
-
-    def encryptor
-      @encryptor ||= Encryptor.new
     end
   end
 end

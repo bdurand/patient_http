@@ -17,7 +17,7 @@ PatientHttp provides a mechanism to offload HTTP requests from application threa
 The heart of the system - runs in a dedicated thread with its own Fiber reactor. Manages the async HTTP request queue and handles concurrent request execution using the `async` gem.
 
 ### TaskHandler
-Abstract base class that defines the integration point between the pool and your application. Implementations handle completion callbacks, error callbacks, and job retry operations. An `Encryptor` can be assigned via `encryptor=` after construction; concrete implementations (such as those in the `patient_http-sidekiq` or `patient_http-solid_queue` gems) are responsible for using it to encrypt serialized `Response`/`Error` data before passing it to the job queue. The base class itself does not call encrypt or decrypt — that responsibility belongs to the implementation. This abstraction allows the pool to work with any job system (Sidekiq, SolidQueue, custom queues, etc.).
+Abstract base class that defines the integration point between the pool and your application. Implementations handle completion callbacks, error callbacks, and job retry operations. Concrete implementations (such as those in the `patient_http-sidekiq` or `patient_http-solid_queue` gems) are responsible for using `Configuration#encryptor` to encrypt serialized `Response`/`Error` data before passing it to the job queue. The base class itself does not call encrypt or decrypt; that responsibility belongs to the implementation. This abstraction allows the pool to work with any job system (Sidekiq, SolidQueue, custom queues, etc.).
 
 ### Request/RequestTemplate
 `Request` is an immutable value object representing an HTTP request. `RequestTemplate` provides a builder for creating requests with shared configuration (base URL, headers, timeout).
@@ -41,7 +41,7 @@ Internal HTTP client that handles connection pooling, HTTP/2 support, and reques
 Manages processor state transitions (stopped → starting → running → draining → stopping) with thread-safe state machines.
 
 ### Encryptor
-Handles encryption and decryption of serialized payloads at the job queue boundary. Wraps user-provided encryption/decryption callables (which operate on raw bytes) with JSON serialization and Base64 encoding. Instantiated from `Configuration#encryptor` and assigned to a `TaskHandler` via `encryptor=` after construction. The `Encryptor` is a helper — concrete `TaskHandler` implementations are responsible for calling `encryptor.encrypt`/`encryptor.decrypt` at every serialization boundary; the base `TaskHandler` class only holds the reference. Encrypted data is enveloped as `{"__encrypted__" => true, "value" => "<base64>"}` to allow transparent no-op pass-through when no encryption is configured.
+Handles encryption and decryption of serialized payloads at the job queue boundary. Wraps user-provided encryption/decryption callables (which operate on raw bytes) with JSON serialization and Base64 encoding. Instantiated from `Configuration#encryptor`. The `Encryptor` is a helper: concrete `TaskHandler` implementations are responsible for calling `encryptor.encrypt`/`encryptor.decrypt` at every serialization boundary. Encrypted data is enveloped as `{"__encrypted__" => true, "value" => "<base64>"}` to allow transparent no-op pass-through when no encryption is configured.
 
 ### ExternalStorage/PayloadStore
 Optional external storage for large request/response payloads. Supports file, Redis, S3, and custom adapters.
