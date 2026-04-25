@@ -46,6 +46,7 @@ module PatientHttp
   autoload :ClientError, File.join(__dir__, "patient_http/http_error")
   autoload :ClientPool, File.join(__dir__, "patient_http/client_pool")
   autoload :Configuration, File.join(__dir__, "patient_http/configuration")
+  autoload :Encryptor, File.join(__dir__, "patient_http/encryptor")
   autoload :Error, File.join(__dir__, "patient_http/error")
   autoload :ExternalStorage, File.join(__dir__, "patient_http/external_storage")
   autoload :HttpError, File.join(__dir__, "patient_http/http_error")

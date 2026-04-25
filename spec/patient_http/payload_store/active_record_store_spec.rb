@@ -128,4 +128,15 @@ RSpec.describe "PatientHttp::PayloadStore::ActiveRecordStore", :active_record do
       expect(fetched).to eq(data)
     end
   end
+
+  describe ".older_than scope" do
+    it "returns records older than specified time" do
+      old_record = PatientHttp::PayloadStore::ActiveRecordStore::Payload.create!(key: "old", data: "{}", created_at: 2.days.ago)
+      new_record = PatientHttp::PayloadStore::ActiveRecordStore::Payload.create!(key: "new", data: "{}", created_at: 1.hour.ago)
+
+      results = PatientHttp::PayloadStore::ActiveRecordStore::Payload.older_than(1.day.ago)
+      expect(results).to include(old_record)
+      expect(results).not_to include(new_record)
+    end
+  end
 end

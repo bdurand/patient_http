@@ -394,6 +394,91 @@ config.register_payload_store(:custom, adapter: :my_store, **options)
 
 Multiple stores can be registered for migration purposes. The last registered store is used for new writes; all registered stores remain available for reads.
 
+## Encryption
+
+When using PatientHttp with a job queue system, request and response data is serialized into the queue (Redis, database, etc.). If this data contains sensitive information, you should encrypt it.
+
+PatientHttp provides encryption helpers through the `Configuration` object, but it is up to the `TaskHandler` implementation to ensure that serialized data is actually encrypted. If you are using an integration gem like [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) or [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue), the `TaskHandler` provided by the gem handles encryption automatically — you just need to configure the encryption key or callables on the `Configuration` object.
+
+If you are writing a custom `TaskHandler`, you are responsible for passing the encryptor from the `Configuration` to your handler and calling `encryptor.encrypt` / `encryptor.decrypt` explicitly wherever your handler serializes or deserializes data.
+
+### Using an encryption key
+
+The simplest option is `encryption_key=`, which sets up [ActiveSupport::MessageEncryptor](https://api.rubyonrails.org/classes/ActiveSupport/MessageEncryptor.html) automatically using AES-256-GCM:
+
+```ruby
+config = PatientHttp::Configuration.new
+config.encryption_key = ENV["PATIENT_HTTP_ENCRYPTION_KEY"]
+```
+
+To support key rotation, pass an array — the first key encrypts new data, and all keys attempt decryption:
+
+```ruby
+config.encryption_key = [ENV["PATIENT_HTTP_ENCRYPTION_KEY"], ENV["PATIENT_HTTP_OLD_KEY"]]
+```
+
+### Using custom callables
+
+For custom encryption libraries, provide callables that accept and return raw bytes (String):
+
+```ruby
+config.encryption { |bytes| MyEncryption.encrypt(bytes) }
+config.decryption { |bytes| MyEncryption.decrypt(bytes) }
+```
+
+Or pass any object that responds to `#call`:
+
+```ruby
+config.encryption(->(bytes) { MyEncryption.encrypt(bytes) })
+config.decryption(->(bytes) { MyEncryption.decrypt(bytes) })
+```
+
+### Wiring encryption into a custom TaskHandler
+
+If you are writing your own `TaskHandler` (rather than using one from an integration gem), you must wire in encryption yourself. `Configuration#encryptor` returns an `Encryptor` built from the configured callables. Pass it to your handler and call `encrypt`/`decrypt` at every serialization boundary:
+
+```ruby
+class MyTaskHandler < PatientHttp::TaskHandler
+  def initialize(job_id)
+    @job_id = job_id
+  end
+
+  def on_complete(response, callback)
+    # Encrypt the serialized response before enqueuing
+    encrypted = encryptor.encrypt(response.as_json)
+    MyJobSystem.enqueue(callback, :on_complete, encrypted)
+  end
+
+  def on_error(error, callback)
+    encrypted = encryptor.encrypt(error.as_json)
+    MyJobSystem.enqueue(callback, :on_error, encrypted)
+  end
+
+  def retry
+    MyJobSystem.enqueue_job(@job_id)
+  end
+end
+
+# Pass the encryptor from your configuration to the handler
+handler = MyTaskHandler.new("job-123")
+handler.encryptor = config.encryptor
+```
+
+In your callback, decrypt before processing:
+
+```ruby
+class FetchDataCallback
+  def on_complete(data)
+    response = PatientHttp::Response.load(encryptor.decrypt(data))
+    # ...
+  end
+end
+```
+
+### How it works
+
+Encrypted data is stored as `{"__encrypted__" => true, "value" => "<base64>"}`. The `Encryptor` JSON-serializes the original hash, passes the bytes to your callable, and Base64-encodes the result. Decryption reverses the process. Hashes without the `"__encrypted__"` key are passed through unchanged, so un-encrypted historical data continues to work while you roll out encryption.
+
 ## Configuration
 
 ```ruby
