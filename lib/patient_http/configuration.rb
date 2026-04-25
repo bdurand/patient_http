@@ -181,6 +181,7 @@ module PatientHttp
       if keys.empty?
         @encryption = nil
         @decryption = nil
+        @encryptor = nil
         return
       end
 
@@ -198,6 +199,7 @@ module PatientHttp
 
       encryption { |data| encryptor.encrypt_and_sign(data) }
       decryption { |data| encryptor.decrypt_and_verify(data) }
+      @encryptor = nil
     end
 
     # Return an Encryptor instance. If encryption and decryption are not set, then
