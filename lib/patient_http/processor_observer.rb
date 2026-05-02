@@ -40,7 +40,7 @@ module PatientHttp
 
     # Called when a request encounters an error.
     #
-    # @param error [Error] the error that occurred
+    # @param error [StandardError] the error that occurred
     # @return [void]
     def request_error(error)
     end
