@@ -59,7 +59,7 @@ module PatientHttp
       id: nil,
       default_max_redirects: 5
     )
-      @id = id || SecureRandom.uuid
+      @id = id&.to_s || SecureRandom.uuid
       @request = request
       @task_handler = task_handler
       @callback = callback.is_a?(Class) ? callback.name : callback.to_s
@@ -266,6 +266,14 @@ module PatientHttp
         callback_args: @callback_args,
         redirects: @redirects
       )
+    end
+
+    # Get the id of the first request task before any redirects. This is useful for tracking
+    # the overall request across multiple redirect tasks.
+    #
+    # @return [String] the original request id
+    def original_id
+      id.split("/").first
     end
 
     private

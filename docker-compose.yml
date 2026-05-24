@@ -9,29 +9,15 @@ services:
       timeout: 3s
       retries: 5
 
-  minio:
-    image: minio/minio:latest
+  s3mock:
+    image: adobe/s3mock:latest
     ports:
-      - "24456:9000"
-      - "24457:9001"
+      - "24456:9090"
+      - "24457:9191"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    command: server /data --console-address ":9001"
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: test-payloads
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-sf", "http://localhost:9090/favicon.ico"]
       interval: 5s
       timeout: 3s
       retries: 5
-
-  minio-setup:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set myminio http://minio:9000 minioadmin minioadmin;
-      mc mb --ignore-existing myminio/test-payloads;
-      exit 0;
-      "

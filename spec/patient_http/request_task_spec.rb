@@ -517,4 +517,28 @@ RSpec.describe PatientHttp::RequestTask do
       end
     end
   end
+
+  describe "#original_id" do
+    it "returns task ID if there were no redirects" do
+      task = described_class.new(
+        request: request,
+        task_handler: task_handler,
+        callback: callback
+      )
+
+      expect(task.original_id).to eq(task.id)
+    end
+
+    it "returns the original task ID for redirect tasks" do
+      task = described_class.new(
+        request: request,
+        task_handler: task_handler,
+        callback: callback
+      )
+
+      redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 302)
+
+      expect(redirect_task.original_id).to eq(task.id)
+    end
+  end
 end
