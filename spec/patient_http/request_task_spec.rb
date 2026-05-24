@@ -7,7 +7,7 @@ RSpec.describe PatientHttp::RequestTask do
     PatientHttp::Request.new(:get, "https://api.example.com/users")
   end
 
-  let(:sidekiq_job) do
+  let(:job_data) do
     {
       "class" => "TestWorker",
       "jid" => "job-123",
@@ -17,7 +17,7 @@ RSpec.describe PatientHttp::RequestTask do
     }
   end
 
-  let(:task_handler) { TestTaskHandler.new(sidekiq_job) }
+  let(:task_handler) { TestTaskHandler.new(job_data) }
 
   let(:callback) { "TestCallback" }
 
@@ -176,7 +176,7 @@ RSpec.describe PatientHttp::RequestTask do
       result = task.retry
       expect(result).to start_with("retry-")
       expect(task_handler.retries.size).to eq(1)
-      expect(task_handler.retries.first).to eq(sidekiq_job)
+      expect(task_handler.retries.first).to eq(job_data)
     end
   end
 

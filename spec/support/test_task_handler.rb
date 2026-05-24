@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Test implementation of PatientHttp::TaskHandler that records all lifecycle
-# calls without any Sidekiq dependency. Used in patient_http specs.
+# calls. Used in patient_http specs.
 class TestTaskHandler < PatientHttp::TaskHandler
   attr_reader :completions, :errors, :retries, :job_data
 

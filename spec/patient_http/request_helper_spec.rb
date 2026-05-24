@@ -59,7 +59,7 @@ RSpec.describe PatientHttp::RequestHelper do
       request_headers = captured_request.headers.to_h
       expect(request_headers).to include("authorization" => "Bearer token")
       expect(request_headers).to include("x-request-id" => "abc123")
-      expect(request_headers).to include("content-type" => "application/json; encoding=utf-8")
+      expect(request_headers).to include("content-type" => "application/json; charset=utf-8")
     end
 
     describe "HTTP method helpers" do

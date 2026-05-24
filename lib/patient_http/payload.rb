@@ -108,7 +108,7 @@ module PatientHttp
         unless text.encoding == Encoding::UTF_8
           begin
             text = text.encode(Encoding::UTF_8)
-          rescue
+          rescue => e
             # Ignore if cannot convert to UTF-8
           end
         end

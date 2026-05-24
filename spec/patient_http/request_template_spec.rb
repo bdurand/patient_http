@@ -149,7 +149,7 @@ RSpec.describe PatientHttp::RequestTemplate do
         result = template.request(:post, "/users", json: data)
 
         expect(result.body).to eq(JSON.generate(data))
-        expect(result.headers["content-type"]).to eq("application/json; encoding=utf-8")
+        expect(result.headers["content-type"]).to eq("application/json; charset=utf-8")
       end
 
       it "raises error when both body and json are provided" do

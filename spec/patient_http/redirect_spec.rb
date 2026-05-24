@@ -7,7 +7,7 @@ RSpec.describe "Redirect handling" do
   let(:processor) { PatientHttp::Processor.new(config) }
 
   let(:request) { PatientHttp::Request.new(:get, "https://example.com/start") }
-  let(:sidekiq_job) do
+  let(:job_data) do
     {
       "class" => "TestWorker",
       "jid" => "job-123",
@@ -15,7 +15,7 @@ RSpec.describe "Redirect handling" do
       "queue" => "default"
     }
   end
-  let(:task_handler) { TestTaskHandler.new(sidekiq_job) }
+  let(:task_handler) { TestTaskHandler.new(job_data) }
 
   describe "redirect status codes" do
     describe "followable redirects" do

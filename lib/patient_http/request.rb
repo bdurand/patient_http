@@ -87,7 +87,7 @@ module PatientHttp
         raise ArgumentError.new("Cannot provide both body and json") if @body
 
         @body = JSON.generate(json)
-        @headers["content-type"] ||= "application/json; encoding=utf-8"
+        @headers["content-type"] ||= "application/json; charset=utf-8"
       end
 
       validate!
