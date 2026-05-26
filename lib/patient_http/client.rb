@@ -19,20 +19,29 @@ module PatientHttp
     # @param request_id [String] unique request identifier
     # @return [Hash] the response data with keys for :status, :headers, and :body
     def make_request(request, request_id)
-      headers = request_headers(request, request_id)
-      body = Protocol::HTTP::Body::Buffered.wrap([request.body.to_s]) if request.body
-      timeout = request.timeout || config.request_timeout
+      async_response = nil
 
-      Async::Task.current.with_timeout(timeout) do
-        async_response = @client_pool.request(request.http_method, request.url, headers, body)
-        headers_hash = async_response.headers.to_h.transform_values(&:to_s)
-        body = @response_reader.read_body(async_response, headers_hash)
+      begin
+        headers = request_headers(request, request_id)
+        body = Protocol::HTTP::Body::Buffered.wrap([request.body.to_s]) if request.body
+        timeout = request.timeout || config.request_timeout
 
-        {
-          status: async_response.status,
-          headers: headers_hash,
-          body: body
-        }
+        Async::Task.current.with_timeout(timeout) do
+          async_response = @client_pool.request(request.http_method, request.url, headers, body)
+          headers_hash = async_response.headers.to_h.transform_values(&:to_s)
+          body = @response_reader.read_body(async_response, headers_hash)
+
+          {
+            status: async_response.status,
+            headers: headers_hash,
+            body: body
+          }
+        end
+      rescue
+        # Close the response on timeout or error to discard the connection
+        # rather than returning it to the pool in a dirty state.
+        async_response&.close
+        raise
       end
     end
 
