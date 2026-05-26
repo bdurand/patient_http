@@ -37,10 +37,13 @@ module PatientHttp
             body: body
           }
         end
-      rescue
-        # Close the response on timeout or error to discard the connection
-        # rather than returning it to the pool in a dirty state.
+      rescue => e
+        # Close the response and evict the client for this host to ensure the
+        # stale connection is not reused for subsequent requests.
         async_response&.close
+        if connection_error?(e)
+          @client_pool.evict(request.url)
+        end
         raise
       end
     end
@@ -56,6 +59,16 @@ module PatientHttp
 
     def config
       @processor.config
+    end
+
+    def connection_error?(exception)
+      case exception
+      when Async::TimeoutError, Errno::ECONNRESET, Errno::EPIPE, Errno::ECONNREFUSED,
+           Errno::EHOSTUNREACH, SocketError, IOError
+        true
+      else
+        false
+      end
     end
 
     def request_headers(request, request_id)

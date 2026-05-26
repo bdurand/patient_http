@@ -93,6 +93,26 @@ module PatientHttp
       end
     end
 
+    # Evict and close the client for the given URL.
+    #
+    # This forces a new connection to be established on the next request to this host.
+    #
+    # @param url [String] the request URL whose host client should be evicted
+    # @return [void]
+    def evict(url)
+      endpoint = Async::HTTP::Endpoint.parse(url)
+      key = host_key(endpoint)
+
+      @mutex.synchronize do
+        client = @clients.delete(key)
+        begin
+          client&.close
+        rescue
+          nil
+        end
+      end
+    end
+
     # @return [Integer] number of clients in the pool
     def size
       @mutex.synchronize { @clients.size }
