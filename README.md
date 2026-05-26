@@ -642,6 +642,8 @@ Open a pull request on [GitHub](https://github.com/bdurand/patient_http).
 
 Please use the [standardrb](https://github.com/testdouble/standard) syntax and lint your code with `standardrb --fix` before submitting.
 
+The [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) and [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gems each provide a test application for integration testing.
+
 ## Further Reading
 
 - [Architecture](ARCHITECTURE.md)
