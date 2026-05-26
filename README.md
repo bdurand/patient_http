@@ -18,6 +18,8 @@ This design keeps application threads free to do other work while HTTP requests 
 
 In general you will want to use this gem through an integration like [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) or [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue). These gems provide a request handler that integrates with their respective job processing systems, allowing you to enqueue HTTP requests directly from your application code without coupling it to the underlying processor implementation. See the [integration](#integration) section for details.
 
+The [patient_llm](https://github.com/bdurand/patient_llm) gem provides an integration for making large language model requests asynchronously. This was the original motivation for building PatientHttp because LLM requests can take much longer than typical HTTP requests.
+
 ## Quick Start
 
 ### 1. Implement a TaskHandler
@@ -617,6 +619,8 @@ For Sidekiq integration, see the [patient_http-sidekiq](https://github.com/bdura
 For Solid Queue integration, see the [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gem which provides similar functionality for Solid Queue.
 
 When using an integration gem, you can use the [standard interface](#standard-interface) to make requests without coupling your code to the underlying processor or task handler implementations.
+
+For large language model (LLM) requests, see the [patient_llm](https://github.com/bdurand/patient_llm) gem which provides an integration for making LLM requests asynchronously via a variety of protocols.
 
 ## Installation
 
