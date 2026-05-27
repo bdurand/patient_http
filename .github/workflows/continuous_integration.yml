@@ -100,7 +100,6 @@ jobs:
     - name: standardrb
       if:   matrix.standardrb == true
       run:  bundle exec standardrb
-
     - name: yard
       if: matrix.yard == true
       run:  bundle exec yard doc --fail-on-warning
