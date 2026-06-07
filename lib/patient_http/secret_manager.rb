@@ -20,6 +20,14 @@ module PatientHttp
       @secrets = secrets || {}
     end
 
+    # Check if a secret name is registered in the static registry.
+    #
+    # @param name [String, Symbol] the secret name
+    # @return [Boolean] true if the name is registered, false otherwise
+    def include?(name)
+      @secrets.include?(name.to_s)
+    end
+
     # Resolve a secret by name.
     #
     # The static registry is checked first; if the registered value responds to #call

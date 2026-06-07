@@ -46,6 +46,9 @@ module PatientHttp
     # @return [Integer] Number of retries for failed requests
     attr_reader :retries
 
+    # @return [SecretManager] the secret manager instance
+    attr_reader :secret_manager
+
     # Initializes a new Configuration with the specified options.
     #
     # @param max_connections [Integer] Maximum number of concurrent connections
@@ -83,7 +86,7 @@ module PatientHttp
 
       # Initialize secret configuration
       @secrets = {}
-      @secret_manager = nil
+      @secret_manager = SecretManager.new
 
       @encryptor = nil
 
@@ -243,16 +246,7 @@ module PatientHttp
 
       @mutex.synchronize do
         @secrets[name.to_s] = block || value
-        @secret_manager = nil
-      end
-    end
-
-    # Return a {SecretManager} built from the registered secrets.
-    #
-    # @return [SecretManager] the secret manager instance
-    def secret_manager
-      @mutex.synchronize do
-        @secret_manager ||= SecretManager.new(secrets: @secrets.dup)
+        @secret_manager = SecretManager.new(secrets: @secrets.dup)
       end
     end
 
@@ -285,7 +279,7 @@ module PatientHttp
       store = PayloadStore::Base.create(adapter, **options)
 
       @mutex.synchronize do
-        @payload_stores[name] = store
+        @payload_stores = @payload_stores.merge(name => store)
         @default_payload_store_name = name
       end
     end
@@ -295,33 +289,25 @@ module PatientHttp
     # @param name [Symbol, String, nil] Store name. If nil, returns the default store.
     # @return [PayloadStore::Base, nil] The store instance or nil if not found
     def payload_store(name = nil)
-      @mutex.synchronize do
-        if name.nil?
-          return nil unless @default_payload_store_name
+      if name.nil?
+        return nil unless @default_payload_store_name
 
-          @payload_stores[@default_payload_store_name]
-        else
-          @payload_stores[name.to_sym]
-        end
+        @payload_stores[@default_payload_store_name]
+      else
+        @payload_stores[name.to_sym]
       end
     end
 
     # Get the name of the default payload store.
     #
     # @return [Symbol, nil] The default store name or nil if none registered
-    def default_payload_store_name
-      @mutex.synchronize do
-        @default_payload_store_name
-      end
-    end
+    attr_reader :default_payload_store_name
 
     # Get all registered payload stores.
     #
     # @return [Hash{Symbol => PayloadStore::Base}] Copy of registered stores
     def payload_stores
-      @mutex.synchronize do
-        @payload_stores.dup
-      end
+      @payload_stores.dup
     end
 
     # Convert to hash for inspection

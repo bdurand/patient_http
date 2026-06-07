@@ -7,6 +7,15 @@ RSpec.describe PatientHttp::SecretManager do
     PatientHttp::SecretReference.new(name)
   end
 
+  describe "#include?" do
+    it "returns true for registered secret names" do
+      manager = described_class.new(secrets: {"token" => "abc123"})
+      expect(manager.include?(:token)).to be true
+      expect(manager.include?("token")).to be true
+      expect(manager.include?(:missing)).to be false
+    end
+  end
+
   describe "#resolve" do
     it "resolves a static value from the registry" do
       manager = described_class.new(secrets: {"token" => "abc123"})
