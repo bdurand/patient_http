@@ -1,7 +1,7 @@
 PATH
   remote: ..
   specs:
-    patient_http (1.0.0)
+    patient_http (1.1.0)
       async (~> 2.0)
       async-http (~> 0.60)
       concurrent-ruby (~> 1.2)
@@ -60,8 +60,8 @@ GEM
       rspec-files (~> 1.0)
       rspec-memory (~> 1.0)
     aws-eventstream (1.4.0)
-    aws-partitions (1.1253.0)
-    aws-sdk-core (3.249.0)
+    aws-partitions (1.1258.0)
+    aws-sdk-core (3.251.0)
       aws-eventstream (~> 1, >= 1.3.0)
       aws-partitions (~> 1, >= 1.992.0)
       aws-sigv4 (~> 1.9)
@@ -69,10 +69,10 @@ GEM
       bigdecimal
       jmespath (~> 1, >= 1.6.1)
       logger
-    aws-sdk-kms (1.128.0)
+    aws-sdk-kms (1.129.0)
       aws-sdk-core (~> 3, >= 3.248.0)
       aws-sigv4 (~> 1.5)
-    aws-sdk-s3 (1.224.0)
+    aws-sdk-s3 (1.225.0)
       aws-sdk-core (~> 3, >= 3.248.0)
       aws-sdk-kms (~> 1)
       aws-sigv4 (~> 1.5)
@@ -83,7 +83,7 @@ GEM
     bigdecimal (4.1.2)
     concurrent-ruby (1.3.6)
     connection_pool (3.0.2)
-    console (1.35.1)
+    console (1.36.0)
       fiber-annotation
       fiber-local (~> 1.1)
       json
@@ -112,7 +112,7 @@ GEM
       rdoc (>= 4.0.0)
       reline (>= 0.4.2)
     jmespath (1.6.2)
-    json (2.19.5)
+    json (2.19.8)
     language_server-protocol (3.17.0.5)
     lint_roller (1.1.0)
     logger (1.7.0)
@@ -140,7 +140,7 @@ GEM
       protocol-http (~> 0.58)
       rack (>= 1.0)
     protocol-url (0.4.0)
-    psych (5.3.1)
+    psych (5.4.0)
       date
       stringio
     public_suffix (7.0.5)
@@ -284,17 +284,17 @@ CHECKSUMS
   async-pool (0.11.2) sha256=0a43a17b02b04d9c451b7d12fafa9a50e55dc6dd00d4369aca00433f16a7e3ed
   async-rspec (1.17.1) sha256=8336a64d44cbb372564e3ee06e0ced6c74ecbc858bb954fdeab4b7d67bfab98c
   aws-eventstream (1.4.0) sha256=116bf85c436200d1060811e6f5d2d40c88f65448f2125bc77ffce5121e6e183b
-  aws-partitions (1.1253.0) sha256=d6924abcd0db15995faa0016d141b0391ba2c5a05415e1d6e0bdd1cad37d811f
-  aws-sdk-core (3.249.0) sha256=320c37f002b8e6a701f5a63d1d0639affd44eefbe4d1de0596a65a0c4efe73fe
-  aws-sdk-kms (1.128.0) sha256=20ce3957f80c7b40b3115a7e902af52b15a6eef42fe6b2e19db72f8e8c9e5658
-  aws-sdk-s3 (1.224.0) sha256=7d443c4ae9eda795b60e081d41f49b498e2483f1fc204f3239176ec922ed7879
+  aws-partitions (1.1258.0) sha256=3fee017570594ecf5e7f4c845b115fef8000530e57bdaf2b927357e5bf08967f
+  aws-sdk-core (3.251.0) sha256=ef8186cb5509147e590310da58fab4c5b0901eba0e85a72955abdf772e425c87
+  aws-sdk-kms (1.129.0) sha256=363f548df321f4a4fcfd05523384e591060b400f8e65133ed7ef0793155a3343
+  aws-sdk-s3 (1.225.0) sha256=734752cc77e369c645ff5285b70ff5af207b0dcd3388346de2f727cd4e943924
   aws-sigv4 (1.12.1) sha256=6973ff95cb0fd0dc58ba26e90e9510a2219525d07620c8babeb70ef831826c00
   base64 (0.3.0) sha256=27337aeabad6ffae05c265c450490628ef3ebd4b67be58257393227588f5a97b
   benchmark (0.5.0) sha256=465df122341aedcb81a2a24b4d3bd19b6c67c1530713fd533f3ff034e419236c
   bigdecimal (4.1.2) sha256=53d217666027eab4280346fba98e7d5b66baaae1b9c3c1c0ffe89d48188a3fbd
   concurrent-ruby (1.3.6) sha256=6b56837e1e7e5292f9864f34b69c5a2cbc75c0cf5338f1ce9903d10fa762d5ab
   connection_pool (3.0.2) sha256=33fff5ba71a12d2aa26cb72b1db8bba2a1a01823559fb01d29eb74c286e62e0a
-  console (1.35.1) sha256=6d2bfdd0bc7e57830540a6c0ce3bc83fff471844db44be89a38aef9f95df296a
+  console (1.36.0) sha256=45599ea906cf80a73d8941f03abf873fe66a6a954e0bac5bc1c01e2cdc406f07
   crack (1.0.1) sha256=ff4a10390cd31d66440b7524eb1841874db86201d5b70032028553130b6d4c7e
   date (3.5.1) sha256=750d06384d7b9c15d562c76291407d89e368dda4d4fff957eb94962d325a0dc0
   diff-lcs (1.6.2) sha256=9ae0d2cba7d4df3075fe8cd8602a8604993efc0dfa934cff568969efb1909962
@@ -312,7 +312,7 @@ CHECKSUMS
   io-stream (0.13.0) sha256=ce24bccb302bdf3ecedef05e8669a687b461621a498d83622fdcab549c9c1636
   irb (1.18.0) sha256=de9454a0703a54704b9811a5ef31a60c86949fbf4013fcf244fabc7c775248e3
   jmespath (1.6.2) sha256=238d774a58723d6c090494c8879b5e9918c19485f7e840f2c1c7532cf84ebcb1
-  json (2.19.5) sha256=218a18553e4801d579ca7e0f5bc72bafd776d7397238a1fb4e74db5b0a812c59
+  json (2.19.8) sha256=6354310fd76ef69b87d5bd1f38b40d730613baf90b6803d2d0a48f618d32dfaa
   language_server-protocol (3.17.0.5) sha256=fd1e39a51a28bf3eec959379985a72e296e9f9acfce46f6a79d31ca8760803cc
   lint_roller (1.1.0) sha256=2c0c845b632a7d172cb849cc90c1bce937a28c5c8ccccb50dfd46a485003cc87
   logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
@@ -320,7 +320,7 @@ CHECKSUMS
   minitest (6.0.6) sha256=153ea36d1d987a62942382b61075745042a2b3123b1cd48f4c3675af9cc7d6f1
   parallel (1.28.0) sha256=33e6de1484baf2524792d178b0913fc8eb94c628d6cfe45599ad4458c638c970
   parser (3.3.11.1) sha256=d17ace7aabe3e72c3cc94043714be27cc6f852f104d81aa284c2281aecc65d54
-  patient_http (1.0.0)
+  patient_http (1.1.0)
   pp (0.6.3) sha256=2951d514450b93ccfeb1df7d021cae0da16e0a7f95ee1e2273719669d0ab9df6
   prettyprint (0.2.0) sha256=2bc9e15581a94742064a3cc8b0fb9d45aae3d03a1baa6ef80922627a0766f193
   prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
@@ -330,7 +330,7 @@ CHECKSUMS
   protocol-http2 (0.26.0) sha256=bac89cd78082b241ccd0cf7246f5160e4bb0c9c975fb4bf7deef5f88cc317486
   protocol-rack (0.22.1) sha256=1185d245927ef9849a603700d6991ca353bc89724fbf98efa4a4333ed62a9fc3
   protocol-url (0.4.0) sha256=64d4c03b6b51ad815ac6fdaf77a1d91e5baf9220d26becb846c5459dacdea9e1
-  psych (5.3.1) sha256=eb7a57cef10c9d70173ff74e739d843ac3b2c019a003de48447b2963d81b1974
+  psych (5.4.0) sha256=14f72d69a611af663d7d70e4a7b67d9eb1f3ae9f8d916b478961d5a0075ba5b7
   public_suffix (7.0.5) sha256=1a8bb08f1bbea19228d3bed6e5ed908d1cb4f7c2726d18bd9cadf60bc676f623
   racc (1.8.1) sha256=4a7f6929691dbec8b5209a0b373bc2614882b55fc5d2e447a21aaa691303d62f
   rack (3.2.6) sha256=5ed78e1f73b2e25679bec7d45ee2d4483cc4146eb1be0264fc4d94cb5ef212c2
