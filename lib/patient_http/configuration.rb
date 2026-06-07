@@ -75,10 +75,15 @@ module PatientHttp
       retries: 3,
       encryption_key: nil
     )
+      @mutex = Mutex.new
+
       # Initialize payload store configuration
       @payload_stores = {}
       @default_payload_store_name = nil
-      @payload_store_mutex = Mutex.new
+
+      # Initialize secret configuration
+      @secrets = {}
+      @secret_manager = nil
 
       @encryptor = nil
 
@@ -215,6 +220,42 @@ module PatientHttp
       @encryptor ||= Encryptor.new(encryption: @encryption, decryption: @decryption)
     end
 
+    # Register a named secret whose value can be referenced indirectly when building
+    # requests via {PatientHttp.secret}.
+    #
+    # The value can be provided directly or as a block (callable). A block is invoked
+    # lazily with the secret name each time the secret is resolved, which is useful for
+    # values that should be read on demand (for example, from the environment).
+    #
+    # @param name [String, Symbol] the secret name
+    # @param value [Object, nil] the secret value (omit when providing a block)
+    # @yield [name] a block that returns the secret value (omit when providing a value)
+    # @raise [ArgumentError] if neither or both of value and block are provided
+    # @return [void]
+    def register_secret(name, value = nil, &block)
+      if value.nil? && block.nil?
+        raise ArgumentError.new("register_secret requires a value or a block")
+      end
+
+      if !value.nil? && block
+        raise ArgumentError.new("register_secret accepts either a value or a block, not both")
+      end
+
+      @mutex.synchronize do
+        @secrets[name.to_s] = block || value
+        @secret_manager = nil
+      end
+    end
+
+    # Return a {SecretManager} built from the registered secrets.
+    #
+    # @return [SecretManager] the secret manager instance
+    def secret_manager
+      @mutex.synchronize do
+        @secret_manager ||= SecretManager.new(secrets: @secrets.dup)
+      end
+    end
+
     # Register a payload store for external storage of large payloads.
     #
     # The name is included in the serialized references to the stored data.
@@ -243,7 +284,7 @@ module PatientHttp
 
       store = PayloadStore::Base.create(adapter, **options)
 
-      @payload_store_mutex.synchronize do
+      @mutex.synchronize do
         @payload_stores[name] = store
         @default_payload_store_name = name
       end
@@ -254,7 +295,7 @@ module PatientHttp
     # @param name [Symbol, String, nil] Store name. If nil, returns the default store.
     # @return [PayloadStore::Base, nil] The store instance or nil if not found
     def payload_store(name = nil)
-      @payload_store_mutex.synchronize do
+      @mutex.synchronize do
         if name.nil?
           return nil unless @default_payload_store_name
 
@@ -269,7 +310,7 @@ module PatientHttp
     #
     # @return [Symbol, nil] The default store name or nil if none registered
     def default_payload_store_name
-      @payload_store_mutex.synchronize do
+      @mutex.synchronize do
         @default_payload_store_name
       end
     end
@@ -278,7 +319,7 @@ module PatientHttp
     #
     # @return [Hash{Symbol => PayloadStore::Base}] Copy of registered stores
     def payload_stores
-      @payload_store_mutex.synchronize do
+      @mutex.synchronize do
         @payload_stores.dup
       end
     end
@@ -300,7 +341,8 @@ module PatientHttp
         "proxy_url" => proxy_url,
         "retries" => retries,
         "payload_stores" => payload_stores.keys,
-        "default_payload_store" => default_payload_store_name
+        "default_payload_store" => default_payload_store_name,
+        "secrets" => @mutex.synchronize { @secrets.keys }
       }
     end
 

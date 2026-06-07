@@ -151,4 +151,44 @@ RSpec.describe PatientHttp::Configuration do
       end
     end
   end
+
+  describe "#register_secret" do
+    it "registers a static value resolvable through the secret manager" do
+      config.register_secret(:api_token, "abc123")
+      expect(config.secret_manager.resolve(:api_token)).to eq("abc123")
+    end
+
+    it "registers a block evaluated lazily at resolve time" do
+      value = "first"
+      config.register_secret(:api_token) { value }
+      manager = config.secret_manager
+      value = "second"
+      expect(manager.resolve(:api_token)).to eq("second")
+    end
+
+    it "raises when neither a value nor a block is given" do
+      expect { config.register_secret(:api_token) }.to raise_error(ArgumentError, /value or a block/)
+    end
+
+    it "raises when both a value and a block are given" do
+      expect {
+        config.register_secret(:api_token, "abc") { "xyz" }
+      }.to raise_error(ArgumentError, /not both/)
+    end
+
+    it "invalidates the memoized secret manager" do
+      first = config.secret_manager
+      config.register_secret(:api_token, "abc123")
+      expect(config.secret_manager).not_to be(first)
+    end
+  end
+
+  describe "#to_h" do
+    it "exposes registered secret names but never their values" do
+      config.register_secret(:api_token, "super-secret")
+      hash = config.to_h
+      expect(hash["secrets"]).to eq(["api_token"])
+      expect(hash.to_s).not_to include("super-secret")
+    end
+  end
 end

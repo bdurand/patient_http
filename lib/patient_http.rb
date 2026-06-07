@@ -66,6 +66,8 @@ module PatientHttp
   autoload :RequestTemplate, File.join(__dir__, "patient_http/request_template")
   autoload :Response, File.join(__dir__, "patient_http/response")
   autoload :ResponseReader, File.join(__dir__, "patient_http/response_reader")
+  autoload :SecretManager, File.join(__dir__, "patient_http/secret_manager")
+  autoload :SecretReference, File.join(__dir__, "patient_http/secret_reference")
   autoload :ServerError, File.join(__dir__, "patient_http/http_error")
   autoload :SynchronousExecutor, File.join(__dir__, "patient_http/synchronous_executor")
   autoload :TaskHandler, File.join(__dir__, "patient_http/task_handler")
@@ -256,6 +258,19 @@ module PatientHttp
         callback_args: callback_args,
         raise_error_responses: raise_error_responses
       )
+    end
+
+    # Build a reference to a named secret for use as a sensitive header or query
+    # parameter value when building a request.
+    #
+    # The reference holds only the secret's name; the value is resolved on the
+    # processor side at send time using the secrets registered on the configuration.
+    #
+    # @param name [String, Symbol] the name of the secret to reference
+    # @return [SecretReference] a reference to the named secret
+    # @see Configuration#register_secret
+    def secret(name)
+      SecretReference.new(name)
     end
 
     private

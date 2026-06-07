@@ -23,11 +23,12 @@ module PatientHttp
 
       begin
         headers = request_headers(request, request_id)
+        url = config.secret_manager.resolve_url(request.url, request.secret_params)
         body = Protocol::HTTP::Body::Buffered.wrap([request.body.to_s]) if request.body
         timeout = request.timeout || config.request_timeout
 
         Async::Task.current.with_timeout(timeout) do
-          async_response = @client_pool.request(request.http_method, request.url, headers, body)
+          async_response = @client_pool.request(request.http_method, url, headers, body)
           headers_hash = async_response.headers.to_h.transform_values(&:to_s)
           body = @response_reader.read_body(async_response, headers_hash)
 
@@ -72,7 +73,8 @@ module PatientHttp
     end
 
     def request_headers(request, request_id)
-      headers = request.headers.to_h.merge("x-request-id" => request_id)
+      headers = config.secret_manager.resolve_headers(request.headers.to_h)
+      headers["x-request-id"] = request_id
       headers["user-agent"] ||= config.user_agent if config.user_agent
       headers
     end

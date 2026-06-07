@@ -180,4 +180,49 @@ RSpec.describe PatientHttp::Request do
       expect(reloaded_request.max_redirects).to eq(original_request.max_redirects)
     end
   end
+
+  describe "secret references" do
+    it "serializes a secret header value as a marker, never the value" do
+      request = described_class.new(
+        :get,
+        "https://api.example.com",
+        headers: {"Authorization" => PatientHttp.secret(:api_token)}
+      )
+      json = request.as_json
+      expect(json["headers"]).to eq("authorization" => {"$secret" => "api_token"})
+    end
+
+    it "keeps secret query params out of the url and serializes them separately" do
+      request = described_class.new(
+        :get,
+        "https://api.example.com/data",
+        params: {"api_key" => PatientHttp.secret(:api_key), "page" => 2}
+      )
+
+      expect(request.url).to eq("https://api.example.com/data?page=2")
+      expect(request.url).not_to include("api_key")
+      expect(request.secret_params).to eq("api_key" => PatientHttp::SecretReference.new(:api_key))
+      expect(request.as_json["secret_params"]).to eq("api_key" => {"$secret" => "api_key"})
+    end
+
+    it "omits secret_params from as_json when there are none" do
+      request = described_class.new(:get, "https://api.example.com")
+      expect(request.as_json).not_to have_key("secret_params")
+    end
+
+    it "round-trips secret headers and params through as_json and load" do
+      original = described_class.new(
+        :get,
+        "https://api.example.com/data",
+        headers: {"Authorization" => PatientHttp.secret(:api_token)},
+        params: {"api_key" => PatientHttp.secret(:api_key), "page" => 2}
+      )
+
+      reloaded = described_class.load(original.as_json)
+
+      expect(reloaded.url).to eq("https://api.example.com/data?page=2")
+      expect(reloaded.headers["authorization"]).to eq(PatientHttp::SecretReference.new(:api_token))
+      expect(reloaded.secret_params).to eq("api_key" => PatientHttp::SecretReference.new(:api_key))
+    end
+  end
 end
