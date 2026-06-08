@@ -46,7 +46,7 @@ jobs:
           - ruby: "4.0"
             appraisal: "redis_5"
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v6
     - name: Start MinIO
       run: |
         docker run -d \
