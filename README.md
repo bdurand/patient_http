@@ -485,6 +485,39 @@ end
 
 Encrypted data is stored as `{"__encrypted__" => true, "value" => "<base64>"}`. The `Encryptor` JSON-serializes the original hash, passes the bytes to your callable, and Base64-encodes the result. Decryption reverses the process. Hashes without the `"__encrypted__"` key are passed through unchanged, so un-encrypted historical data continues to work while you roll out encryption.
 
+## Secrets
+
+Requests are serialized into your job queue before they run. If you put a sensitive value — an API token in an `Authorization` header, or an API key in a query parameter — directly on the request, that value is written into the queue. Requests can be encrypted in the queue, but a better practice is to avoid putting sensitive values on the request at all.
+
+The secret manager lets you reference a sensitive values in headers or query parameters by name instead. The serialized request stores only a reference marker (`{"$secret" => "name"}`), never the value. The actual value lives on the `Configuration` (which exists on the processor side) and is resolved at the moment the request is sent.
+
+### Defining secrets
+
+Register named secrets on the `Configuration`. A value can be given directly, or as a block that is evaluated lazily each time the secret is resolved (useful for reading from the environment on demand):
+
+```ruby
+config = PatientHttp::Configuration.new
+config.register_secret(:authorization, "Bearer #{ENV['API_TOKEN']}") # static value
+config.register_secret(:api_key) { ENV["MY_API_KEY"] } # lazy block
+```
+
+I a secret is not found when resolving a request, a `PatientHttp::SecretManager::SecretNotFoundError` is raised, which surfaces through the normal request error path.
+
+### Referencing secrets when building a request
+
+Use `PatientHttp.secret(name)` anywhere you would put a sensitive header or query parameter value. No value is needed (or available) at build time:
+
+```ruby
+PatientHttp.get(
+  "https://api.example.com/data",
+  callback: MyCallback,
+  headers: {"Authorization" => PatientHttp.secret(:api_token)},
+  params: {"api_key" => PatientHttp.secret(:api_key), "page" => 2}
+)
+```
+
+The request serializes the secret header as `{"$secret" => "api_token"}` and keeps the secret query parameter out of the URL (non-secret params like `page` are still folded into the URL as usual). The processor dereferences both just before sending: the header is set to its resolved value and the resolved query parameter is appended to the URL.
+
 ## Configuration
 
 ```ruby
@@ -525,6 +558,9 @@ config = PatientHttp::Configuration.new(
   # Logger instance (default: Logger to STDERR at ERROR level)
   logger: Logger.new($stdout)
 )
+
+# Register named secrets to reference sensitive headers/params indirectly (see Secrets)
+config.register_secret(:api_token, ENV["MY_API_TOKEN"])
 ```
 
 ### Tuning Tips

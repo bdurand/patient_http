@@ -34,6 +34,10 @@ module PatientHttp
     # @return [Integer, nil] Maximum number of redirects to follow (nil uses config default, 0 disables)
     attr_reader :max_redirects
 
+    # @return [Hash{String, Symbol => SecretReference}] Query parameters whose values are
+    #   secret references, kept out of the serialized URL and resolved at send time
+    attr_reader :secret_params
+
     class << self
       # Reconstruct a Request from a hash
       #
@@ -43,11 +47,30 @@ module PatientHttp
         new(
           hash["http_method"].to_sym,
           hash["url"],
-          headers: hash["headers"],
+          headers: load_headers(hash["headers"]),
           body: Payload.load(hash["body"])&.value,
+          params: load_secret_params(hash["secret_params"]),
           timeout: hash["timeout"],
           max_redirects: hash["max_redirects"]
         )
+      end
+
+      private
+
+      # Convert serialized secret-reference header markers back into SecretReference
+      # objects, leaving plain header values unchanged.
+      def load_headers(headers)
+        return headers if headers.nil?
+
+        headers.transform_values { |value| SecretReference.load(value) }
+      end
+
+      # Reconstruct secret params from their serialized markers. Returned as a params
+      # hash so the constructor folds them back into the request's secret params.
+      def load_secret_params(secret_params)
+        return nil if secret_params.nil? || secret_params.empty?
+
+        secret_params.transform_values { |value| SecretReference.load(value) }
       end
     end
 
@@ -77,6 +100,7 @@ module PatientHttp
         raise ArgumentError.new("url must be a String or URI, got: #{url.class}")
       end
 
+      @secret_params = {}
       @url = normalized_url(url, params)
       @headers = headers.is_a?(HttpHeaders) ? headers : HttpHeaders.new(headers)
       @body = (body == "") ? nil : body
@@ -109,23 +133,49 @@ module PatientHttp
     #
     # @return [Hash]
     def as_json
-      {
+      hash = {
         "http_method" => @http_method.to_s,
         "url" => @url.to_s,
-        "headers" => @headers.to_h,
+        "headers" => serialized_headers,
         "body" => @payload&.as_json,
         "timeout" => @timeout,
         "max_redirects" => @max_redirects
       }
+
+      if @secret_params.any?
+        hash["secret_params"] = @secret_params.transform_values(&:as_json)
+      end
+
+      hash
     end
 
     private
+
+    # Header values may be SecretReference objects; serialize those as markers.
+    def serialized_headers
+      @headers.to_h.transform_values do |value|
+        value.is_a?(SecretReference) ? value.as_json : value
+      end
+    end
 
     def normalized_url(url, params)
       uri = url.is_a?(URI::Generic) ? url.dup : URI(url.to_s)
       return uri.to_s unless params&.any?
 
-      serialized_params = URI.encode_www_form(params)
+      # Partition out secret params: they are kept off the serialized URL and resolved
+      # at send time by the processor. Only non-secret params are folded into the URL.
+      regular_params = {}
+      params.each do |key, value|
+        if SecretReference.reference?(value)
+          @secret_params[key] = SecretReference.load(value)
+        else
+          regular_params[key] = value
+        end
+      end
+
+      return uri.to_s if regular_params.empty?
+
+      serialized_params = URI.encode_www_form(regular_params)
       uri.query = [uri.query, serialized_params].compact.reject(&:empty?).join("&")
       uri.to_s
     end

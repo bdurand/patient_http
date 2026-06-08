@@ -39,11 +39,12 @@ module PatientHttp
             timeout = @task.request.timeout || @config.request_timeout
 
             response_data = Async::Task.current.with_timeout(timeout) do
-              headers = @task.request.headers.to_h.merge("x-request-id" => @task.id)
+              headers = @config.secret_manager.resolve_headers(@task.request.headers.to_h)
+              headers["x-request-id"] = @task.id
               headers["user-agent"] ||= @config.user_agent if @config.user_agent
               body = Protocol::HTTP::Body::Buffered.wrap([@task.request.body.to_s]) if @task.request.body
 
-              endpoint = Async::HTTP::Endpoint.parse(@task.request.url)
+              endpoint = Async::HTTP::Endpoint.parse(request_url)
               endpoint = configure_endpoint(endpoint) if @config.connection_timeout
 
               verb = @task.request.http_method.to_s.upcase
@@ -124,11 +125,18 @@ module PatientHttp
 
     private
 
+    # Resolve the current task's request URL, appending any secret query params.
+    #
+    # @return [String] the resolved request URL
+    def request_url
+      @config.secret_manager.resolve_url(@task.request.url, @task.request.secret_params)
+    end
+
     # Create HTTP client with config settings (retries, proxy, connection timeout).
     #
     # @return [Protocol::HTTP::AcceptEncoding] wrapped HTTP client
     def create_http_client
-      endpoint = Async::HTTP::Endpoint.parse(@task.request.url)
+      endpoint = Async::HTTP::Endpoint.parse(request_url)
       endpoint = configure_endpoint(endpoint) if @config.connection_timeout
 
       client = if @config.proxy_url

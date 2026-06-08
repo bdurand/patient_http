@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.1.0
+
+### Added
+
+- Secret manager for referencing sensitive headers and query parameters indirectly. Register secrets on the `Configuration` with `register_secret` (static value or lazy block), then reference them when building a request via `PatientHttp.secret(name)`. The serialized request stores only a `{"$secret" => name}` reference; the value is resolved by the processor when the request is sent, keeping sensitive values out of the job queue and logs.
+
 ## 1.0.0
 
 ### Added
