@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.1.1
+
+### Fixed
+
+- Connection pools are now closed gracefully inside the reactor during shutdown. Previously the reactor stopped with open pools, causing async-pool to force-cancel each connection pool's background gardener task mid-wait and emit a noisy (but harmless) `ThreadError: Attempt to unlock a mutex which is not locked` warning when the process was killed.
+
 ## 1.1.0
 
 ### Added
