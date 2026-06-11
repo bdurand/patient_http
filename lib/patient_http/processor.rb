@@ -328,6 +328,17 @@ module PatientHttp
         @config.logger&.info("[PatientHttp] Reactor received stop signal")
       rescue => e
         @config.logger&.error("[PatientHttp] Reactor loop error: #{e.inspect}\n#{e.backtrace.join("\n")}")
+      ensure
+        # Close the HTTP connection pools while still inside the reactor so the
+        # pools' background gardener tasks shut down gracefully. Otherwise the
+        # reactor stops with open pools and async-pool force-cancels each
+        # gardener mid-wait, emitting a noisy (but harmless) ThreadError:
+        # "Attempt to unlock a mutex which is not locked".
+        begin
+          @http_client.close
+        rescue => e
+          @config.logger&.error("[PatientHttp] Error closing HTTP client: #{e.inspect}")
+        end
       end
     end
 

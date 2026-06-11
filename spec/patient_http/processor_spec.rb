@@ -1013,6 +1013,7 @@ RSpec.describe PatientHttp::Processor do
       # Set up HTTP client mock
       allow(Async::HTTP::Client).to receive(:new).and_return(mock_client)
       allow(mock_client).to receive(:call).and_return(mock_async_response)
+      allow(mock_client).to receive(:close)
       allow(mock_async_response).to receive(:body).and_return(StringIO.new("response body"))
 
       processor.start
