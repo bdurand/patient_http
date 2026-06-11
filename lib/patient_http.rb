@@ -307,8 +307,8 @@ module PatientHttp
       if missing_keywords.any?
         raise ArgumentError.new(
           "Handler must accept keyword arguments: " \
-          "#{required_keywords.map(&:to_s).join(", ")}. " \
-          "Missing: #{missing_keywords.map(&:to_s).join(", ")}"
+          "#{required_keywords.join(", ")}. " \
+          "Missing: #{missing_keywords.join(", ")}"
         )
       end
 
@@ -321,7 +321,7 @@ module PatientHttp
 
       raise ArgumentError.new(
         "Handler must not have extra required keyword parameters. " \
-        "Found: #{extra_required_keywords.map(&:to_s).join(", ")}"
+        "Found: #{extra_required_keywords.join(", ")}"
       )
     end
   end
