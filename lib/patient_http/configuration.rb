@@ -46,6 +46,10 @@ module PatientHttp
     # @return [Integer] Number of retries for failed requests
     attr_reader :retries
 
+    # @return [Symbol, nil] HTTP protocol to use (:http1 or :http2). When nil, the
+    #   protocol is negotiated with the server (HTTP/2 preferred for HTTPS).
+    attr_reader :protocol
+
     # @return [SecretManager] the secret manager instance
     attr_reader :secret_manager
 
@@ -63,6 +67,7 @@ module PatientHttp
     # @param connection_timeout [Numeric, nil] Connection timeout in seconds
     # @param proxy_url [String, nil] HTTP/HTTPS proxy URL (supports authentication)
     # @param retries [Integer] Number of retries for failed requests
+    # @param protocol [Symbol, nil] HTTP protocol to use (:http1 or :http2); nil to negotiate
     def initialize(
       max_connections: 256,
       request_timeout: 60,
@@ -76,6 +81,7 @@ module PatientHttp
       connection_timeout: nil,
       proxy_url: nil,
       retries: 3,
+      protocol: nil,
       encryption_key: nil
     )
       @mutex = Mutex.new
@@ -102,6 +108,7 @@ module PatientHttp
       self.connection_timeout = connection_timeout
       self.proxy_url = proxy_url
       self.retries = retries
+      self.protocol = protocol
       self.encryption_key = encryption_key
     end
 
@@ -162,6 +169,20 @@ module PatientHttp
     def retries=(value)
       validate_non_negative_integer(:retries, value)
       @retries = value
+    end
+
+    def protocol=(value)
+      if value.nil?
+        @protocol = nil
+        return
+      end
+
+      value = value.to_sym if value.is_a?(String)
+      unless ClientPool::PROTOCOLS.key?(value)
+        raise ArgumentError.new("protocol must be one of #{ClientPool::PROTOCOLS.keys.inspect}, got: #{value.inspect}")
+      end
+
+      @protocol = value
     end
 
     # Set the encryption callable for encrypting payloads before serialization.
@@ -326,6 +347,7 @@ module PatientHttp
         "connection_timeout" => connection_timeout,
         "proxy_url" => proxy_url,
         "retries" => retries,
+        "protocol" => protocol,
         "payload_stores" => payload_stores.keys,
         "default_payload_store" => default_payload_store_name,
         "secrets" => @mutex.synchronize { @secrets.keys }

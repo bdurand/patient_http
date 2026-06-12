@@ -29,6 +29,47 @@ RSpec.describe PatientHttp::ClientPool do
       expect(pool_with_proxy.proxy_url).to eq("http://proxy.example.com:8080")
       pool_with_proxy.close
     end
+
+    it "sets protocol when provided" do
+      pool_with_protocol = described_class.new(max_size: 3, protocol: :http1)
+      expect(pool_with_protocol.protocol).to eq(:http1)
+      pool_with_protocol.close
+    end
+
+    it "raises ArgumentError for an unsupported protocol" do
+      expect {
+        described_class.new(max_size: 3, protocol: :spdy)
+      }.to raise_error(ArgumentError, /protocol must be one of/)
+    end
+  end
+
+  describe "protocol enforcement" do
+    it "forces HTTP/1.1 on client endpoints when protocol is :http1" do
+      pool_with_protocol = described_class.new(max_size: 3, protocol: :http1)
+      client = pool_with_protocol.client_for(Async::HTTP::Endpoint.parse("https://example.com"))
+      endpoint = client.delegate.endpoint
+
+      expect(endpoint.protocol).to eq(Async::HTTP::Protocol::HTTP11)
+      expect(endpoint.alpn_protocols).to eq(["http/1.1"])
+      pool_with_protocol.close
+    end
+
+    it "forces HTTP/2 on client endpoints when protocol is :http2" do
+      pool_with_protocol = described_class.new(max_size: 3, protocol: :http2)
+      client = pool_with_protocol.client_for(Async::HTTP::Endpoint.parse("https://example.com"))
+      endpoint = client.delegate.endpoint
+
+      expect(endpoint.protocol).to eq(Async::HTTP::Protocol::HTTP2)
+      expect(endpoint.alpn_protocols).to eq(["h2"])
+      pool_with_protocol.close
+    end
+
+    it "leaves endpoints unchanged when no protocol is set" do
+      original_endpoint = Async::HTTP::Endpoint.parse("https://example.com")
+      client = pool.client_for(original_endpoint)
+
+      expect(client.delegate.endpoint).to be(original_endpoint)
+    end
   end
 
   describe "#size" do

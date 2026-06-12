@@ -7,17 +7,30 @@ module PatientHttp
   # is capped with an LRU algorithm - when a new client is needed and the
   # pool is at capacity, the least recently used client is closed and removed.
   class ClientPool
-    def initialize(max_size:, connection_timeout: nil, proxy_url: nil, retries: 3)
+    # Supported protocol names mapped to their async-http implementations. Forcing
+    # :http1 also limits the TLS ALPN advertisement to http/1.1, which avoids
+    # HTTP/2 negotiation with servers and middleboxes that mishandle it.
+    PROTOCOLS = {
+      http1: Async::HTTP::Protocol::HTTP11,
+      http2: Async::HTTP::Protocol::HTTP2
+    }.freeze
+
+    def initialize(max_size:, connection_timeout: nil, proxy_url: nil, retries: 3, protocol: nil)
+      if protocol && !PROTOCOLS.include?(protocol)
+        raise ArgumentError.new("protocol must be one of #{PROTOCOLS.keys.inspect}, got: #{protocol.inspect}")
+      end
+
       @clients = {}
       @max_size = max_size
       @connection_timeout = connection_timeout
       @proxy_url = proxy_url
       @retries = retries
+      @protocol = protocol
       @mutex = Mutex.new
       @proxy_client = nil
     end
 
-    attr_reader :max_size, :connection_timeout, :proxy_url, :retries
+    attr_reader :max_size, :connection_timeout, :proxy_url, :retries, :protocol
 
     # Get or create a client for the given endpoint.
     #
@@ -162,17 +175,19 @@ module PatientHttp
 
     def create_proxy_client
       proxy_endpoint = Async::HTTP::Endpoint.parse(@proxy_url)
-      proxy_endpoint = configure_endpoint(proxy_endpoint) if @connection_timeout
+      if @connection_timeout
+        proxy_endpoint = Async::HTTP::Endpoint.new(proxy_endpoint.url, timeout: @connection_timeout)
+      end
       Async::HTTP::Client.new(proxy_endpoint)
     end
 
     def configure_endpoint(endpoint)
-      return endpoint unless @connection_timeout
+      options = {}
+      options[:timeout] = @connection_timeout if @connection_timeout
+      options[:protocol] = PROTOCOLS.fetch(@protocol) if @protocol
+      return endpoint if options.empty?
 
-      Async::HTTP::Endpoint.new(
-        endpoint.url,
-        timeout: @connection_timeout
-      )
+      Async::HTTP::Endpoint.new(endpoint.url, **options)
     end
   end
 end

@@ -22,6 +22,18 @@ RSpec.describe PatientHttp::Client do
   let(:client) { described_class.new(processor) }
   let(:request_id) { "test-request-123" }
 
+  describe "#initialize" do
+    it "passes the configured protocol to the client pool" do
+      config.protocol = :http1
+
+      expect(PatientHttp::ClientPool).to receive(:new)
+        .with(hash_including(protocol: :http1))
+        .and_call_original
+
+      described_class.new(processor)
+    end
+  end
+
   describe "#make_request" do
     let(:request) do
       PatientHttp::Request.new(
@@ -331,6 +343,22 @@ RSpec.describe PatientHttp::Client do
             client.make_request(request, request_id)
           end.wait
         }.to raise_error(SocketError, "Failed to connect")
+      end
+
+      it "evicts the pooled client when the connection is aborted" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_raise(Errno::ECONNABORTED)
+
+        client_pool = client.instance_variable_get(:@client_pool)
+        allow(client_pool).to receive(:evict).and_call_original
+
+        expect {
+          Async do
+            client.make_request(request, request_id)
+          end.wait
+        }.to raise_error(Errno::ECONNABORTED)
+
+        expect(client_pool).to have_received(:evict).with("https://api.example.com/users")
       end
     end
 
