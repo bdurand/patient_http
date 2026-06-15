@@ -4,11 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 1.2.0
+## 1.1.2
 
 ### Added
 
-- `protocol` configuration option to force the HTTP protocol to `:http1` or `:http2` instead of negotiating with the server. Forcing `:http1` also limits the TLS ALPN advertisement to `http/1.1`, which can work around SSL-intercepting proxies that mishandle HTTP/2 negotiation.
+- Added `protocol` configuration option to force the HTTP protocol to `:http1` or `:http2` instead of negotiating with the server. Forcing `:http1` also limits the TLS ALPN advertisement to `http/1.1`, which can work around SSL-intercepting proxies that mishandle HTTP/2 negotiation.
 
 ### Fixed
 
