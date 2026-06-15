@@ -55,6 +55,15 @@ RSpec.describe PatientHttp::RequestError do
         expect(error.error_type).to eq(:connection)
       end
 
+      it "classifies Errno::ECONNABORTED as :connection" do
+        exception = Errno::ECONNABORTED.new("Connection aborted")
+        error = described_class.from_exception(exception, request_id: request_id, duration: 1.0, url: url,
+          http_method: :get)
+
+        expect(error.error_class).to eq(Errno::ECONNABORTED)
+        expect(error.error_type).to eq(:connection)
+      end
+
       it "classifies Errno::EHOSTUNREACH as :connection" do
         exception = Errno::EHOSTUNREACH.new("Host unreachable")
         error = described_class.from_exception(exception, request_id: request_id, duration: 1.0, url: url,
@@ -179,6 +188,7 @@ RSpec.describe PatientHttp::RequestError do
       expect(described_class.error_type(OpenSSL::SSL::SSLError.new)).to eq(:ssl)
       expect(described_class.error_type(Errno::ECONNREFUSED.new)).to eq(:connection)
       expect(described_class.error_type(Errno::ECONNRESET.new)).to eq(:connection)
+      expect(described_class.error_type(Errno::ECONNABORTED.new)).to eq(:connection)
       expect(described_class.error_type(StandardError.new)).to eq(:unknown)
     end
   end

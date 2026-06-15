@@ -183,6 +183,40 @@ RSpec.describe PatientHttp::Configuration do
     end
   end
 
+  describe "#protocol=" do
+    it "defaults to nil" do
+      expect(config.protocol).to be_nil
+    end
+
+    it "accepts :http1 and :http2" do
+      config.protocol = :http1
+      expect(config.protocol).to eq(:http1)
+
+      config.protocol = :http2
+      expect(config.protocol).to eq(:http2)
+    end
+
+    it "normalizes strings to symbols" do
+      config.protocol = "http1"
+      expect(config.protocol).to eq(:http1)
+    end
+
+    it "can be reset to nil" do
+      config.protocol = :http1
+      config.protocol = nil
+      expect(config.protocol).to be_nil
+    end
+
+    it "raises ArgumentError for unsupported values" do
+      expect { config.protocol = :spdy }.to raise_error(ArgumentError, /protocol must be one of/)
+    end
+
+    it "is included in to_h" do
+      config.protocol = :http1
+      expect(config.to_h["protocol"]).to eq(:http1)
+    end
+  end
+
   describe "#to_h" do
     it "exposes registered secret names but never their values" do
       config.register_secret(:api_token, "super-secret")

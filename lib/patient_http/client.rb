@@ -8,7 +8,8 @@ module PatientHttp
         max_size: config.connection_pool_size,
         connection_timeout: config.connection_timeout,
         proxy_url: config.proxy_url,
-        retries: config.retries
+        retries: config.retries,
+        protocol: config.protocol
       )
       @response_reader = ResponseReader.new(@processor)
     end
@@ -64,8 +65,8 @@ module PatientHttp
 
     def connection_error?(exception)
       case exception
-      when Async::TimeoutError, Errno::ECONNRESET, Errno::EPIPE, Errno::ECONNREFUSED,
-           Errno::EHOSTUNREACH, SocketError, IOError
+      when Async::TimeoutError, Errno::ECONNRESET, Errno::ECONNABORTED, Errno::EPIPE,
+           Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError, IOError
         true
       else
         false

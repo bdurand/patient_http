@@ -555,6 +555,12 @@ config = PatientHttp::Configuration.new(
   # Retries for failed requests (default: 3)
   retries: 3,
 
+  # Force the HTTP protocol to :http1 or :http2 (default: nil, negotiates with
+  # the server, preferring HTTP/2 for HTTPS). Forcing :http1 also limits the TLS
+  # ALPN advertisement to http/1.1, which can work around SSL-intercepting
+  # proxies that mishandle HTTP/2.
+  protocol: nil,
+
   # Logger instance (default: Logger to STDERR at ERROR level)
   logger: Logger.new($stdout)
 )

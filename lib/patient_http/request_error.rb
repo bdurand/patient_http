@@ -80,7 +80,7 @@ module PatientHttp
           :timeout
         in OpenSSL::SSL::SSLError
           :ssl
-        in Errno::ECONNREFUSED | Errno::ECONNRESET | Errno::EHOSTUNREACH | Errno::EPIPE | SocketError | IOError
+        in Errno::ECONNREFUSED | Errno::ECONNRESET | Errno::ECONNABORTED | Errno::EHOSTUNREACH | Errno::EPIPE | SocketError | IOError
           :connection
         else
           if exception.is_a?(PatientHttp::ResponseTooLargeError)
