@@ -183,6 +183,73 @@ RSpec.describe PatientHttp::Configuration do
     end
   end
 
+  describe "#register_preprocessor" do
+    it "registers a block retrievable by name" do
+      config.register_preprocessor(:signer) { |request| request.headers["x-signature"] = "signed" }
+      expect(config.preprocessor(:signer)).to be_a(Proc)
+    end
+
+    it "registers a callable retrievable by string or symbol name" do
+      callable = ->(request) { request }
+      config.register_preprocessor(:signer, callable)
+      expect(config.preprocessor(:signer)).to be(callable)
+      expect(config.preprocessor("signer")).to be(callable)
+    end
+
+    it "accepts a callable object with a call method" do
+      klass = Class.new do
+        def call(request)
+          request
+        end
+      end
+      config.register_preprocessor(:signer, klass.new)
+      expect(config.preprocessor(:signer)).to respond_to(:call)
+    end
+
+    it "returns nil for an unregistered preprocessor" do
+      expect(config.preprocessor(:missing)).to be_nil
+    end
+
+    it "raises when neither a callable nor a block is given" do
+      expect { config.register_preprocessor(:signer) }.to raise_error(ArgumentError, /callable or a block/)
+    end
+
+    it "raises when both a callable and a block are given" do
+      expect {
+        config.register_preprocessor(:signer, ->(_request) {}) { |request| request }
+      }.to raise_error(ArgumentError, /not both/)
+    end
+
+    it "raises when the callable does not accept an argument" do
+      expect {
+        config.register_preprocessor(:signer, -> {})
+      }.to raise_error(ArgumentError, /single argument/)
+    end
+
+    it "raises when a block does not accept an argument" do
+      expect {
+        config.register_preprocessor(:signer) { "value" }
+      }.to raise_error(ArgumentError, /single argument/)
+    end
+
+    it "raises when the callable requires more than one argument" do
+      expect {
+        config.register_preprocessor(:signer, ->(_a, _b) {})
+      }.to raise_error(ArgumentError, /single argument/)
+    end
+
+    it "raises when the callable requires keyword arguments" do
+      expect {
+        config.register_preprocessor(:signer, ->(_request, _other:) {})
+      }.to raise_error(ArgumentError, /single argument/)
+    end
+
+    it "includes preprocessor names in to_h" do
+      config.register_preprocessor(:signer) { |request| request }
+      expect(config.to_h["preprocessors"]).to eq(["signer"])
+    end
+  end
+
   describe "#protocol=" do
     it "defaults to nil" do
       expect(config.protocol).to be_nil

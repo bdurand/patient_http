@@ -52,6 +52,7 @@ module PatientHttp
   autoload :HttpError, File.join(__dir__, "patient_http/http_error")
   autoload :HttpHeaders, File.join(__dir__, "patient_http/http_headers")
   autoload :LifecycleManager, File.join(__dir__, "patient_http/lifecycle_manager")
+  autoload :OutgoingRequest, File.join(__dir__, "patient_http/outgoing_request")
   autoload :Payload, File.join(__dir__, "patient_http/payload")
   autoload :PayloadStore, File.join(__dir__, "patient_http/payload_store")
   autoload :Processor, File.join(__dir__, "patient_http/processor")
@@ -62,6 +63,7 @@ module PatientHttp
   autoload :Request, File.join(__dir__, "patient_http/request")
   autoload :RequestError, File.join(__dir__, "patient_http/request_error")
   autoload :RequestHelper, File.join(__dir__, "patient_http/request_helper")
+  autoload :RequestPreparer, File.join(__dir__, "patient_http/request_preparer")
   autoload :RequestTask, File.join(__dir__, "patient_http/request_task")
   autoload :RequestTemplate, File.join(__dir__, "patient_http/request_template")
   autoload :Response, File.join(__dir__, "patient_http/response")
@@ -238,6 +240,8 @@ module PatientHttp
     # @param raise_error_responses [Boolean, nil] when true, non-success responses are
     #   reported as errors
     # @param callback_args [Hash, nil] JSON-compatible callback arguments
+    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] names of preprocessors
+    #   registered on the configuration to apply to the request when it is sent
     # @return [Object] return value from the registered request handler
     def request(
       method,
@@ -249,9 +253,19 @@ module PatientHttp
       params: nil,
       timeout: nil,
       raise_error_responses: nil,
-      callback_args: nil
+      callback_args: nil,
+      preprocessors: nil
     )
-      request = Request.new(method, url, body: body, json: json, headers: headers, params: params, timeout: timeout)
+      request = Request.new(
+        method,
+        url,
+        body: body,
+        json: json,
+        headers: headers,
+        params: params,
+        timeout: timeout,
+        preprocessors: preprocessors
+      )
       execute(
         request: request,
         callback: callback,

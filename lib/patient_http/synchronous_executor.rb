@@ -19,6 +19,7 @@ module PatientHttp
       @on_complete = on_complete
       @on_error = on_error
       @proxy_client = nil
+      @request_preparer = RequestPreparer.new(config)
     end
 
     # Execute the request synchronously.
@@ -35,16 +36,15 @@ module PatientHttp
             http_client&.close
             @proxy_client&.close
             @proxy_client = nil
-            http_client = create_http_client
+            outgoing = @request_preparer.prepare(@task.request, @task.id)
+            http_client = create_http_client(outgoing.url)
             timeout = @task.request.timeout || @config.request_timeout
 
             response_data = Async::Task.current.with_timeout(timeout) do
-              headers = @config.secret_manager.resolve_headers(@task.request.headers.to_h)
-              headers["x-request-id"] = @task.id
-              headers["user-agent"] ||= @config.user_agent if @config.user_agent
+              headers = outgoing.headers.to_h
               body = Protocol::HTTP::Body::Buffered.wrap([@task.request.body.to_s]) if @task.request.body
 
-              endpoint = Async::HTTP::Endpoint.parse(request_url)
+              endpoint = Async::HTTP::Endpoint.parse(outgoing.url)
               endpoint = configure_endpoint(endpoint) if @config.connection_timeout
 
               verb = @task.request.http_method.to_s.upcase
@@ -125,18 +125,12 @@ module PatientHttp
 
     private
 
-    # Resolve the current task's request URL, appending any secret query params.
-    #
-    # @return [String] the resolved request URL
-    def request_url
-      @config.secret_manager.resolve_url(@task.request.url, @task.request.secret_params)
-    end
-
     # Create HTTP client with config settings (retries, proxy, connection timeout).
     #
+    # @param url [String] the resolved request URL
     # @return [Protocol::HTTP::AcceptEncoding] wrapped HTTP client
-    def create_http_client
-      endpoint = Async::HTTP::Endpoint.parse(request_url)
+    def create_http_client(url)
+      endpoint = Async::HTTP::Endpoint.parse(url)
       endpoint = configure_endpoint(endpoint) if @config.connection_timeout
 
       client = if @config.proxy_url

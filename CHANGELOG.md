@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.2.0
+
+### Added
+
+- Request preprocessors for modifying the outgoing request just before it is sent — most usefully, to sign requests (e.g. AWS SigV4 signatures that must set multiple headers computed over the final request). Register a preprocessor on the `Configuration` with `register_preprocessor(name)` and attach it to a request with `preprocessors: name`. The request serializes only the preprocessor name; the callable (and any credentials it uses) stays on the processor side. Preprocessors receive an `OutgoingRequest` — a view of the request after secret resolution with read access to the method, URL, and body, mutable headers, and an `add_param` method for appending query parameters. On redirects, preprocessors re-run against each redirect URL and are dropped on cross-origin hops, consistent with sensitive header stripping.
+
+### Fixed
+
+- `SynchronousExecutor` no longer resolves secret query params twice per request, which previously invoked callable secrets twice.
+
 ## 1.1.2
 
 ### Added

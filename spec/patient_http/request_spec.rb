@@ -225,4 +225,40 @@ RSpec.describe PatientHttp::Request do
       expect(reloaded.secret_params).to eq("api_key" => PatientHttp::SecretReference.new(:api_key))
     end
   end
+
+  describe "preprocessors" do
+    it "defaults to an empty array" do
+      request = described_class.new(:get, "https://api.example.com")
+      expect(request.preprocessors).to eq([])
+    end
+
+    it "normalizes a single name to an array of strings" do
+      request = described_class.new(:get, "https://api.example.com", preprocessors: :signer)
+      expect(request.preprocessors).to eq(["signer"])
+    end
+
+    it "normalizes an array of names to strings" do
+      request = described_class.new(:get, "https://api.example.com", preprocessors: [:signer, "other"])
+      expect(request.preprocessors).to eq(["signer", "other"])
+    end
+
+    it "raises ArgumentError for a blank name" do
+      expect {
+        described_class.new(:get, "https://api.example.com", preprocessors: "")
+      }.to raise_error(ArgumentError, /cannot be empty/)
+    end
+
+    it "serializes preprocessor names and restores them with load" do
+      request = described_class.new(:get, "https://api.example.com", preprocessors: [:signer])
+      expect(request.as_json["preprocessors"]).to eq(["signer"])
+
+      reloaded = described_class.load(JSON.parse(JSON.generate(request.as_json)))
+      expect(reloaded.preprocessors).to eq(["signer"])
+    end
+
+    it "omits preprocessors from as_json when there are none" do
+      request = described_class.new(:get, "https://api.example.com")
+      expect(request.as_json).not_to have_key("preprocessors")
+    end
+  end
 end
