@@ -80,6 +80,46 @@ RSpec.describe "Processor Shutdown Integration", :integration do
     end
   end
 
+  describe "in-flight requests completing during shutdown" do
+    it "delivers responses that complete during the stop window and returns before the timeout" do
+      template = PatientHttp::RequestTemplate.new(base_url: test_web_server.base_url)
+      request = template.get("/delay/300")
+
+      handler = TestTaskHandler.new({
+        "class" => "Worker",
+        "jid" => "test-jid-graceful",
+        "args" => []
+      })
+
+      request_task = PatientHttp::RequestTask.new(
+        request: request,
+        task_handler: handler,
+        callback: TestCallback
+      )
+
+      processor.enqueue(request_task)
+
+      # Wait for the request to be in flight, then stop while it is running
+      processor.wait_for_processing
+
+      started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      processor.stop(timeout: 10)
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at
+
+      # The 300ms request completed during the stop window and was delivered
+      expect(handler.completions.size).to eq(1)
+      expect(handler.completions.first[:response].status).to eq(200)
+
+      # The request was not re-enqueued since it completed
+      expect(handler.retries).to be_empty
+
+      # Stop returned as soon as the request finished, not after the full timeout
+      expect(elapsed).to be < 5
+
+      expect(processor.stopped?).to be true
+    end
+  end
+
   describe "forced shutdown with re-enqueue" do
     it "re-enqueues in-flight requests when timeout is insufficient" do
       # Build request

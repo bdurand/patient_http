@@ -281,6 +281,8 @@ error = PatientHttp::HttpError.load(json_data)
 
 The `Response` object includes the HTTP status code, headers, body, and callback arguments. Error objects (`HttpError`, `RedirectError`, `RequestError`) include the error message, context about the request, and callback arguments.
 
+Response headers are case insensitive. Headers that appear multiple times in the response (such as `set-cookie`) are flattened into a single joined string value.
+
 Response bodies are automatically encoded for JSON serialization. Binary content is Base64 encoded, and large text content is gzipped and then Base64 encoded to reduce payload size. Decoding is handled transparently when you access the `body` or `json` methods on the `Response` object.
 
 ### Payload Stores
@@ -321,10 +323,10 @@ config.register_payload_store(:files, adapter: :file, directory: "/tmp/payloads"
 
 #### Redis Store
 
-For production with shared state across processes:
+For production with shared state across processes (requires the `redis` gem; the client must respond to `set`, `get`, `del`, and `exists`):
 
 ```ruby
-redis = RedisClient.new(url: ENV["REDIS_URL"])
+redis = Redis.new(url: ENV["REDIS_URL"])
 config.register_payload_store(:redis, adapter: :redis, redis: redis, ttl: 86400)
 ```
 

@@ -31,6 +31,7 @@ module PatientHttp
         begin
           http_client = nil
           response_data = nil
+          redirect_error = nil
 
           loop do
             http_client&.close
@@ -57,6 +58,8 @@ module PatientHttp
 
               request = Protocol::HTTP::Request[verb, endpoint.path, **options]
               async_response = http_client.call(request)
+              # Note: headers that appear multiple times (e.g. set-cookie) are
+              # flattened to a single joined string value.
               headers_hash = async_response.headers.to_h.transform_values(&:to_s)
 
               body_content = read_response_body(async_response, headers_hash)
@@ -71,36 +74,39 @@ module PatientHttp
             # Check for redirect
             break unless should_follow_redirect?(@task, response_data)
 
+            # Note: a `return` here would raise LocalJumpError since this block
+            # runs on a reactor fiber, so break out and handle the error below.
             redirect_error = check_redirect_error(@task, response_data)
-            if redirect_error
-              invoke_callback(redirect_error, :error)
-              return
-            end
+            break if redirect_error
 
             location = response_data[:headers]["location"]
             @task = @task.redirect_task(location: location, status: response_data[:status])
           end
 
-          end_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          duration = end_time - start_time
-
-          response = Response.new(
-            status: response_data[:status],
-            headers: response_data[:headers],
-            body: response_data[:body],
-            duration: duration,
-            request_id: @task.id,
-            url: @task.request.url,
-            http_method: @task.request.http_method,
-            callback_args: @task.callback_args,
-            redirects: @task.redirects
-          )
-
-          if @task.raise_error_responses && !response.success?
-            http_error = HttpError.new(response)
-            invoke_callback(http_error, :error)
+          if redirect_error
+            invoke_callback(redirect_error, :error)
           else
-            invoke_callback(response, :response)
+            end_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            duration = end_time - start_time
+
+            response = Response.new(
+              status: response_data[:status],
+              headers: response_data[:headers],
+              body: response_data[:body],
+              duration: duration,
+              request_id: @task.original_id,
+              url: @task.request.url,
+              http_method: @task.request.http_method,
+              callback_args: @task.callback_args,
+              redirects: @task.redirects
+            )
+
+            if @task.raise_error_responses && !response.success?
+              http_error = HttpError.new(response)
+              invoke_callback(http_error, :error)
+            else
+              invoke_callback(response, :response)
+            end
           end
         rescue => e
           end_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -185,15 +191,23 @@ module PatientHttp
 
       chunks = []
       total_size = 0
+      finished = false
 
-      async_response.body.each do |chunk|
-        total_size += chunk.bytesize
-        if total_size > @config.max_response_size
-          raise ResponseTooLargeError.new(
-            "Response body size exceeded maximum allowed size (#{@config.max_response_size} bytes)"
-          )
+      begin
+        async_response.body.each do |chunk|
+          total_size += chunk.bytesize
+          if total_size > @config.max_response_size
+            raise ResponseTooLargeError.new(
+              "Response body size exceeded maximum allowed size (#{@config.max_response_size} bytes)"
+            )
+          end
+          chunks << chunk
         end
-        chunks << chunk
+
+        finished = true
+      ensure
+        # Close the body if the read was interrupted so the connection is released
+        async_response.body.close unless finished
       end
 
       body = chunks.join.force_encoding(Encoding::ASCII_8BIT)

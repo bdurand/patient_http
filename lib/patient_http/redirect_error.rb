@@ -25,8 +25,13 @@ module PatientHttp
       #
       # @param hash [Hash] hash representation
       # @return [RedirectError] reconstructed error
+      # @raise [ArgumentError] if the serialized error class is not a RedirectError
       def load(hash)
         error_class = ClassHelper.resolve_class_name(hash["error_class"])
+        unless error_class.is_a?(Class) && error_class <= RedirectError
+          raise ArgumentError.new("Invalid redirect error class: #{hash["error_class"].inspect}")
+        end
+
         error_class.new(
           url: hash["url"],
           http_method: hash["http_method"]&.to_sym,

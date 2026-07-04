@@ -110,7 +110,9 @@ module PatientHttp
 
       @secret_params = {}
       @url = normalized_url(url, params)
-      @headers = headers.is_a?(HttpHeaders) ? headers : HttpHeaders.new(headers)
+      # Copy the headers so the request does not share mutable state with the
+      # caller (or with another request when following redirects).
+      @headers = headers.is_a?(HttpHeaders) ? headers.dup : HttpHeaders.new(headers)
       @body = (body == "") ? nil : body
       @timeout = timeout
       @max_redirects = max_redirects

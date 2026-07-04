@@ -32,6 +32,8 @@ module PatientHttp
 
         Async::Task.current.with_timeout(timeout) do
           async_response = @client_pool.request(request.http_method, url, headers, body)
+          # Note: headers that appear multiple times (e.g. set-cookie) are
+          # flattened to a single joined string value.
           headers_hash = async_response.headers.to_h.transform_values(&:to_s)
           body = @response_reader.read_body(async_response, headers_hash)
 
@@ -68,7 +70,7 @@ module PatientHttp
     def connection_error?(exception)
       case exception
       when Async::TimeoutError, Errno::ECONNRESET, Errno::ECONNABORTED, Errno::EPIPE,
-           Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError, IOError
+           Errno::ECONNREFUSED, Errno::EHOSTUNREACH, Errno::ETIMEDOUT, SocketError, IOError
         true
       else
         false

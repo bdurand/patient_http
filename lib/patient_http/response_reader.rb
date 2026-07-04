@@ -6,6 +6,13 @@ module PatientHttp
   # Encapsulates the logic for reading async HTTP responses with size validation
   # and building Response objects from the raw response data.
   class ResponseReader
+    # Raised when a body read is aborted because the processor was stopped
+    # past its shutdown deadline. The shutdown sequence re-enqueues the task,
+    # so this error is handled internally and never reaches callbacks.
+    #
+    # @api private
+    class ReadAbortedError < StandardError; end
+
     # Initialize the reader.
     #
     # @param processor [Processor] the processor object
@@ -24,6 +31,7 @@ module PatientHttp
     # @param headers_hash [Hash] the response headers
     # @return [String, nil] the response body or nil if no body present
     # @raise [ResponseTooLargeError] if body exceeds max_response_size
+    # @raise [ReadAbortedError] if the processor stopped past its shutdown deadline mid-read
     def read_body(async_response, headers_hash)
       return nil unless async_response.body
 
@@ -58,8 +66,9 @@ module PatientHttp
     # Read body chunks while checking size.
     #
     # @param async_response [Async::HTTP::Protocol::Response] the async HTTP response
-    # @return [String, nil] the response body in ASCII-8BIT encoding, or nil if interrupted
+    # @return [String] the response body in ASCII-8BIT encoding
     # @raise [ResponseTooLargeError] if body size exceeds max_response_size during read
+    # @raise [ReadAbortedError] if the processor stopped past its shutdown deadline mid-read
     def read_body_chunks(async_response)
       chunks = []
       total_size = 0
@@ -67,9 +76,12 @@ module PatientHttp
 
       begin
         async_response.body.each do |chunk|
-          # Check if processor is stopping/stopped (early exit during shutdown)
-          if @processor.stopping? || @processor.stopped?
-            return nil
+          # Abort the read once the processor has passed its shutdown deadline.
+          # Reads are allowed to finish while the processor is merely stopping
+          # (the graceful shutdown window) so in-flight responses can still be
+          # delivered.
+          if @processor.stopped?
+            raise ReadAbortedError.new("Processor stopped while reading response body")
           end
 
           total_size += chunk.bytesize

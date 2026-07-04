@@ -12,7 +12,7 @@ module PatientHttp
     STATES = %i[stopped starting running draining stopping].freeze
 
     # Polling interval during wait operations
-    POLL_INTERVAL = 0.001
+    POLL_INTERVAL = 0.01
 
     # Initialize the lifecycle manager.
     #
@@ -66,12 +66,14 @@ module PatientHttp
       state == :stopping
     end
 
-    # Transition to starting state.
+    # Transition to starting state. The processor can only be started from
+    # the stopped state; in particular, starting a draining processor would
+    # spawn a second reactor alongside the one still finishing its drain.
     #
     # @return [Boolean] true if transition was successful
     def start!
       @lock.synchronize do
-        return false if starting? || running? || stopping?
+        return false unless stopped?
 
         @state.set(:starting)
         @shutdown_barrier.reset
@@ -83,9 +85,18 @@ module PatientHttp
 
     # Transition to running state.
     #
-    # @return [void]
+    # The transition only occurs from the starting state so that a reactor
+    # that already failed and transitioned to stopped is not overwritten.
+    #
+    # @return [Boolean] true if transition was successful
     def running!
-      @state.set(:running)
+      @lock.synchronize do
+        return false unless starting?
+
+        @state.set(:running)
+      end
+
+      true
     end
 
     # Transition to draining state.
@@ -136,9 +147,10 @@ module PatientHttp
 
     # Wait for the reactor to be ready.
     #
-    # @return [void]
-    def wait_for_reactor
-      @reactor_ready.wait
+    # @param timeout [Numeric, nil] maximum time to wait in seconds (nil waits forever)
+    # @return [Boolean] true if the reactor is ready, false if the timeout was reached
+    def wait_for_reactor(timeout: nil)
+      @reactor_ready.wait(timeout)
     end
 
     # Check if shutdown has been signaled.

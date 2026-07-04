@@ -12,6 +12,9 @@ module PatientHttp
     # @return [Integer] HTTP status code
     attr_reader :status
 
+    # Response headers. Headers that appeared multiple times in the response
+    # (such as set-cookie) are flattened into a single joined string value.
+    #
     # @return [HttpHeaders] response headers
     attr_reader :headers
 

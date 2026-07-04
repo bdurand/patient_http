@@ -173,20 +173,40 @@ RSpec.describe PatientHttp::ResponseReader do
 
       before do
         allow(processor).to receive(:config).and_return(config)
-        allow(processor).to receive(:stopping?).and_return(true)
         allow(processor).to receive(:stopped?).and_return(false)
         allow(body_double).to receive(:each).and_yield("Hello, ").and_yield("World!")
         allow(body_double).to receive(:close)
       end
 
-      it "returns nil" do
+      it "finishes reading the body so in-flight responses can be delivered" do
         result = response_reader.read_body(async_response, headers_hash)
-        expect(result).to be_nil
+        expect(result).to eq("Hello, World!")
+      end
+    end
+
+    context "when processor is stopped" do
+      let(:processor) { instance_double(PatientHttp::Processor) }
+      let(:config) { PatientHttp::Configuration.new }
+      let(:response_reader) { described_class.new(processor) }
+
+      before do
+        allow(processor).to receive(:config).and_return(config)
+        allow(processor).to receive(:stopped?).and_return(true)
+        allow(body_double).to receive(:each).and_yield("Hello, ").and_yield("World!")
+        allow(body_double).to receive(:close)
+      end
+
+      it "aborts the read" do
+        expect do
+          response_reader.read_body(async_response, headers_hash)
+        end.to raise_error(described_class::ReadAbortedError)
       end
 
       it "closes the body" do
         expect(body_double).to receive(:close)
-        response_reader.read_body(async_response, headers_hash)
+        expect do
+          response_reader.read_body(async_response, headers_hash)
+        end.to raise_error(described_class::ReadAbortedError)
       end
     end
   end

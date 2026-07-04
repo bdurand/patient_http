@@ -109,13 +109,36 @@ RSpec.describe PatientHttp::LifecycleManager do
         expect(lifecycle.stopping?).to be true
       end
     end
+
+    context "when draining" do
+      before do
+        lifecycle.start!
+        lifecycle.running!
+        lifecycle.drain!
+      end
+
+      it "returns false and stays in draining" do
+        expect(lifecycle.start!).to be false
+        expect(lifecycle.draining?).to be true
+      end
+    end
   end
 
   describe "#running!" do
     it "transitions to running state" do
       lifecycle.start!
-      lifecycle.running!
+      expect(lifecycle.running!).to be true
       expect(lifecycle.running?).to be true
+    end
+
+    it "does not transition unless starting" do
+      lifecycle.start!
+      lifecycle.running!
+      lifecycle.stop!
+      lifecycle.stopped!
+
+      expect(lifecycle.running!).to be false
+      expect(lifecycle.stopped?).to be true
     end
   end
 

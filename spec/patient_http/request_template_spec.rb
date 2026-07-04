@@ -128,8 +128,18 @@ RSpec.describe PatientHttp::RequestTemplate do
 
     context "with headers" do
       it "merges request headers with instance headers" do
+        result = template.request(:get, "/users", headers: {"X-Request-ID" => "abc123"})
+
+        expect(result.headers["authorization"]).to eq("Bearer token123")
+        expect(result.headers["x-request-id"]).to eq("abc123")
+      end
+
+      it "does not add per-request headers to the template defaults" do
         template.request(:get, "/users", headers: {"X-Request-ID" => "abc123"})
-        # Headers should be merged
+        result = template.request(:get, "/users")
+
+        expect(template.headers.include?("x-request-id")).to be false
+        expect(result.headers.include?("x-request-id")).to be false
       end
 
       it "does not merge when no headers provided" do
