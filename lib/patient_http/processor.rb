@@ -25,6 +25,12 @@ module PatientHttp
       @lifecycle = LifecycleManager.new
       @queue = Thread::Queue.new
       @reactor_thread = nil
+      # Serializes start/stop so a start cannot interleave with a stop that is
+      # still reaping its reactor thread (and vice versa).
+      @lifecycle_mutex = Mutex.new
+      # Incremented once per reactor run; lets a reactor's teardown detect
+      # whether it is still the current run before mutating shared state.
+      @reactor_generation = 0
       @inflight_requests = Concurrent::Hash.new
       @pending_tasks = Concurrent::Hash.new
       @tasks_lock = Mutex.new
@@ -38,34 +44,64 @@ module PatientHttp
     #
     # @return [void]
     def start
-      @tasks_lock.synchronize do
-        return unless @lifecycle.start!
-      end
+      observers_to_notify = nil
 
-      @reactor_thread = Thread.new do
-        Thread.current.name = "patient-http-processor"
-        run_reactor
-      rescue => e
-        @config.logger&.error("[PatientHttp] Processor error: #{e.message}\n#{e.backtrace.join("\n")}")
-
-        raise if PatientHttp.testing?
-      ensure
-        # Mark the processor stopped when the reactor exits. The nil check
-        # covers a reactor that fails before the thread is assigned; the
-        # equality check prevents a stale thread from a previous run from
-        # clobbering the state of a restarted processor.
-        @tasks_lock.synchronize do
-          @lifecycle.stopped! if @reactor_thread.nil? || @reactor_thread == Thread.current
+      # Hold the lifecycle mutex across the whole start so a concurrent stop
+      # cannot interleave with (and reap) the reactor thread we are creating.
+      @lifecycle_mutex.synchronize do
+        # Claim this reactor run's generation atomically with the state
+        # transition. The reactor thread captures it below and its teardown
+        # only mutates shared state while it is still the current generation.
+        generation = @tasks_lock.synchronize do
+          return unless @lifecycle.start!
+          @reactor_generation += 1
         end
+
+        @reactor_thread = Thread.new do
+          Thread.current.name = "patient-http-processor"
+          run_reactor
+        rescue => e
+          @config.logger&.error("[PatientHttp] Processor error: #{e.message}\n#{e.backtrace.join("\n")}")
+
+          raise if PatientHttp.testing?
+        ensure
+          # Mark the processor stopped when the reactor exits and re-enqueue any
+          # tasks still being tracked, so a reactor that exits without a stop()
+          # call (e.g. an unhandled error) does not lose in-flight/pending
+          # requests or leak stale tracking entries into a later run.
+          #
+          # Only act while this is still the current generation: a newer start
+          # (after a stop) owns the processor state and a stale reactor from a
+          # prior run must not clobber it. Snapshot and clear happen under the
+          # lock; re-enqueueing runs outside it. This is idempotent with stop()'s
+          # reenqueue_pending_requests: whichever runs second snapshots an empty
+          # set.
+          orphaned_tasks = @tasks_lock.synchronize do
+            if @reactor_generation == generation
+              drain_tracked_tasks_locked
+            else
+              []
+            end
+          end
+          reenqueue_tasks(orphaned_tasks)
+        end
+
+        # The transition can fail if the reactor thread already failed and
+        # marked the processor stopped. Capture the observer snapshot under the
+        # same lock as the transition so an observer registered concurrently via
+        # #observe is notified of start by exactly one path (here or in #observe).
+        started, observers = @tasks_lock.synchronize do
+          [@lifecycle.running!, @observers.dup]
+        end
+        observers_to_notify = observers if started
+
+        # Block until the reactor is ready
+        @lifecycle.wait_for_reactor(timeout: 5)
       end
 
-      # The transition can fail if the reactor thread already failed and
-      # marked the processor stopped.
-      started = @tasks_lock.synchronize { @lifecycle.running! }
-      notify_observers { |observer| observer.start } if started
-
-      # Block until the reactor is ready
-      @lifecycle.wait_for_reactor(timeout: 5)
+      # Notify observers outside the lifecycle mutex so an observer callback
+      # that re-enters the processor cannot deadlock.
+      observers_to_notify&.each { |observer| notify_observer(observer) { |o| o.start } }
     end
 
     # Stop the processor.
@@ -74,54 +110,74 @@ module PatientHttp
     # @return [void]
     def stop(timeout: nil)
       timeout ||= @config.shutdown_timeout
+      should_notify_stop = false
 
-      # Atomically transition to stopping state under lock to ensure consistency
-      # with other state-checking operations
-      @tasks_lock.synchronize do
-        return unless @lifecycle.stop!
-      end
+      # Hold the lifecycle mutex across the whole stop so a concurrent start
+      # cannot begin (and reassign @reactor_thread) while we are tearing down.
+      @lifecycle_mutex.synchronize do
+        # Atomically transition to stopping and capture the reactor thread for
+        # this run. Joining/killing the captured reference rather than the ivar
+        # means we can never tear down a reactor from a different run.
+        reactor = @tasks_lock.synchronize do
+          return unless @lifecycle.stop!
+          @reactor_thread
+        end
 
-      # Interrupt the reactor's queue wait by pushing a sentinel value
-      @queue.push(nil)
+        # Interrupt the reactor's queue wait by pushing a sentinel value
+        @queue.push(nil)
 
-      # Wait for in-flight and pending requests to complete.
-      # Queue items are not checked here — they will be re-enqueued by
-      # reenqueue_remaining_queue_items after the reactor thread exits.
-      if timeout > 0
-        deadline = monotonic_time + timeout
-        @tasks_lock.synchronize do
-          loop do
-            break if @pending_tasks.empty? && @inflight_requests.empty?
-            remaining = deadline - monotonic_time
-            break if remaining <= 0
-            @idle_condition.wait(@tasks_lock, remaining)
+        # Wait for in-flight and pending requests to complete.
+        # Queue items are not checked here — they will be re-enqueued by
+        # reenqueue_remaining_queue_items after the reactor thread exits.
+        if timeout > 0
+          deadline = monotonic_time + timeout
+          @tasks_lock.synchronize do
+            loop do
+              break if @pending_tasks.empty? && @inflight_requests.empty?
+              remaining = deadline - monotonic_time
+              break if remaining <= 0
+              @idle_condition.wait(@tasks_lock, remaining)
+            end
           end
         end
+
+        reenqueue_pending_requests
+
+        # Reap the reactor thread — unless stop was called from the reactor
+        # thread itself (e.g. from a task callback or observer), where joining
+        # the current thread would raise ThreadError. In that case the reactor
+        # exits on its own once the callback returns (its loop sees the stopped
+        # state) and its ensure block performs the same cleanup.
+        if reactor && !reactor.equal?(Thread.current)
+          reactor.join(1) if reactor.alive?
+          if reactor.alive?
+            reactor.kill
+            # Wait for the killed thread's ensure blocks so a stale lifecycle
+            # transition cannot fire during a subsequent start.
+            reactor.join(1)
+          end
+        end
+        @tasks_lock.synchronize do
+          @reactor_thread = nil if @reactor_thread.equal?(reactor)
+        end
+
+        # Run a second pass now that the reactor has exited to catch any task
+        # that slipped into pending/in-flight tracking after the first snapshot
+        # (a task can be popped from the queue but not yet tracked when the
+        # snapshot is taken).
+        reenqueue_pending_requests
+
+        # Drain any items left in the queue after the reactor has exited.
+        # This must happen after the reactor thread is done to avoid consuming
+        # the nil sentinel that wakes the reactor.
+        reenqueue_remaining_queue_items
+
+        should_notify_stop = true
       end
 
-      reenqueue_pending_requests
-
-      @reactor_thread.join(1) if @reactor_thread&.alive?
-      if @reactor_thread&.alive?
-        @reactor_thread.kill
-        # Wait for the killed thread's ensure blocks so a stale lifecycle
-        # transition cannot fire during a subsequent start.
-        @reactor_thread.join(1)
-      end
-      @reactor_thread = nil
-
-      # Run a second pass now that the reactor has exited to catch any task
-      # that slipped into pending/in-flight tracking after the first snapshot
-      # (a task can be popped from the queue but not yet tracked when the
-      # snapshot is taken).
-      reenqueue_pending_requests
-
-      # Drain any items left in the queue after the reactor has exited.
-      # This must happen after the reactor thread is done to avoid consuming
-      # the nil sentinel that wakes the reactor.
-      reenqueue_remaining_queue_items
-
-      notify_observers { |observer| observer.stop }
+      # Notify observers outside the lifecycle mutex so an observer callback
+      # that re-enters the processor cannot deadlock.
+      notify_observers { |observer| observer.stop } if should_notify_stop
     end
 
     # Drain the processor (stop accepting new requests).
@@ -262,7 +318,10 @@ module PatientHttp
         raise ArgumentError.new("Observer already added") if @observers.include?(observer)
 
         @observers << observer
-        notify_start = starting? || running?
+        # Only self-notify when already running. An observer added while the
+        # processor is still starting is picked up by start's atomic observer
+        # snapshot, so notifying here too would deliver start twice.
+        notify_start = running?
       end
 
       notify_observer(observer) { |o| o.start } if notify_start
@@ -424,10 +483,11 @@ module PatientHttp
         # shutdown sequence has re-enqueued the task; discard the response.
         return if stopped?
 
-        # Check for redirect handling
+        # Check for redirect handling. handle_redirect claims the task itself
+        # (atomically with enqueueing the redirect) and returns whether this
+        # caller owns delivery, so the ensure block can finish the task.
         if should_follow_redirect?(task, response_data)
-          claimed = claim_task(task)
-          handle_redirect(task, response_data) if claimed
+          claimed = handle_redirect(task, response_data)
           return
         end
 
@@ -448,6 +508,13 @@ module PatientHttp
         # there is nothing to deliver.
         nil
       rescue => e
+        # A failure raised after the task was claimed came from the delivery
+        # attempt itself (only reachable in testing mode; the delivery helpers
+        # rescue their own failures in production). Re-raise rather than
+        # claiming again — claimed must stay true so the ensure block still
+        # finishes the task.
+        raise if claimed
+
         claimed = claim_task(task)
         if claimed
           notify_observers { |observer| observer.request_error(e) }
@@ -455,7 +522,10 @@ module PatientHttp
         end
       ensure
         finish_task(task) if claimed
-        @testing_callback&.call(task) if PatientHttp.testing?
+        # Only fire the testing hook for tasks this caller actually owns.
+        # A task discarded during shutdown (claimed == false) is re-enqueued
+        # by the shutdown sequence, not processed here.
+        @testing_callback&.call(task) if claimed && PatientHttp.testing?
       end
     end
 
@@ -500,13 +570,24 @@ module PatientHttp
         "[PatientHttp] Request #{task.id} succeeded with status #{response.status}, " \
         "enqueued callback #{task.callback}"
       )
+    rescue => e
+      @config.logger&.error(
+        "[PatientHttp] Failed to enqueue completion callback for request #{task.id}: #{e.class} - #{e.message}"
+      )
+      raise if PatientHttp.testing?
     end
 
     # Handle a redirect response.
     #
+    # Claims the task before delivering an error or enqueueing the redirect so
+    # the result is delivered exactly once. When following a redirect, the
+    # original task is removed from in-flight tracking and the redirect task is
+    # pushed onto the queue within a single {@tasks_lock} section, so a
+    # concurrent {#idle?} never observes a moment where neither is tracked.
+    #
     # @param task [RequestTask] the request task
     # @param response_data [Hash] the response data with status, headers, body
-    # @return [void]
+    # @return [Boolean] true if this caller owns delivery of the task's result
     def handle_redirect(task, response_data)
       status = response_data[:status]
       location = response_data[:headers]["location"]
@@ -514,18 +595,30 @@ module PatientHttp
       # Check for redirect errors
       error = check_redirect_error(task, response_data)
       if error
+        return false unless claim_task(task)
+
         notify_observers { |observer| observer.request_error(error) }
         handle_error(task, error)
-        return
+        return true
       end
 
-      # Create redirect task and enqueue it
+      # Create the redirect task, then atomically claim the original (remove it
+      # from in-flight) and enqueue the redirect. If the claim fails the
+      # shutdown sequence already re-enqueued the original, so drop the redirect.
       redirect_task = task.redirect_task(location: location, status: status)
       redirect_task.enqueued!
-      @queue.push(redirect_task)
+
+      claimed = @tasks_lock.synchronize do
+        next false if @inflight_requests.delete(task.id).nil?
+
+        @queue.push(redirect_task)
+        true
+      end
+      return false unless claimed
 
       redirect_url = resolve_redirect_url(task.request.url, location)
       @config.logger&.debug("[PatientHttp] Request #{task.id} redirected (#{status}) to #{redirect_url}")
+      true
     end
 
     # Handle error response. The caller must have claimed the task via
@@ -567,17 +660,35 @@ module PatientHttp
     end
 
     def reenqueue_pending_requests
-      # Re-enqueue any remaining in-flight, pending, and queued tasks
-      tasks_to_reenqueue = []
-      @tasks_lock.synchronize do
-        # Now that we have the lock again, atomically transition to stopped and clear collections
-        @lifecycle.stopped!
-        tasks_to_reenqueue = @inflight_requests.values + @pending_tasks.values
-        @inflight_requests.clear
-        @pending_tasks.clear
-      end
+      reenqueue_tasks(drain_tracked_tasks)
+    end
 
-      reenqueue_tasks(tasks_to_reenqueue)
+    # Atomically transition to stopped and remove all tracked (in-flight and
+    # pending) tasks, returning them so the caller can re-enqueue them.
+    #
+    # Acquires {@tasks_lock}; callers must NOT already hold it. Use
+    # {#drain_tracked_tasks_locked} when the lock is already held.
+    #
+    # @return [Array<RequestTask>] the tasks that were being tracked
+    def drain_tracked_tasks
+      @tasks_lock.synchronize { drain_tracked_tasks_locked }
+    end
+
+    # Transition to stopped and remove all tracked tasks. Must be called with
+    # {@tasks_lock} held.
+    #
+    # @return [Array<RequestTask>] the tasks that were being tracked
+    def drain_tracked_tasks_locked
+      @lifecycle.stopped!
+      tasks = @inflight_requests.values + @pending_tasks.values
+      @inflight_requests.clear
+      @pending_tasks.clear
+      # Wake any stop() thread blocked on the idle condition. Without this, a
+      # reactor-side drain (e.g. after a crash during shutdown) would clear the
+      # tracking hashes without signalling, leaving stop() asleep until its
+      # full timeout elapses.
+      @idle_condition.broadcast
+      tasks
     end
 
     def reenqueue_remaining_queue_items
@@ -599,7 +710,10 @@ module PatientHttp
     def reenqueue_tasks(tasks_to_reenqueue)
       tasks_to_reenqueue.each do |task|
         task.retry
-        notify_observers { |observer| observer.request_end(task) }
+        # Only emit request_end for tasks that actually started, so observers
+        # that pair request_start/request_end (e.g. an in-flight gauge) stay
+        # balanced. Queued-but-never-started tasks emit neither.
+        notify_observers { |observer| observer.request_end(task) } if task.started?
 
         @config.logger&.info(
           "[PatientHttp] Retrying incomplete request #{task.id}"
