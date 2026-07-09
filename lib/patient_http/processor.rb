@@ -50,16 +50,22 @@ module PatientHttp
 
         raise if PatientHttp.testing?
       ensure
-        @tasks_lock.synchronize { @lifecycle.stopped! } if @reactor_thread == Thread.current
+        # Mark the processor stopped when the reactor exits. The nil check
+        # covers a reactor that fails before the thread is assigned; the
+        # equality check prevents a stale thread from a previous run from
+        # clobbering the state of a restarted processor.
+        @tasks_lock.synchronize do
+          @lifecycle.stopped! if @reactor_thread.nil? || @reactor_thread == Thread.current
+        end
       end
 
-      @tasks_lock.synchronize do
-        @lifecycle.running!
-        notify_observers { |observer| observer.start }
-      end
+      # The transition can fail if the reactor thread already failed and
+      # marked the processor stopped.
+      started = @tasks_lock.synchronize { @lifecycle.running! }
+      notify_observers { |observer| observer.start } if started
 
       # Block until the reactor is ready
-      @lifecycle.wait_for_reactor
+      @lifecycle.wait_for_reactor(timeout: 5)
     end
 
     # Stop the processor.
@@ -96,8 +102,19 @@ module PatientHttp
       reenqueue_pending_requests
 
       @reactor_thread.join(1) if @reactor_thread&.alive?
-      @reactor_thread.kill if @reactor_thread&.alive?
+      if @reactor_thread&.alive?
+        @reactor_thread.kill
+        # Wait for the killed thread's ensure blocks so a stale lifecycle
+        # transition cannot fire during a subsequent start.
+        @reactor_thread.join(1)
+      end
       @reactor_thread = nil
+
+      # Run a second pass now that the reactor has exited to catch any task
+      # that slipped into pending/in-flight tracking after the first snapshot
+      # (a task can be popped from the queue but not yet tracked when the
+      # snapshot is taken).
+      reenqueue_pending_requests
 
       # Drain any items left in the queue after the reactor has exited.
       # This must happen after the reactor thread is done to avoid consuming
@@ -125,18 +142,24 @@ module PatientHttp
     # @raise [MaxCapacityError] if at max capacity
     # @return [void]
     def enqueue(task)
+      at_capacity = false
+
       @tasks_lock.synchronize do
         raise NotRunningError.new("Cannot enqueue request: processor is #{state}") unless running?
 
         # Check capacity - raise error if at max connections
         total = @queue.size + @pending_tasks.size + @inflight_requests.size
         if total >= @config.max_connections
-          notify_observers { |observer| observer.capacity_exceeded }
-          raise MaxCapacityError.new("Cannot enqueue request: already at max capacity (#{@config.max_connections} connections)")
+          at_capacity = true
+        else
+          task.enqueued!
+          @queue.push(task)
         end
+      end
 
-        task.enqueued!
-        @queue.push(task)
+      if at_capacity
+        notify_observers { |observer| observer.capacity_exceeded }
+        raise MaxCapacityError.new("Cannot enqueue request: already at max capacity (#{@config.max_connections} connections)")
       end
     end
 
@@ -233,12 +256,16 @@ module PatientHttp
     # @param observer [ProcessorObserver] the observer to add
     # @return [void]
     def observe(observer)
+      notify_start = false
+
       @tasks_lock.synchronize do
         raise ArgumentError.new("Observer already added") if @observers.include?(observer)
 
         @observers << observer
-        observer.start if starting? || running?
+        notify_start = starting? || running?
       end
+
+      notify_observer(observer) { |o| o.start } if notify_start
     end
 
     # Wait for the processor to start.
@@ -323,6 +350,22 @@ module PatientHttp
           end
         end
 
+        # Wait for in-flight request fibers to finish so responses that
+        # complete during the graceful shutdown window are delivered before
+        # the connection pools are closed below. Transient tasks (such as the
+        # connection pools' gardener tasks) are excluded; they are shut down
+        # by closing the HTTP client.
+        loop do
+          children = task.children&.to_a&.reject(&:transient?)
+          break if children.nil? || children.empty?
+
+          children.each do |child|
+            child.wait
+          rescue => e
+            @config.logger&.error("[PatientHttp] Error waiting for in-flight request: #{e.inspect}")
+          end
+        end
+
         @config.logger&.info("[PatientHttp] Processor stopped")
       rescue Async::Stop
         @config.logger&.info("[PatientHttp] Reactor received stop signal")
@@ -358,8 +401,12 @@ module PatientHttp
     # @param task [RequestTask] the request task to process
     # @return [void]
     def process_request(task)
-      # Move from pending to in-flight tracking
+      # Move from pending to in-flight tracking. If the shutdown deadline has
+      # already passed, the shutdown sequence re-enqueues the task, so leave
+      # it in pending tracking and don't execute it.
       @tasks_lock.synchronize do
+        return if stopped?
+
         @pending_tasks.delete(task.id)
         @inflight_requests[task.id] = task
       end
@@ -368,50 +415,71 @@ module PatientHttp
 
       # Mark task as started
       task.started!
-      response_handled = false
+      claimed = false
 
       begin
         response_data = @http_client.make_request(task.request, task.id)
 
-        # Return early because the body many not have been fully read.
-        return if stopping? || stopped?
+        # If the shutdown deadline passed while the request was in flight, the
+        # shutdown sequence has re-enqueued the task; discard the response.
+        return if stopped?
 
         # Check for redirect handling
         if should_follow_redirect?(task, response_data)
-          handle_redirect(task, response_data)
-          response_handled = true
+          claimed = claim_task(task)
+          handle_redirect(task, response_data) if claimed
           return
         end
 
         response = task.build_response(**response_data)
-        if task.raise_error_responses && !response.success?
-          http_error = HttpError.new(response)
-          notify_observers { |observer| observer.request_error(http_error) }
-          handle_error(task, http_error)
-        else
-          handle_completion(task, response)
+        claimed = claim_task(task)
+        if claimed
+          if task.raise_error_responses && !response.success?
+            http_error = HttpError.new(response)
+            notify_observers { |observer| observer.request_error(http_error) }
+            handle_error(task, http_error)
+          else
+            handle_completion(task, response)
+          end
         end
-
-        response_handled = true
+      rescue ResponseReader::ReadAbortedError
+        # The processor stopped past its shutdown deadline while the response
+        # body was being read. The shutdown sequence re-enqueues the task, so
+        # there is nothing to deliver.
+        nil
       rescue => e
-        notify_observers { |observer| observer.request_error(e) }
-        handle_error(task, e)
-        response_handled = true
+        claimed = claim_task(task)
+        if claimed
+          notify_observers { |observer| observer.request_error(e) }
+          handle_error(task, e)
+        end
       ensure
-        cleanup_after_task(task, response_handled)
+        finish_task(task) if claimed
         @testing_callback&.call(task) if PatientHttp.testing?
       end
     end
 
-    # Cleanup after request processing.
+    # Atomically take ownership of delivering a task's result by removing it
+    # from in-flight tracking.
+    #
+    # Returns false when the task has already been claimed by the shutdown
+    # sequence (re-enqueued for retry), in which case the result must not be
+    # delivered.
+    #
+    # @param task [RequestTask] the request task
+    # @return [Boolean] true if this caller owns delivery of the task's result
+    def claim_task(task)
+      @tasks_lock.synchronize do
+        !@inflight_requests.delete(task.id).nil?
+      end
+    end
+
+    # Signal idle waiters and notify observers after a claimed task finishes.
     #
     # @param task [RequestTask] the request task
     # @return [void]
-    def cleanup_after_task(task, response_handled)
-      return if (stopping? || stopped?) && !response_handled
-
+    def finish_task(task)
       @tasks_lock.synchronize do
-        @inflight_requests.delete(task.id)
         if @pending_tasks.empty? && @inflight_requests.empty?
           @idle_condition.broadcast
         end
@@ -419,17 +487,13 @@ module PatientHttp
       notify_observers { |observer| observer.request_end(task) }
     end
 
-    # Handle successful response.
+    # Handle successful response. The caller must have claimed the task via
+    # {#claim_task} so the result is delivered exactly once.
     #
     # @param task [RequestTask] the request task
     # @param response [Response] the response object
     # @return [void]
     def handle_completion(task, response)
-      if stopped?
-        @config.logger&.warn("[PatientHttp] Request #{task.id} succeeded after processor was stopped")
-        return
-      end
-
       task.completed!(response)
 
       @config.logger&.debug(
@@ -464,17 +528,13 @@ module PatientHttp
       @config.logger&.debug("[PatientHttp] Request #{task.id} redirected (#{status}) to #{redirect_url}")
     end
 
-    # Handle error response.
+    # Handle error response. The caller must have claimed the task via
+    # {#claim_task} so the result is delivered exactly once.
     #
     # @param task [RequestTask] the request task
     # @param exception [Exception] the exception
     # @return [void]
     def handle_error(task, exception)
-      if stopped?
-        @config.logger&.warn("[PatientHttp] Request #{task.id} failed after processor was stopped")
-        return
-      end
-
       task.error!(exception)
 
       @config.logger&.warn(
@@ -488,15 +548,22 @@ module PatientHttp
       raise if PatientHttp.testing?
     end
 
+    # Notify all observers of an event. Observers are called outside of any
+    # internal lock so they can safely call back into the processor.
     def notify_observers(&block)
-      @observers.each do |observer|
-        yield(observer)
-      rescue => e
-        @config.logger&.error(
-          "[PatientHttp] Observer #{observer.class.name} error: #{e.class} - #{e.message}"
-        )
-        raise e if PatientHttp.testing?
+      observers = @tasks_lock.synchronize { @observers.dup }
+      observers.each do |observer|
+        notify_observer(observer, &block)
       end
+    end
+
+    def notify_observer(observer)
+      yield(observer)
+    rescue => e
+      @config.logger&.error(
+        "[PatientHttp] Observer #{observer.class.name} error: #{e.class} - #{e.message}"
+      )
+      raise e if PatientHttp.testing?
     end
 
     def reenqueue_pending_requests

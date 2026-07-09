@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.2.0
+
+### Added
+
+- Request preprocessors for modifying the outgoing request just before it is sent — most usefully, to sign requests (e.g. AWS SigV4 signatures that must set multiple headers computed over the final request). Register a preprocessor on the `Configuration` with `register_preprocessor(name)` and attach it to a request with `preprocessors: name`. The request serializes only the preprocessor name; the callable (and any credentials it uses) stays on the processor side. Preprocessors receive an `OutgoingRequest` — a view of the request after secret resolution with read access to the method, URL, and body, mutable headers, and an `add_param` method for appending query parameters. On redirects, preprocessors re-run against each redirect URL and are dropped on cross-origin hops, consistent with sensitive header stripping.
+
+### Fixed
+
+- `SynchronousExecutor` no longer resolves secret query params twice per request, which previously invoked callable secrets twice.
+- Graceful shutdown now works as documented: requests that complete while the processor is stopping have their responses delivered instead of being discarded and retried, and `Processor#stop` returns as soon as in-flight requests finish rather than always blocking for the full `shutdown_timeout`.
+- `Processor#stop` performs a second re-enqueue pass after the reactor thread exits, closing a race where a task dequeued but not yet tracked at shutdown could be silently lost.
+- Task results are now claimed atomically at shutdown so a completing request can no longer trigger both its completion callback and a `TaskHandler#retry` for the same task.
+- `Processor#start` on a draining processor is now a no-op instead of spawning a second reactor thread that shared the queue and connection pools with the draining one.
+- The processor can no longer end up in a running state with a dead reactor thread when the reactor fails during startup.
+- Processor observers are now invoked outside of internal locks, so an observer callback can safely call back into processor methods such as `total_count` without raising a recursive locking error.
+- `SynchronousExecutor` no longer invokes the error callback twice when a redirect fails with too many redirects or a redirect loop.
+- `HttpHeaders#merge` no longer mutates the receiver. This also fixes `RequestTemplate` permanently absorbing per-request headers into its defaults, which could leak headers (including credentials) across requests built from the same template.
+- `Request` now copies headers passed to its constructor instead of holding (and potentially mutating) the caller's `HttpHeaders` instance.
+- `Errno::ETIMEDOUT` is now treated as a connection error, evicting the pooled client and classifying the `RequestError` as `:connection`.
+- `RedirectError.load` validates that the serialized error class is a `RedirectError` subclass instead of instantiating an arbitrary class name from the payload.
+- Fixed the Redis payload store documentation to use the `redis` gem interface (`Redis.new`); the previously documented `RedisClient` does not respond to the methods the store calls.
+
 ## 1.1.2
 
 ### Added

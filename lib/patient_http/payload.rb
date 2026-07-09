@@ -89,7 +89,7 @@ module PatientHttp
         return Encoding::ASCII_8BIT.name unless match
 
         begin
-          Encoding.find(match[1])
+          Encoding.find(match[1]).name
         rescue
           Encoding::ASCII_8BIT.name
         end

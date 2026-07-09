@@ -175,6 +175,42 @@ RSpec.describe PatientHttp::Processor do
       processor.drain
       expect(processor).to be_stopped
     end
+
+    it "cannot be restarted while draining" do
+      processor.run do
+        processor.drain
+        reactor_thread = processor.instance_variable_get(:@reactor_thread)
+
+        processor.start
+
+        expect(processor).to be_draining
+        expect(processor.instance_variable_get(:@reactor_thread)).to eq(reactor_thread)
+      end
+    end
+  end
+
+  describe "#observe" do
+    it "allows observers to call back into the processor" do
+      observer_class = Class.new(PatientHttp::ProcessorObserver) do
+        attr_reader :count_at_start
+
+        def initialize(processor)
+          @processor = processor
+          @count_at_start = nil
+        end
+
+        def start
+          @count_at_start = @processor.total_count
+        end
+      end
+
+      observer = observer_class.new(processor)
+
+      processor.run do
+        processor.observe(observer)
+        expect(observer.count_at_start).to eq(0)
+      end
+    end
   end
 
   describe "#enqueue" do

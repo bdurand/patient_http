@@ -333,6 +333,43 @@ RSpec.describe PatientHttp::Client do
       end
     end
 
+    context "with preprocessors" do
+      let(:request) do
+        PatientHttp::Request.new(
+          :get,
+          "https://api.example.com/users",
+          headers: {"Authorization" => "Bearer token123"},
+          preprocessors: :signer
+        )
+      end
+
+      before do
+        config.register_preprocessor(:signer) do |outgoing|
+          outgoing.headers["x-signature"] = "#{outgoing.http_method}:#{outgoing.url}:#{outgoing.headers["x-request-id"]}"
+          outgoing.headers["x-signed-date"] = "2026-07-02"
+          outgoing.add_param("signed", "true")
+        end
+      end
+
+      it "applies the preprocessor's header and query param changes to the outgoing request" do
+        stub_request(:get, "https://api.example.com/users?signed=true")
+          .with(headers: {
+            "Authorization" => "Bearer token123",
+            "User-Agent" => "TestAgent/1.0",
+            "X-Request-Id" => request_id,
+            "X-Signature" => "get:https://api.example.com/users:#{request_id}",
+            "X-Signed-Date" => "2026-07-02"
+          })
+          .to_return(status: 200, body: "OK")
+
+        result = Async do
+          client.make_request(request, request_id)
+        end.wait
+
+        expect(result[:status]).to eq(200)
+      end
+    end
+
     context "when network error occurs" do
       it "raises the error" do
         stub_request(:get, "https://api.example.com/users")

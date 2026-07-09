@@ -94,6 +94,9 @@ module PatientHttp
       @secrets = {}
       @secret_manager = SecretManager.new
 
+      # Initialize preprocessor registry
+      @preprocessors = {}
+
       @encryptor = nil
 
       self.max_connections = max_connections
@@ -271,6 +274,43 @@ module PatientHttp
       end
     end
 
+    # Register a named preprocessor that can be attached to requests to modify them
+    # just before they are sent -- for example, to sign requests.
+    #
+    # The preprocessor can be provided as a callable or a block taking a single
+    # argument. When a request that references the preprocessor is sent, it is
+    # invoked with an {OutgoingRequest} after secret references have been resolved
+    # and the x-request-id and default user-agent headers have been set. It can
+    # change the request headers and append query parameters.
+    #
+    # Requests reference preprocessors by name only, so the callable (and any
+    # credentials it uses) stays on the processor side and is never serialized.
+    #
+    # @param name [String, Symbol] the preprocessor name
+    # @param callable [#call, nil] object invoked with the outgoing request (omit when providing a block)
+    # @yield [outgoing_request] a block invoked with the outgoing request (omit when providing a callable)
+    # @raise [ArgumentError] if neither or both of callable and block are provided, or
+    #   if the preprocessor cannot be called with a single argument
+    # @return [void]
+    def register_preprocessor(name, callable = nil, &block)
+      preprocessor = resolve_callable(:preprocessor, callable, &block)
+      raise ArgumentError.new("register_preprocessor requires a callable or a block") if preprocessor.nil?
+
+      validate_preprocessor_parameters!(preprocessor)
+
+      @mutex.synchronize do
+        @preprocessors = @preprocessors.merge(name.to_s => preprocessor)
+      end
+    end
+
+    # Get a registered preprocessor by name.
+    #
+    # @param name [String, Symbol] the preprocessor name
+    # @return [#call, nil] the preprocessor or nil if not registered
+    def preprocessor(name)
+      @preprocessors[name.to_s]
+    end
+
     # Register a payload store for external storage of large payloads.
     #
     # The name is included in the serialized references to the stored data.
@@ -350,7 +390,8 @@ module PatientHttp
         "protocol" => protocol,
         "payload_stores" => payload_stores.keys,
         "default_payload_store" => default_payload_store_name,
-        "secrets" => @mutex.synchronize { @secrets.keys }
+        "secrets" => @mutex.synchronize { @secrets.keys },
+        "preprocessors" => @mutex.synchronize { @preprocessors.keys }
       }
     end
 
@@ -366,6 +407,20 @@ module PatientHttp
       end
 
       callable || block
+    end
+
+    # Validate that a preprocessor can be invoked with a single positional argument.
+    def validate_preprocessor_parameters!(preprocessor)
+      method_obj = preprocessor.is_a?(Proc) ? preprocessor : preprocessor.method(:call)
+      parameters = method_obj.parameters
+
+      positional = parameters.count { |type, _| %i[req opt rest].include?(type) }
+      required = parameters.count { |type, _| type == :req }
+      required_keywords = parameters.count { |type, _| type == :keyreq }
+
+      if positional.zero? || required > 1 || required_keywords.positive?
+        raise ArgumentError.new("preprocessor must accept a single argument")
+      end
     end
 
     def validate_positive(attribute, value)

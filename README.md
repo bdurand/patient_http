@@ -281,6 +281,8 @@ error = PatientHttp::HttpError.load(json_data)
 
 The `Response` object includes the HTTP status code, headers, body, and callback arguments. Error objects (`HttpError`, `RedirectError`, `RequestError`) include the error message, context about the request, and callback arguments.
 
+Response headers are case insensitive. Headers that appear multiple times in the response (such as `set-cookie`) are flattened into a single joined string value.
+
 Response bodies are automatically encoded for JSON serialization. Binary content is Base64 encoded, and large text content is gzipped and then Base64 encoded to reduce payload size. Decoding is handled transparently when you access the `body` or `json` methods on the `Response` object.
 
 ### Payload Stores
@@ -321,10 +323,10 @@ config.register_payload_store(:files, adapter: :file, directory: "/tmp/payloads"
 
 #### Redis Store
 
-For production with shared state across processes:
+For production with shared state across processes (requires the `redis` gem; the client must respond to `set`, `get`, `del`, and `exists`):
 
 ```ruby
-redis = RedisClient.new(url: ENV["REDIS_URL"])
+redis = Redis.new(url: ENV["REDIS_URL"])
 config.register_payload_store(:redis, adapter: :redis, redis: redis, ttl: 86400)
 ```
 
@@ -501,7 +503,7 @@ config.register_secret(:authorization, "Bearer #{ENV['API_TOKEN']}") # static va
 config.register_secret(:api_key) { ENV["MY_API_KEY"] } # lazy block
 ```
 
-I a secret is not found when resolving a request, a `PatientHttp::SecretManager::SecretNotFoundError` is raised, which surfaces through the normal request error path.
+If a secret is not found when resolving a request, a `PatientHttp::SecretManager::SecretNotFoundError` is raised, which surfaces through the normal request error path.
 
 ### Referencing secrets when building a request
 
@@ -517,6 +519,59 @@ PatientHttp.get(
 ```
 
 The request serializes the secret header as `{"$secret" => "api_token"}` and keeps the secret query parameter out of the URL (non-secret params like `page` are still folded into the URL as usual). The processor dereferences both just before sending: the header is set to its resolved value and the resolved query parameter is appended to the URL.
+
+## Request Preprocessors
+
+Preprocessors let you modify a request just before it is sent — most usefully, to sign it. Signing schemes like AWS SigV4 need to compute values over the final outgoing request (method, URL, headers, body) and set multiple headers, which cannot be expressed as a static header value at build time.
+
+Like secrets, preprocessors are registered on the `Configuration` and referenced from requests by name only. The serialized request carries just the name, so the signing logic and its credentials live on the processor side and are never written to the job queue.
+
+### Defining preprocessors
+
+Register a named preprocessor as a block or callable taking a single argument:
+
+```ruby
+config = PatientHttp::Configuration.new
+config.register_preprocessor(:aws_sigv4) do |request|
+  signer = Aws::Sigv4::Signer.new(
+    service: "execute-api",
+    region: "us-east-1",
+    credentials_provider: Aws::CredentialProviderChain.new.resolve
+  )
+  signature = signer.sign_request(
+    http_method: request.http_method.to_s.upcase,
+    url: request.url,
+    headers: request.headers.to_h,
+    body: request.body.to_s
+  )
+  signature.headers.each { |name, value| request.headers[name] = value }
+end
+```
+
+The argument is a `PatientHttp::OutgoingRequest` — a view of the request as it is about to be sent, after all secret references have been resolved and the `x-request-id` and default `User-Agent` headers have been set. It exposes:
+
+- `http_method`, `url`, and `body` (read-only; the URL includes any resolved secret query params)
+- `headers` — mutable, case-insensitive headers
+- `add_param(name, value)` — appends a query parameter to the URL, for signed-query-param schemes
+
+### Attaching preprocessors to a request
+
+Reference registered preprocessors by name when building a request:
+
+```ruby
+PatientHttp.post(
+  "https://api.example.com/data",
+  callback: MyCallback,
+  json: {value: 1},
+  preprocessors: :aws_sigv4
+)
+```
+
+Multiple preprocessors can be given as an array; they run in order, each seeing the changes made by the ones before it. `RequestTemplate` also accepts `preprocessors:` as a template-wide default.
+
+If a request references a preprocessor name that is not registered, a `PatientHttp::RequestPreparer::PreprocessorNotFoundError` is raised, which surfaces through the normal request error path.
+
+When redirects are followed, preprocessors are re-run against each redirect URL so signatures stay valid. On cross-origin redirects they are dropped entirely, consistent with the stripping of `Authorization` and `Cookie` headers, so signed credentials are never sent to an unexpected origin.
 
 ## Configuration
 

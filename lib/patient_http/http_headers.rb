@@ -88,6 +88,13 @@ module PatientHttp
       @headers.include?(name.to_s.downcase)
     end
 
+    # Ensure copies do not share the underlying storage so that mutating a
+    # copy (for example, via #merge) does not modify the original.
+    def initialize_copy(other)
+      super
+      @headers = @headers.dup
+    end
+
     def eql?(other)
       other.is_a?(HttpHeaders) && @headers.eql?(other.to_h)
     end

@@ -41,6 +41,20 @@ RSpec.describe PatientHttp::RedirectError do
       expect(error.url).to eq("https://example.com/cycle")
       expect(error.http_method).to eq(:post)
     end
+
+    it "raises an error if the error class is not a RedirectError" do
+      hash = {
+        "error_class" => "PatientHttp::Response",
+        "url" => "https://example.com/final",
+        "http_method" => "get",
+        "duration" => 1.0,
+        "request_id" => "req-789",
+        "redirects" => [],
+        "callback_args" => {}
+      }
+
+      expect { described_class.load(hash) }.to raise_error(ArgumentError, /Invalid redirect error class/)
+    end
   end
 end
 

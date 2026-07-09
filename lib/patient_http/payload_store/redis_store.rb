@@ -10,8 +10,11 @@ module PatientHttp
     #
     # Thread-safe: Redis clients handle their own thread safety.
     #
+    # The client must respond to `set`, `get`, `del`, and `exists` (the
+    # interface provided by the `redis` gem).
+    #
     # @example Configuration with direct Redis client
-    #   redis = RedisClient.new(url: ENV["REDIS_URL"])
+    #   redis = Redis.new(url: ENV["REDIS_URL"])
     #   config.register_payload_store(:redis, adapter: :redis, redis: redis, ttl: 86400)
     class RedisStore < Base
       Base.register :redis, self

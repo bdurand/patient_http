@@ -338,6 +338,32 @@ RSpec.describe PatientHttp::RequestTask do
       expect(redirect_task.max_redirects).to eq(3)
     end
 
+    it "preserves preprocessors on same-origin redirects" do
+      request = PatientHttp::Request.new(:get, "https://api.example.com/users", preprocessors: :signer)
+      task = described_class.new(
+        request: request,
+        task_handler: task_handler,
+        callback: callback
+      )
+
+      redirect_task = task.redirect_task(location: "https://api.example.com/new-location", status: 302)
+
+      expect(redirect_task.request.preprocessors).to eq(["signer"])
+    end
+
+    it "drops preprocessors on cross-origin redirects" do
+      request = PatientHttp::Request.new(:get, "https://api.example.com/users", preprocessors: :signer)
+      task = described_class.new(
+        request: request,
+        task_handler: task_handler,
+        callback: callback
+      )
+
+      redirect_task = task.redirect_task(location: "https://other.example.com/new-location", status: 302)
+
+      expect(redirect_task.request.preprocessors).to eq([])
+    end
+
     context "with 301, 302, 303 redirects" do
       it "converts POST to GET and removes body for 301" do
         task = described_class.new(

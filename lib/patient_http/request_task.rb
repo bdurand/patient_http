@@ -213,12 +213,11 @@ module PatientHttp
       # Resolve the redirect URL (handle relative URLs)
       redirect_url = resolve_redirect_url(location)
 
-      # Strip sensitive headers on cross-origin redirects to prevent credential leakage
-      redirect_headers = if cross_origin?(request.url, redirect_url)
-        request.headers.except(*SENSITIVE_HEADERS)
-      else
-        request.headers
-      end
+      # Strip sensitive headers and preprocessors on cross-origin redirects to
+      # prevent credential leakage
+      cross_origin = cross_origin?(request.url, redirect_url)
+      redirect_headers = cross_origin ? request.headers.except(*SENSITIVE_HEADERS) : request.headers
+      redirect_preprocessors = cross_origin ? [] : request.preprocessors
 
       # Create a new request for the redirect
       redirect_request = Request.new(
@@ -227,7 +226,8 @@ module PatientHttp
         headers: redirect_headers,
         body: redirect_body,
         timeout: request.timeout,
-        max_redirects: request.max_redirects
+        max_redirects: request.max_redirects,
+        preprocessors: redirect_preprocessors
       )
 
       redirect_task_id = "#{id.split("/").first}/#{@redirects.size + 2}"
