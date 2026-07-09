@@ -92,6 +92,15 @@ module PatientHttp
       @started_at = monotonic_time
     end
 
+    # Return true if the task has started processing (i.e. {#started!} was
+    # called). Used to keep observer request_start/request_end notifications
+    # balanced when a task is re-enqueued during shutdown.
+    #
+    # @return [Boolean]
+    def started?
+      !@started_at.nil?
+    end
+
     # Returns the wall clock time when the task was enqueued.
     #
     # @return [Time, nil] The enqueued time or nil if not enqueued.

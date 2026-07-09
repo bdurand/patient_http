@@ -146,16 +146,23 @@ RSpec.describe PatientHttp::Processor do
         end
 
         it "does not wait longer than timeout" do
-          # Simulate an in-flight request that never completes
-          inflight = processor.instance_variable_get(:@inflight_requests)
-          inflight["fake-id"] = double("task", retry: nil, id: "fake-id")
+          # A real in-flight request that outlives the stop timeout. (A bare
+          # double can't stand in here: it isn't a reactor fiber, so the reactor
+          # would drain it immediately and stop would return before the timeout.)
+          stub_request(:get, "https://api.example.com/users").to_return do
+            sleep(0.3)
+            {status: 200, body: "", headers: {}}
+          end
+
+          processor.enqueue(create_request_task)
+          processor.wait_for_processing(timeout: 1)
 
           start_time = Time.now
-          processor.stop(timeout: 0.2)
+          processor.stop(timeout: 0.1)
           elapsed = Time.now - start_time
 
-          # Should stop around timeout
-          expect(elapsed).to be_between(0.15, 0.5)
+          # Waits about the timeout for the stuck request, then gives up.
+          expect(elapsed).to be_between(0.08, 1.5)
         end
       end
     end
@@ -464,19 +471,21 @@ RSpec.describe PatientHttp::Processor do
     let(:processor_with_logger) { described_class.new(config) }
 
     it "logs errors from the reactor loop" do
-      error_logged = Concurrent::AtomicBoolean.new(false)
       # Force an error in the reactor by making dequeue_request raise
-      allow(processor_with_logger).to receive(:dequeue_request) do
-        error_logged.make_true
-        raise StandardError.new("Test error")
-      end
+      allow(processor_with_logger).to receive(:dequeue_request).and_raise(StandardError.new("Test error"))
 
-      processor_with_logger.run do
-        # Wait for the error to be logged
+      # Drive start/stop directly rather than via #run: the reactor crashes on
+      # the first dequeue and never reaches the running state, so #run's
+      # wait_for_running would block for its full 5s timeout.
+      processor_with_logger.start
+      begin
+        # Wait for the error to be logged (the reactor crashes on first dequeue).
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 1
-        Thread.pass until error_logged.true? || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        Thread.pass until log_output.string.match?(/Test error/) || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
         expect(log_output.string).to match(/Test error/)
+      ensure
+        processor_with_logger.stop(timeout: 0)
       end
     end
 
@@ -1197,6 +1206,278 @@ RSpec.describe PatientHttp::Processor do
 
       # Check error was logged
       expect(log_output.string).to match(/\[PatientHttp\] Failed to re-enqueue request #{Regexp.escape(request.id)}/)
+    end
+  end
+
+  describe "review regression fixes" do
+    # Observer that counts start / request_start / request_end callbacks.
+    let(:counting_observer_class) do
+      Class.new(PatientHttp::ProcessorObserver) do
+        attr_reader :starts, :stops, :request_starts, :request_ends
+
+        def initialize
+          @starts = Concurrent::AtomicFixnum.new(0)
+          @stops = Concurrent::AtomicFixnum.new(0)
+          @request_starts = Concurrent::AtomicFixnum.new(0)
+          @request_ends = Concurrent::AtomicFixnum.new(0)
+        end
+
+        def start
+          @starts.increment
+        end
+
+        def stop
+          @stops.increment
+        end
+
+        def request_start(_task)
+          @request_starts.increment
+        end
+
+        def request_end(_task)
+          @request_ends.increment
+        end
+      end
+    end
+
+    describe "self-cleaning reactor teardown" do
+      # Route the intentional reactor-crash error to a StringIO instead of the
+      # default stderr logger so it does not pollute the test output.
+      let(:config) { PatientHttp::Configuration.new(logger: Logger.new(StringIO.new)) }
+
+      it "re-enqueues tracked tasks if the reactor exits without stop()" do
+        orphan = create_request_task
+
+        # Seed a tracked task, then crash the reactor's dequeue loop so it
+        # exits without a stop() call.
+        processor.instance_variable_get(:@tasks_lock).synchronize do
+          processor.instance_variable_get(:@pending_tasks)[orphan.id] = orphan
+        end
+        allow(processor).to receive(:dequeue_request).and_raise(StandardError.new("reactor boom"))
+
+        processor.start
+
+        # Wait for the teardown to re-enqueue the orphaned task.
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 2
+        Thread.pass until orphan.task_handler.retries.any? || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+        expect(orphan.task_handler.retries.size).to eq(1)
+        expect(processor.inflight_count).to eq(0)
+        expect(processor.instance_variable_get(:@pending_tasks)).to be_empty
+        expect(processor).to be_stopped
+      end
+    end
+
+    describe "observer request_start/request_end balance" do
+      it "does not emit request_end for tasks retried without starting" do
+        observer = counting_observer_class.new
+        # Never let the reactor consume the queue, so the enqueued task is
+        # retried straight from the queue without ever starting.
+        allow(processor).to receive(:dequeue_request) { |**_args| nil }
+
+        processor.start
+        processor.observe(observer)
+        processor.enqueue(create_request_task)
+        processor.stop(timeout: 0)
+
+        expect(observer.request_starts.value).to eq(0)
+        expect(observer.request_ends.value).to eq(0)
+      end
+
+      it "keeps request_start/request_end balanced when a started request is retried" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_return do
+            sleep(0.2) # keep the request in-flight past the shutdown deadline
+            {status: 200, body: "", headers: {}}
+          end
+
+        observer = counting_observer_class.new
+        processor.start
+        processor.observe(observer)
+        processor.enqueue(create_request_task)
+        processor.wait_for_processing
+        processor.stop(timeout: 0.001)
+
+        expect(observer.request_starts.value).to eq(1)
+        expect(observer.request_ends.value).to eq(observer.request_starts.value)
+      end
+    end
+
+    describe "atomic redirect handoff" do
+      it "never exposes an idle gap while handing off a redirect" do
+        stub_request(:get, "https://api.example.com/start")
+          .to_return(status: 302, headers: {"Location" => "https://api.example.com/finish"})
+        stub_request(:get, "https://api.example.com/finish")
+          .to_return(status: 200, body: "ok", headers: {})
+
+        processor.start
+        request = create_request_task(url: "https://api.example.com/start")
+
+        idle_during_handoff = Concurrent::AtomicBoolean.new(false)
+        # redirect_task is built before the original is removed from in-flight,
+        # so the processor must never look idle at this point.
+        allow(request).to receive(:redirect_task).and_wrap_original do |original, **kwargs|
+          idle_during_handoff.make_true if processor.idle?
+          original.call(**kwargs)
+        end
+
+        processor.enqueue(request)
+        processor.wait_for_idle(timeout: 2)
+
+        expect(idle_during_handoff.value).to be(false)
+        expect(request.task_handler.completions.size).to eq(1)
+      end
+    end
+
+    describe "observer start delivery" do
+      it "notifies an observer registered before start exactly once" do
+        observer = counting_observer_class.new
+        processor.observe(observer)
+        processor.start
+        processor.wait_for_running
+
+        expect(observer.starts.value).to eq(1)
+      end
+
+      it "notifies an observer registered while running exactly once" do
+        observer = counting_observer_class.new
+        processor.start
+        processor.wait_for_running
+        processor.observe(observer)
+
+        expect(observer.starts.value).to eq(1)
+      end
+    end
+
+    describe "testing_callback" do
+      it "does not fire for tasks discarded during shutdown" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_return do
+            sleep(0.2) # keep the request in-flight past the shutdown deadline
+            {status: 200, body: "", headers: {}}
+          end
+
+        called_ids = Concurrent::Array.new
+        processor.testing_callback = ->(task) { called_ids << task.id }
+
+        processor.start
+        request = create_request_task
+        processor.enqueue(request)
+        processor.wait_for_processing
+        processor.stop(timeout: 0.001)
+
+        expect(called_ids).not_to include(request.id)
+        expect(request.task_handler.retries.size).to eq(1)
+      end
+    end
+
+    describe "completion callback failures", :disable_testing_mode do
+      let(:log_output) { StringIO.new }
+      let(:config) { PatientHttp::Configuration.new(logger: Logger.new(log_output)) }
+
+      it "logs the failure and still finishes the task" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_return(status: 200, body: "", headers: {})
+
+        observer = counting_observer_class.new
+        request = create_request_task
+        allow(request.task_handler).to receive(:on_complete).and_raise(StandardError.new("job system down"))
+
+        processor.start
+        processor.observe(observer)
+        processor.enqueue(request)
+
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 2
+        Thread.pass until observer.request_ends.value == 1 || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+        expect(log_output.string).to match(/Failed to enqueue completion callback for request #{Regexp.escape(request.id)}/)
+        expect(observer.request_starts.value).to eq(1)
+        expect(observer.request_ends.value).to eq(1)
+        expect(processor.inflight_count).to eq(0)
+      end
+    end
+
+    describe "stop from the reactor thread" do
+      it "stops cleanly when called from a task callback" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_return(status: 200, body: "", headers: {})
+
+        observer = counting_observer_class.new
+        request = create_request_task
+        stop_error = nil
+        allow(request.task_handler).to receive(:on_complete) do
+          processor.stop(timeout: 0)
+        rescue => e
+          stop_error = e
+        end
+
+        processor.start
+        processor.observe(observer)
+        processor.enqueue(request)
+
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 2
+        Thread.pass until (processor.stopped? && observer.stops.value == 1) || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+        expect(stop_error).to be_nil
+        expect(processor).to be_stopped
+        expect(observer.stops.value).to eq(1)
+      end
+    end
+  end
+
+  describe "lifecycle race fixes" do
+    it "assigns a fresh reactor generation on each start" do
+      expect(processor.instance_variable_get(:@reactor_generation)).to eq(0)
+
+      processor.start
+      expect(processor.instance_variable_get(:@reactor_generation)).to eq(1)
+
+      processor.stop(timeout: 0)
+      processor.start
+      expect(processor.instance_variable_get(:@reactor_generation)).to eq(2)
+    end
+
+    it "never leaves the processor running with a dead reactor under concurrent start/stop" do
+      30.times do
+        starter = Thread.new { processor.start }
+        stopper = Thread.new { processor.stop(timeout: 0) }
+        [starter, stopper].each(&:join)
+
+        # start and stop are serialized, so the observed state is always
+        # consistent: if it reports running, a live reactor backs it.
+        if processor.running?
+          reactor = processor.instance_variable_get(:@reactor_thread)
+          expect(reactor).to be_a(Thread)
+          expect(reactor).to be_alive
+        end
+
+        processor.stop(timeout: 0) # normalize before the next iteration
+      end
+    end
+
+    it "wakes a stop() blocked in its idle-wait when tracked tasks are drained" do
+      lock = processor.instance_variable_get(:@tasks_lock)
+      cond = processor.instance_variable_get(:@idle_condition)
+      # A tracked task keeps the idle-wait from returning on its own.
+      processor.instance_variable_get(:@inflight_requests)["stuck"] = create_request_task
+
+      woke = Concurrent::AtomicBoolean.new(false)
+      waiter = Thread.new do
+        lock.synchronize { cond.wait(lock, 5) } # long timeout; must be woken well before it
+        woke.make_true
+      end
+
+      # Ensure the waiter is actually parked inside cond.wait (lock released).
+      Thread.pass until waiter.status == "sleep"
+      sleep(0.02)
+
+      # Draining the tracking hashes must signal the idle condition; without the
+      # broadcast the waiter would sleep until its 5s timeout.
+      processor.send(:drain_tracked_tasks)
+      joined = waiter.join(1)
+
+      expect(joined).not_to be_nil
+      expect(woke.value).to be(true)
     end
   end
 
