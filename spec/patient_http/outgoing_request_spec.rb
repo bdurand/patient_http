@@ -50,7 +50,16 @@ RSpec.describe PatientHttp::OutgoingRequest do
   end
 
   describe "#inspect" do
-    it "shows the method, url without the query string, and header names" do
+    let(:outgoing) do
+      described_class.new(
+        http_method: :post,
+        url: "https://user:pass@api.example.com/users?page=2",
+        headers: headers,
+        body: '{"name":"Alice"}'
+      )
+    end
+
+    it "shows the method, url without the query string or credentials, and header names" do
       value = outgoing.inspect
       expect(value).to include("POST")
       expect(value).to include("https://api.example.com/users")

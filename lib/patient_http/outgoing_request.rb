@@ -62,6 +62,8 @@ module PatientHttp
     def redacted_url
       uri = URI(@url)
       uri.query = nil
+      uri.user = nil
+      uri.password = nil
       uri.to_s
     rescue URI::InvalidURIError
       "<invalid url>"
