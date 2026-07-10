@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
-# S3/Minio test helpers
+# S3 test helpers
 #
-# This helper provides access to a Minio-based S3 bucket for testing.
-# Requires the minio docker container to be running on port 24456.
+# This helper provides access to an S3-compatible bucket for testing.
+# Requires the s3mock docker container to be running on port 24456.
 
 module S3Helper
-  MINIO_ENDPOINT = ENV.fetch("MINIO_ENDPOINT", "http://127.0.0.1:24456")
-  MINIO_ACCESS_KEY = ENV.fetch("MINIO_ACCESS_KEY", "minioadmin")
-  MINIO_SECRET_KEY = ENV.fetch("MINIO_SECRET_KEY", "minioadmin")
+  S3_ENDPOINT = ENV.fetch("S3_ENDPOINT", "http://127.0.0.1:24456")
+  S3_ACCESS_KEY = ENV.fetch("S3_ACCESS_KEY", "s3mock")
+  S3_SECRET_KEY = ENV.fetch("S3_SECRET_KEY", "s3mock")
   TEST_BUCKET_NAME = ENV.fetch("S3_TEST_BUCKET", "test-payloads")
 
   class << self
@@ -29,9 +29,9 @@ module S3Helper
       @s3_client ||= begin
         require "aws-sdk-s3"
         Aws::S3::Client.new(
-          endpoint: MINIO_ENDPOINT,
-          access_key_id: MINIO_ACCESS_KEY,
-          secret_access_key: MINIO_SECRET_KEY,
+          endpoint: S3_ENDPOINT,
+          access_key_id: S3_ACCESS_KEY,
+          secret_access_key: S3_SECRET_KEY,
           region: "us-east-1",
           force_path_style: true
         )

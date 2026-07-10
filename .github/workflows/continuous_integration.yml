@@ -11,13 +11,6 @@ on:
     branches-ignore:
       - actions-*
 
-env:
-  BUNDLE_CLEAN: "true"
-  BUNDLE_PATH: vendor/bundle
-  BUNDLE_JOBS: 3
-  BUNDLE_RETRY: 3
-  RUBYOPT: '--enable=frozen-string-literal --debug=frozen-string-literal'
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,6 +21,17 @@ jobs:
           - 24455:6379
         options: >-
           --health-cmd "valkey-cli ping"
+          --health-interval 1s
+          --health-timeout 5s
+          --health-retries 10
+      s3mock:
+        image: adobe/s3mock:latest
+        ports:
+          - 24456:9090
+        env:
+          COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: test-payloads
+        options: >-
+          --health-cmd "wget -q -O /dev/null http://localhost:9090/favicon.ico"
           --health-interval 1s
           --health-timeout 5s
           --health-retries 10
@@ -47,60 +51,13 @@ jobs:
           - ruby: "4.0"
             appraisal: "redis_5"
     steps:
-    - uses: actions/checkout@v6
-    - name: Start MinIO
-      run: |
-        docker run -d \
-          --name minio \
-          -p 24456:9000 \
-          -e MINIO_ROOT_USER=minioadmin \
-          -e MINIO_ROOT_PASSWORD=minioadmin \
-          minio/minio server /data --console-address ":9001"
-        echo "Waiting for MinIO to be ready..."
-        max_attempts=20
-        attempt=0
-        while [ $attempt -lt $max_attempts ]; do
-          if curl -sf http://localhost:24456/minio/health/live > /dev/null 2>&1; then
-            echo "MinIO is ready after $attempt attempts"
-            exit 0
-          fi
-          attempt=$((attempt + 1))
-          echo "Attempt $attempt/$max_attempts - MinIO not ready yet"
-          sleep 1
-        done
-        echo "MinIO failed to start within $max_attempts seconds"
-        docker logs minio
-        exit 1
-        if [ $elapsed -ge $timeout ]; then
-          echo "MinIO failed to start within ${timeout} seconds"
-          exit 1
-        fi
-    - name: Set up Ruby ${{ matrix.ruby }}
-      uses: ruby/setup-ruby@v1
-      with:
-        ruby-version: "${{ matrix.ruby }}"
-    - name: Install packages
-      run: |
-        sudo apt-get update
-        sudo apt-get install libsqlite3-dev
-    - name: Setup bundler
-      if: matrix.bundler != ''
-      run: |
-        gem uninstall bundler --all
-        gem install bundler --no-document --version ${{ matrix.bundler }}
-    - name: Set Appraisal bundle
-      if: matrix.appraisal != ''
-      run: |
-        echo "using gemfile gemfiles/${{ matrix.appraisal }}.gemfile"
-        bundle config set gemfile "gemfiles/${{ matrix.appraisal }}.gemfile"
-    - name: Install gems
-      run: |
-        bundle install
-    - name: Run Tests
-      run: bundle exec rake
-    - name: standardrb
-      if:   matrix.standardrb == true
-      run:  bundle exec standardrb
-    - name: yard
-      if: matrix.yard == true
-      run:  bundle exec yard doc --fail-on-warning
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Ruby CI
+        uses: bdurand/github-actions/ruby-ci@v1.0.1
+        with:
+          ruby: ${{ matrix.ruby }}
+          appraisal: ${{ matrix.appraisal }}
+          bundler: ${{ matrix.bundler }}
+          standardrb: ${{ matrix.standardrb }}
+          yard: ${{ matrix.yard }}
