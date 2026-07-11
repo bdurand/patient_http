@@ -51,6 +51,7 @@ module PatientHttp
   autoload :ExternalStorage, File.join(__dir__, "patient_http/external_storage")
   autoload :HttpError, File.join(__dir__, "patient_http/http_error")
   autoload :HttpHeaders, File.join(__dir__, "patient_http/http_headers")
+  autoload :InlineTaskHandler, File.join(__dir__, "patient_http/inline_task_handler")
   autoload :LifecycleManager, File.join(__dir__, "patient_http/lifecycle_manager")
   autoload :OutgoingRequest, File.join(__dir__, "patient_http/outgoing_request")
   autoload :Payload, File.join(__dir__, "patient_http/payload")
@@ -78,6 +79,11 @@ module PatientHttp
   @testing = %w[RAILS_ENV RACK_ENV APP_ENV].any? { |var| ENV[var] == "test" }
   @handler = nil
   @handler_mutex = Monitor.new
+  @inline_handler = nil
+  @default_configuration = nil
+  @inline_configuration = nil
+  @module_secrets = {}
+  @config_mutex = Monitor.new
 
   class << self
     # Check if running in testing mode.
@@ -151,6 +157,81 @@ module PatientHttp
       @handler_mutex.synchronize do
         @handler = nil if @handler == handler || handler.nil?
       end
+    end
+
+    # Registers a request handler that executes requests inline (synchronously,
+    # in-process) instead of dispatching them to a job system.
+    #
+    # This is intended for consoles, tests, and development environments where no
+    # job-system integration gem is configured. Each request runs through
+    # {SynchronousExecutor} and the callback is invoked on the calling thread
+    # before the handler returns.
+    #
+    # @param config [Configuration, nil] configuration to execute requests against.
+    #   Defaults to {.default_configuration}, or a lazily created configuration that
+    #   includes any secrets registered with {.register_secret}.
+    # @return [void]
+    def inline!(config: nil)
+      handler = lambda do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+        execute_inline(
+          request: request,
+          callback: callback,
+          callback_args: callback_args,
+          raise_error_responses: raise_error_responses,
+          config: config
+        )
+      end
+
+      @handler_mutex.synchronize do
+        register_handler(handler)
+        @inline_handler = handler
+      end
+    end
+
+    # Check if the currently registered handler is the inline handler registered
+    # by {.inline!}.
+    #
+    # @return [Boolean]
+    def inline?
+      @handler_mutex.synchronize { !@handler.nil? && @handler.equal?(@inline_handler) }
+    end
+
+    # Check if a request handler is registered.
+    #
+    # @return [Boolean]
+    def handler_registered?
+      @handler_mutex.synchronize { !@handler.nil? }
+    end
+
+    # Executes a request inline (synchronously, in-process) through
+    # {SynchronousExecutor}, invoking the callback with the response or error
+    # before returning.
+    #
+    # @param request [Request] the HTTP request to execute
+    # @param callback [Class, String] the callback class or name
+    # @param callback_args [Hash, nil] JSON-compatible callback arguments
+    # @param raise_error_responses [Boolean, nil] when true, non-success responses are
+    #   reported as errors; defaults to the configuration's setting
+    # @param config [Configuration, nil] configuration to execute the request against.
+    #   Defaults to {.default_configuration}, or a lazily created configuration that
+    #   includes any secrets registered with {.register_secret}.
+    # @return [String] the request id
+    def execute_inline(request:, callback:, callback_args: nil, raise_error_responses: nil, config: nil)
+      config ||= default_configuration || inline_configuration
+      raise_error_responses = config.raise_error_responses if raise_error_responses.nil?
+
+      task = RequestTask.new(
+        request: request,
+        task_handler: InlineTaskHandler.new,
+        callback: callback,
+        callback_args: callback_args,
+        raise_error_responses: raise_error_responses,
+        default_max_redirects: config.max_redirects
+      )
+
+      SynchronousExecutor.new(task, config: config).call
+
+      task.id
     end
 
     # Executes the registered request handler with the given request parameters.
@@ -287,7 +368,92 @@ module PatientHttp
       SecretReference.new(name)
     end
 
+    # Register a named secret at the module level, independent of any configuration.
+    #
+    # Secrets registered here are applied to the {.default_configuration} (immediately
+    # if one is already set, or when one is set later) and to the configuration used
+    # for inline execution. This makes boot order irrelevant: application code can
+    # register secrets before or after the job-system integration gem configures the
+    # processor.
+    #
+    # @param name [String, Symbol] the secret name
+    # @param value [Object, nil] the secret value (omit when providing a block)
+    # @yield [name] a block that returns the secret value (omit when providing a value)
+    # @raise [ArgumentError] if neither or both of value and block are provided
+    # @return [void]
+    # @see Configuration#register_secret
+    def register_secret(name, value = nil, &block)
+      if value.nil? && block.nil?
+        raise ArgumentError.new("register_secret requires a value or a block")
+      end
+
+      if !value.nil? && block
+        raise ArgumentError.new("register_secret accepts either a value or a block, not both")
+      end
+
+      @config_mutex.synchronize do
+        secret_value = block || value
+        @module_secrets[name.to_s] = secret_value
+        @default_configuration&.register_secret(name, secret_value)
+        @inline_configuration&.register_secret(name, secret_value)
+      end
+    end
+
+    # Check if a secret name is registered, either at the module level via
+    # {.register_secret} or on the {.default_configuration}.
+    #
+    # @param name [String, Symbol] the secret name
+    # @return [Boolean]
+    def secret_registered?(name)
+      @config_mutex.synchronize do
+        return true if @module_secrets.include?(name.to_s)
+
+        !@default_configuration.nil? && @default_configuration.secret_manager.include?(name)
+      end
+    end
+
+    # The default configuration used for inline execution when none is provided.
+    # Job-system integration gems should set this at the end of their configure
+    # step so that module-level secrets registered with {.register_secret} are
+    # applied to the configuration the processor runs with.
+    #
+    # @return [Configuration, nil] the default configuration
+    def default_configuration
+      @config_mutex.synchronize { @default_configuration }
+    end
+
+    # Set the default configuration. Any secrets registered with {.register_secret}
+    # are applied to it; the module-level registry is retained, so re-assigning a
+    # new configuration re-applies the same secrets.
+    #
+    # @param config [Configuration, nil] the configuration to use as the default
+    # @return [void]
+    def default_configuration=(config)
+      @config_mutex.synchronize do
+        @default_configuration = config
+        apply_module_secrets(config) if config
+      end
+    end
+
     private
+
+    # The lazily created configuration used for inline execution when no explicit
+    # or default configuration is available. Module-level secrets are applied to it.
+    #
+    # @return [Configuration]
+    def inline_configuration
+      @config_mutex.synchronize do
+        @inline_configuration ||= Configuration.new.tap { |config| apply_module_secrets(config) }
+      end
+    end
+
+    # Apply all module-level secrets to the given configuration.
+    #
+    # @param config [Configuration] the configuration to apply secrets to
+    # @return [void]
+    def apply_module_secrets(config)
+      @module_secrets.each { |name, value| config.register_secret(name, value) }
+    end
 
     # Validates that the handler accepts the required keyword arguments.
     #

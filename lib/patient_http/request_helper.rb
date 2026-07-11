@@ -114,13 +114,16 @@ module PatientHttp
       # @param headers [Hash] default headers for requests
       # @param params [Hash, nil] default query parameters for requests
       # @param timeout [Float] default timeout in seconds
+      # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] default names of
+      #   preprocessors registered on the configuration to apply to requests
       # @return [void]
-      def request_template(base_url: nil, headers: {}, params: nil, timeout: 30)
+      def request_template(base_url: nil, headers: {}, params: nil, timeout: 30, preprocessors: nil)
         @patient_http_request_template = RequestTemplate.new(
           base_url: base_url,
           headers: headers,
           params: params,
-          timeout: timeout
+          timeout: timeout,
+          preprocessors: preprocessors
         )
       end
 
@@ -140,6 +143,8 @@ module PatientHttp
       # @param raise_error_responses [Boolean, nil] when true, non-success responses are
       #   reported as errors
       # @param callback_args [Hash, nil] JSON-compatible callback arguments
+      # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] names of preprocessors
+      #   registered on the configuration to apply to the request when it is sent
       # @return [Object] return value from the registered request handler
       def async_request(
         method,
@@ -151,10 +156,11 @@ module PatientHttp
         params: nil,
         timeout: nil,
         raise_error_responses: nil,
-        callback_args: nil
+        callback_args: nil,
+        preprocessors: nil
       )
         template = async_request_template
-        kwargs = {body: body, json: json, headers: headers, params: params, timeout: timeout}
+        kwargs = {body: body, json: json, headers: headers, params: params, timeout: timeout, preprocessors: preprocessors}
         request = if template
           template.request(method, url, **kwargs)
         else
@@ -198,6 +204,8 @@ module PatientHttp
     # @param raise_error_responses [Boolean, nil] when true, non-success responses are
     #   reported as errors
     # @param callback_args [Hash, nil] JSON-compatible callback arguments
+    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] names of preprocessors
+    #   registered on the configuration to apply to the request when it is sent
     # @return [Object] return value from the registered request handler
     def async_request(
       method,
@@ -209,7 +217,8 @@ module PatientHttp
       params: nil,
       timeout: nil,
       raise_error_responses: nil,
-      callback_args: nil
+      callback_args: nil,
+      preprocessors: nil
     )
       self.class.async_request(
         method,
@@ -221,7 +230,8 @@ module PatientHttp
         params: params,
         timeout: timeout,
         raise_error_responses: raise_error_responses,
-        callback_args: callback_args
+        callback_args: callback_args,
+        preprocessors: preprocessors
       )
     end
 
