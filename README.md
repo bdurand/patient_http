@@ -194,6 +194,30 @@ PatientHttp.get(
 
 If you are using the [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) gem or the [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gem, the appropriate handler will automatically be registered for you.
 
+### Inline Execution
+
+For consoles, tests, and development environments where no job system is configured, you can register a handler that executes requests inline — synchronously, in-process — instead of dispatching them to a queue:
+
+```ruby
+PatientHttp.inline!
+```
+
+Now every request made through the `PatientHttp` interface (or the `RequestHelper` mixin) runs immediately through the full request lifecycle (timeouts, redirects, error wrapping) and invokes its callback on the calling thread before returning. Callbacks can make further requests; those execute inline as well.
+
+```ruby
+PatientHttp.inline!
+PatientHttp.get("https://api.example.com/users/123", callback: FetchUserCallback)
+# FetchUserCallback#on_complete has already been invoked by this point
+```
+
+Inline requests run against `PatientHttp.default_configuration` by default (or a lazily created default configuration that includes any secrets registered with `PatientHttp.register_secret` — see [Secrets](#secrets)). You can also pass an explicit configuration:
+
+```ruby
+PatientHttp.inline!(config: PatientHttp::Configuration.new(raise_error_responses: true))
+```
+
+Use `PatientHttp.inline?` to check whether the inline handler is the currently registered handler. To execute a single request inline without registering a handler, use `PatientHttp.execute_inline(request:, callback:)`.
+
 ### RequestHelper Mixin
 
 Use `PatientHttp::RequestHelper` when you want a simple API for creating and dispatching async HTTP requests directly from your class.
@@ -505,6 +529,23 @@ config.register_secret(:api_key) { ENV["MY_API_KEY"] } # lazy block
 
 If a secret is not found when resolving a request, a `PatientHttp::SecretManager::SecretNotFoundError` is raised, which surfaces through the normal request error path.
 
+#### Module-level registration
+
+If the `Configuration` is owned by an integration gem (patient_http-sidekiq, patient_http-solid_queue), your application code may not have a convenient reference to it — or may load before it exists. In that case, register secrets at the module level instead:
+
+```ruby
+PatientHttp.register_secret(:authorization, "Bearer #{ENV['API_TOKEN']}")
+PatientHttp.register_secret(:api_key) { ENV["MY_API_KEY"] }
+```
+
+Module-level secrets are applied to `PatientHttp.default_configuration` — immediately if one is already set, or as soon as one is set later — so registration order between your application code and the integration gem's configuration does not matter. Integration gems set the default configuration at the end of their configure step; you can also set it yourself:
+
+```ruby
+PatientHttp.default_configuration = config
+```
+
+Use `PatientHttp.secret_registered?(name)` to check whether a secret is available, either at the module level or on the default configuration.
+
 ### Referencing secrets when building a request
 
 Use `PatientHttp.secret(name)` anywhere you would put a sensitive header or query parameter value. No value is needed (or available) at build time:
@@ -567,11 +608,28 @@ PatientHttp.post(
 )
 ```
 
-Multiple preprocessors can be given as an array; they run in order, each seeing the changes made by the ones before it. `RequestTemplate` also accepts `preprocessors:` as a template-wide default.
+Multiple preprocessors can be given as an array; they run in order, each seeing the changes made by the ones before it. `RequestTemplate` and the `RequestHelper` mixin's `request_template` also accept `preprocessors:` as a template-wide default, and the mixin's `async_*` helpers accept `preprocessors:` per request.
 
 If a request references a preprocessor name that is not registered, a `PatientHttp::RequestPreparer::PreprocessorNotFoundError` is raised, which surfaces through the normal request error path.
 
 When redirects are followed, preprocessors are re-run against each redirect URL so signatures stay valid. On cross-origin redirects they are dropped entirely, consistent with the stripping of `Authorization` and `Cookie` headers, so signed credentials are never sent to an unexpected origin.
+
+## Troubleshooting
+
+### Warning: `ThreadError: Attempt to unlock a mutex which is not locked`
+
+On some Ruby versions you may see a warning like this in your logs:
+
+```
+warn: Async::Task: Async::Pool::Controller Gardener [...]
+    | Task may have ended with unhandled exception.
+    |   ThreadError: Attempt to unlock a mutex which is not locked
+    |   → .../async-pool-x.y.z/lib/async/pool/controller.rb:132 in `synchronize'
+```
+
+This is caused by [Ruby bug #20907](https://bugs.ruby-lang.org/issues/20907) (see also [socketry/async#424](https://github.com/socketry/async/issues/424)): under the fiber scheduler, a fiber interrupted while waiting on a `ConditionVariable` fails to re-acquire its mutex before unwinding, raising a spurious `ThreadError`. It appears whenever a pooled HTTP client is closed while its connection pool's background "gardener" task is idle — for example when a connection is evicted after a connection error, when the least recently used client is evicted because the pool is full, or when the processor shuts down.
+
+The warning is harmless — connections are still closed correctly; only the log noise is wrong. The fix is to upgrade Ruby: the bug is fixed in Ruby 3.2.7+, 3.3.7+, and 3.4+.
 
 ## Configuration
 

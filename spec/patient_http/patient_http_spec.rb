@@ -351,4 +351,266 @@ RSpec.describe PatientHttp do
       end
     end
   end
+
+  describe "inline execution" do
+    before do
+      TestCallback.reset_calls!
+    end
+
+    after do
+      described_class.instance_variable_set(:@module_secrets, {})
+      described_class.instance_variable_set(:@default_configuration, nil)
+      described_class.instance_variable_set(:@inline_configuration, nil)
+    end
+
+    describe ".inline!" do
+      it "registers a handler that executes requests inline and invokes the callback" do
+        stub_request(:get, "https://api.example.com/data")
+          .to_return(status: 200, body: "hello", headers: {"Content-Type" => "text/plain"})
+
+        described_class.inline!
+        result = described_class.get(
+          "https://api.example.com/data",
+          callback: TestCallback,
+          callback_args: {"id" => 1}
+        )
+
+        expect(TestCallback.error_calls).to be_empty
+        expect(TestCallback.completion_calls.size).to eq(1)
+
+        response = TestCallback.completion_calls.first
+        expect(response.status).to eq(200)
+        expect(response.body).to eq("hello")
+        expect(response.callback_args["id"]).to eq(1)
+        expect(result).to eq(response.request_id)
+      end
+
+      it "invokes the error callback when the request fails" do
+        stub_request(:get, "https://api.example.com/broken").to_raise(Errno::ECONNREFUSED)
+
+        described_class.inline!
+        described_class.get("https://api.example.com/broken", callback: TestCallback)
+
+        expect(TestCallback.completion_calls).to be_empty
+        expect(TestCallback.error_calls.size).to eq(1)
+        expect(TestCallback.error_calls.first).to be_a(PatientHttp::RequestError)
+      end
+
+      it "reports non-success responses as errors when raise_error_responses is set" do
+        stub_request(:get, "https://api.example.com/fail").to_return(status: 500)
+
+        described_class.inline!
+        described_class.get(
+          "https://api.example.com/fail",
+          callback: TestCallback,
+          raise_error_responses: true
+        )
+
+        expect(TestCallback.completion_calls).to be_empty
+        expect(TestCallback.error_calls.size).to eq(1)
+        expect(TestCallback.error_calls.first).to be_a(PatientHttp::HttpError)
+      end
+
+      it "executes requests against a provided configuration" do
+        stub_request(:get, "https://api.example.com/fail").to_return(status: 500)
+
+        config = PatientHttp::Configuration.new(raise_error_responses: true)
+        described_class.inline!(config: config)
+        described_class.get("https://api.example.com/fail", callback: TestCallback)
+
+        expect(TestCallback.completion_calls).to be_empty
+        expect(TestCallback.error_calls.size).to eq(1)
+        expect(TestCallback.error_calls.first).to be_a(PatientHttp::HttpError)
+      end
+
+      it "supports re-entrant requests from within a callback" do
+        stub_request(:get, "https://api.example.com/first").to_return(status: 200, body: "first")
+        stub_request(:get, "https://api.example.com/second").to_return(status: 200, body: "second")
+
+        reentrant_callback = Class.new do
+          def on_complete(response)
+            TestCallback.record_completion(response)
+            if response.url.end_with?("/first")
+              PatientHttp.get("https://api.example.com/second", callback: TestCallback)
+            end
+          end
+
+          def on_error(error)
+            TestCallback.record_error(error)
+          end
+        end
+        stub_const("ReentrantCallback", reentrant_callback)
+
+        described_class.inline!
+        described_class.get("https://api.example.com/first", callback: "ReentrantCallback")
+
+        expect(TestCallback.error_calls).to be_empty
+        expect(TestCallback.completion_calls.map(&:body)).to contain_exactly("first", "second")
+      end
+
+      it "resolves module-level secrets on inline requests" do
+        described_class.register_secret("api-key", "s3cret")
+        stub = stub_request(:get, "https://api.example.com/private")
+          .with(headers: {"Authorization" => "s3cret"})
+          .to_return(status: 200)
+
+        described_class.inline!
+        described_class.get(
+          "https://api.example.com/private",
+          callback: TestCallback,
+          headers: {"Authorization" => described_class.secret("api-key")}
+        )
+
+        expect(stub).to have_been_requested
+        expect(TestCallback.error_calls).to be_empty
+        expect(TestCallback.completion_calls.size).to eq(1)
+      end
+    end
+
+    describe ".inline?" do
+      it "returns false when no handler is registered" do
+        expect(described_class.inline?).to be false
+      end
+
+      it "returns true when the inline handler is registered" do
+        described_class.inline!
+        expect(described_class.inline?).to be true
+      end
+
+      it "returns false after the handler is unregistered" do
+        described_class.inline!
+        described_class.unregister_handler
+        expect(described_class.inline?).to be false
+      end
+
+      it "returns false when a different handler is registered" do
+        described_class.inline!
+        described_class.register_handler { |request:, callback:, callback_args: nil, raise_error_responses: nil| }
+        expect(described_class.inline?).to be false
+      end
+    end
+
+    describe ".execute_inline" do
+      it "returns the request id and defaults raise_error_responses from the configuration" do
+        stub_request(:get, "https://api.example.com/fail").to_return(status: 500)
+
+        request = PatientHttp::Request.new(:get, "https://api.example.com/fail")
+        result = described_class.execute_inline(request: request, callback: TestCallback)
+
+        expect(TestCallback.error_calls).to be_empty
+        expect(TestCallback.completion_calls.size).to eq(1)
+        expect(TestCallback.completion_calls.first.status).to eq(500)
+        expect(result).to eq(TestCallback.completion_calls.first.request_id)
+      end
+
+      it "uses the default configuration when one is set" do
+        stub_request(:get, "https://api.example.com/fail").to_return(status: 500)
+
+        described_class.default_configuration = PatientHttp::Configuration.new(raise_error_responses: true)
+        request = PatientHttp::Request.new(:get, "https://api.example.com/fail")
+        described_class.execute_inline(request: request, callback: TestCallback)
+
+        expect(TestCallback.completion_calls).to be_empty
+        expect(TestCallback.error_calls.size).to eq(1)
+        expect(TestCallback.error_calls.first).to be_a(PatientHttp::HttpError)
+      end
+    end
+  end
+
+  describe "module-level secrets" do
+    after do
+      described_class.instance_variable_set(:@module_secrets, {})
+      described_class.instance_variable_set(:@default_configuration, nil)
+      described_class.instance_variable_set(:@inline_configuration, nil)
+    end
+
+    describe ".register_secret" do
+      it "raises when neither a value nor a block is provided" do
+        expect do
+          described_class.register_secret("api-key")
+        end.to raise_error(ArgumentError, "register_secret requires a value or a block")
+      end
+
+      it "raises when both a value and a block are provided" do
+        expect do
+          described_class.register_secret("api-key", "value") { "other" }
+        end.to raise_error(ArgumentError, "register_secret accepts either a value or a block, not both")
+      end
+
+      it "applies secrets registered before a default configuration is set" do
+        described_class.register_secret("api-key", "s3cret")
+
+        config = PatientHttp::Configuration.new
+        described_class.default_configuration = config
+
+        expect(config.secret_manager.include?("api-key")).to be true
+        expect(config.secret_manager.resolve("api-key")).to eq("s3cret")
+      end
+
+      it "applies secrets immediately when a default configuration is already set" do
+        config = PatientHttp::Configuration.new
+        described_class.default_configuration = config
+
+        described_class.register_secret("api-key", "s3cret")
+
+        expect(config.secret_manager.resolve("api-key")).to eq("s3cret")
+      end
+
+      it "re-applies secrets when the default configuration is replaced" do
+        described_class.register_secret("api-key", "s3cret")
+        described_class.default_configuration = PatientHttp::Configuration.new
+
+        replacement = PatientHttp::Configuration.new
+        described_class.default_configuration = replacement
+
+        expect(replacement.secret_manager.resolve("api-key")).to eq("s3cret")
+      end
+
+      it "resolves block secrets lazily" do
+        value = "initial"
+        described_class.register_secret("api-key") { value }
+        described_class.default_configuration = PatientHttp::Configuration.new
+
+        value = "updated"
+
+        expect(described_class.default_configuration.secret_manager.resolve("api-key")).to eq("updated")
+      end
+    end
+
+    describe ".secret_registered?" do
+      it "returns true for secrets registered at the module level" do
+        described_class.register_secret("api-key", "s3cret")
+
+        expect(described_class.secret_registered?("api-key")).to be true
+        expect(described_class.secret_registered?(:"api-key")).to be true
+      end
+
+      it "returns true for secrets registered directly on the default configuration" do
+        config = PatientHttp::Configuration.new
+        config.register_secret("config-key", "s3cret")
+        described_class.default_configuration = config
+
+        expect(described_class.secret_registered?("config-key")).to be true
+      end
+
+      it "returns false when the secret is not registered anywhere" do
+        described_class.default_configuration = PatientHttp::Configuration.new
+
+        expect(described_class.secret_registered?("missing")).to be false
+      end
+    end
+
+    describe ".default_configuration" do
+      it "returns nil when no default configuration is set" do
+        expect(described_class.default_configuration).to be_nil
+      end
+
+      it "returns the assigned configuration" do
+        config = PatientHttp::Configuration.new
+        described_class.default_configuration = config
+
+        expect(described_class.default_configuration).to be(config)
+      end
+    end
+  end
 end

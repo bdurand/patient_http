@@ -432,10 +432,15 @@ module PatientHttp
         @config.logger&.error("[PatientHttp] Reactor loop error: #{e.inspect}\n#{e.backtrace.join("\n")}")
       ensure
         # Close the HTTP connection pools while still inside the reactor so the
-        # pools' background gardener tasks shut down gracefully. Otherwise the
-        # reactor stops with open pools and async-pool force-cancels each
-        # gardener mid-wait, emitting a noisy (but harmless) ThreadError:
-        # "Attempt to unlock a mutex which is not locked".
+        # pools shut down in an orderly fashion: in-flight responses have been
+        # delivered above, and each pool's background gardener task is stopped
+        # by the pool itself rather than force-cancelled by the dying reactor.
+        #
+        # Note: on Ruby < 3.2.7 / < 3.3.7, stopping a gardener still logs a
+        # spurious (harmless) ThreadError: "Attempt to unlock a mutex which is
+        # not locked" — a fiber interrupted in ConditionVariable#wait fails to
+        # re-acquire its mutex (https://bugs.ruby-lang.org/issues/20907, fixed
+        # in Ruby 3.2.7+, 3.3.7+, and 3.4+).
         begin
           @http_client.close
         rescue => e

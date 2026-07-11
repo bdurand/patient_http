@@ -170,4 +170,59 @@ RSpec.describe PatientHttp::RequestHelper do
       end
     end
   end
+
+  describe "preprocessors" do
+    before do
+      @captured_request = nil
+      PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+        @captured_request = request
+      end
+    end
+
+    it "passes preprocessors through async_request" do
+      TestService.async_get("/path", callback: TestCallback, preprocessors: :signer)
+
+      expect(@captured_request.preprocessors).to eq(["signer"])
+    end
+
+    it "passes preprocessors through instance-level async_request" do
+      TestService.new.async_get("/path", callback: TestCallback, preprocessors: [:signer, "tracer"])
+
+      expect(@captured_request.preprocessors).to eq(["signer", "tracer"])
+    end
+
+    it "uses the request template's default preprocessors" do
+      service_class = Class.new do
+        include PatientHttp::RequestHelper
+
+        request_template base_url: "https://api.example.com", preprocessors: :signer
+      end
+
+      service_class.async_get("/path", callback: TestCallback)
+
+      expect(@captured_request.preprocessors).to eq(["signer"])
+    end
+
+    it "overrides the template's default preprocessors with per-request preprocessors" do
+      service_class = Class.new do
+        include PatientHttp::RequestHelper
+
+        request_template base_url: "https://api.example.com", preprocessors: :signer
+      end
+
+      service_class.async_get("/path", callback: TestCallback, preprocessors: :tracer)
+
+      expect(@captured_request.preprocessors).to eq(["tracer"])
+    end
+
+    it "passes preprocessors without a request template" do
+      service_class = Class.new do
+        include PatientHttp::RequestHelper
+      end
+
+      service_class.async_get("https://api.example.com/path", callback: TestCallback, preprocessors: :signer)
+
+      expect(@captured_request.preprocessors).to eq(["signer"])
+    end
+  end
 end

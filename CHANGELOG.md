@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.3.0
+
+### Added
+
+- `PatientHttp.inline!` registers a request handler that executes requests inline (synchronously, in-process) through `SynchronousExecutor`, for consoles, tests, and development environments with no job-system integration. `PatientHttp.inline?` checks whether the inline handler is currently registered, and `PatientHttp.execute_inline` executes a single request inline without registering a handler.
+- `PatientHttp.register_secret` registers named secrets at the module level, independent of any `Configuration`. Module-level secrets are applied to the new `PatientHttp.default_configuration` (immediately if set, or when it is set later), making registration order between application code and integration gem configuration irrelevant. `PatientHttp.secret_registered?` checks whether a secret is registered at the module level or on the default configuration.
+- `PatientHttp::RequestHelper`'s `request_template` and `async_request` now accept `preprocessors:`, matching `PatientHttp.request` and `RequestTemplate`.
+- `PatientHttp.handler_registered?` checks whether a request handler is registered.
+
 ## 1.2.0
 
 ### Added
