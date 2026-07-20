@@ -3,14 +3,20 @@
 # Suppress experimental feature warnings (IO::Buffer used by async gems)
 Warning[:experimental] = false
 
+require "bundler/setup"
+
 # SimpleCov must be started before requiring the lib
-require "simplecov"
-SimpleCov.start do
-  add_filter "/spec/"
-  enable_coverage :branch
+begin
+  require "simplecov"
+  SimpleCov.start do
+    add_filter "/spec/"
+    enable_coverage :branch
+  end
+rescue LoadError
+  # SimpleCov is not available
 end
 
-require "bundler/setup"
+Bundler.require(:default, :test)
 
 require "webmock/rspec"
 require "async/rspec"
