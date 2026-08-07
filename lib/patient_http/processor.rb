@@ -33,6 +33,10 @@ module PatientHttp
       @reactor_generation = 0
       @inflight_requests = Concurrent::Hash.new
       @pending_tasks = Concurrent::Hash.new
+      # Tasks pushed onto @queue but not yet popped by the reactor. Kept in a
+      # hash because Thread::Queue cannot be enumerated; used to report all
+      # tracked task ids (e.g. for heartbeat updates on queued tasks).
+      @queued_tasks = Concurrent::Hash.new
       @tasks_lock = Mutex.new
       @idle_condition = ConditionVariable.new
       @testing_callback = nil
@@ -198,24 +202,41 @@ module PatientHttp
     # @raise [MaxCapacityError] if at max capacity
     # @return [void]
     def enqueue(task)
+      raise NotRunningError.new("Cannot enqueue request: processor is #{state}") unless running?
+
+      # Announce the task before it is visible to the reactor so observers can
+      # set up tracking with a guarantee that the task cannot start, finish,
+      # or be re-enqueued first. Observers are notified outside the lock, so
+      # the running state is re-checked under the lock below.
+      notify_observers { |observer| observer.request_enqueued(task) }
+
       at_capacity = false
+      accepted = false
 
-      @tasks_lock.synchronize do
-        raise NotRunningError.new("Cannot enqueue request: processor is #{state}") unless running?
+      begin
+        @tasks_lock.synchronize do
+          raise NotRunningError.new("Cannot enqueue request: processor is #{state}") unless running?
 
-        # Check capacity - raise error if at max connections
-        total = @queue.size + @pending_tasks.size + @inflight_requests.size
-        if total >= @config.max_connections
-          at_capacity = true
-        else
-          task.enqueued!
-          @queue.push(task)
+          # Check capacity - raise error if at max connections
+          total = @queue.size + @pending_tasks.size + @inflight_requests.size
+          if total >= @config.max_connections
+            at_capacity = true
+          else
+            task.enqueued!
+            @queued_tasks[task.id] = task
+            @queue.push(task)
+            accepted = true
+          end
         end
-      end
 
-      if at_capacity
-        notify_observers { |observer| observer.capacity_exceeded }
-        raise MaxCapacityError.new("Cannot enqueue request: already at max capacity (#{@config.max_connections} connections)")
+        if at_capacity
+          notify_observers { |observer| observer.capacity_exceeded }
+          raise MaxCapacityError.new("Cannot enqueue request: already at max capacity (#{@config.max_connections} connections)")
+        end
+      ensure
+        # The task was announced but not accepted; let observers tear down
+        # anything they set up for it in request_enqueued.
+        notify_observers { |observer| observer.request_rejected(task) } unless accepted
       end
     end
 
@@ -307,6 +328,17 @@ module PatientHttp
       end
     end
 
+    # Get the IDs of all tasks in the pipeline (queued, pending, and in-flight).
+    # Use this to keep durable tracking (e.g. heartbeats) alive for tasks the
+    # processor has accepted but not yet started.
+    #
+    # @return [Array<String>]
+    def tracked_request_ids
+      @tasks_lock.synchronize do
+        (@queued_tasks.keys + @pending_tasks.keys + @inflight_requests.keys).uniq
+      end
+    end
+
     # Add an observer for processor events.
     #
     # @param observer [ProcessorObserver] the observer to add
@@ -393,6 +425,7 @@ module PatientHttp
 
           # Track as pending immediately to avoid race condition with stop()
           @tasks_lock.synchronize do
+            @queued_tasks.delete(request_task.id)
             @pending_tasks[request_task.id] = request_task
           end
 
@@ -475,10 +508,12 @@ module PatientHttp
         @inflight_requests[task.id] = task
       end
 
+      # Mark the task as started before announcing it so any task that has
+      # emitted request_start is identifiable by started?. The shutdown
+      # re-enqueue path relies on this to pair request_end with request_start.
+      task.started!
       notify_observers { |observer| observer.request_start(task) }
 
-      # Mark task as started
-      task.started!
       claimed = false
 
       begin
@@ -613,13 +648,20 @@ module PatientHttp
       redirect_task = task.redirect_task(location: location, status: status)
       redirect_task.enqueued!
 
+      # Announce the redirect before it is visible to the reactor (see #enqueue).
+      notify_observers { |observer| observer.request_enqueued(redirect_task) }
+
       claimed = @tasks_lock.synchronize do
         next false if @inflight_requests.delete(task.id).nil?
 
+        @queued_tasks[redirect_task.id] = redirect_task
         @queue.push(redirect_task)
         true
       end
-      return false unless claimed
+      unless claimed
+        notify_observers { |observer| observer.request_rejected(redirect_task) }
+        return false
+      end
 
       redirect_url = resolve_redirect_url(task.request.url, location)
       @config.logger&.debug("[PatientHttp] Request #{task.id} redirected (#{status}) to #{redirect_url}")
@@ -703,7 +745,10 @@ module PatientHttp
       until @queue.empty?
         begin
           task = @queue.pop(true)
-          tasks_to_reenqueue << task if task
+          if task
+            @tasks_lock.synchronize { @queued_tasks.delete(task.id) }
+            tasks_to_reenqueue << task
+          end
         rescue ThreadError
           break
         end
@@ -715,6 +760,10 @@ module PatientHttp
     def reenqueue_tasks(tasks_to_reenqueue)
       tasks_to_reenqueue.each do |task|
         task.retry
+        # The task handler's job system owns the request again; let observers
+        # tear down any durable tracking for the task. Only sent after a
+        # successful retry so a failed retry leaves the tracking in place.
+        notify_observers { |observer| observer.request_requeued(task) }
         # Only emit request_end for tasks that actually started, so observers
         # that pair request_start/request_end (e.g. an in-flight gauge) stay
         # balanced. Queued-but-never-started tasks emit neither.

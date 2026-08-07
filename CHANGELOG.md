@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.4.0
+
+### Added
+
+- `ProcessorObserver` events for the full task pipeline: `request_enqueued` is sent when the processor accepts a task, before the task is visible to the reactor, so observers can set up durable tracking (e.g. a crash-recovery registry entry) before `Processor#enqueue` returns. `request_rejected` is sent when an announced task is not accepted (not running or at capacity). `request_requeued` is sent when an incomplete task is re-enqueued through its task handler, so observers can tear down tracking for tasks the job system owns again. Redirect tasks are announced with `request_enqueued` as well.
+- `Processor#tracked_request_ids` returns the IDs of all tasks in the pipeline (queued, pending, and in-flight), so durable tracking can keep heartbeats alive for tasks that have not started yet.
+
+### Fixed
+
+- A task is now marked as started before the `request_start` notification is sent. Before this fix, a shutdown that snapshotted the task between the two steps re-enqueued the task without a `request_end` notification, which could leak observer tracking for the task and cause a duplicate execution through crash recovery.
+
 ## 1.3.0
 
 ### Added

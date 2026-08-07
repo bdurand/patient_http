@@ -744,6 +744,14 @@ end
 processor.observe(MetricsObserver.new)
 ```
 
+Observers can also track the full task pipeline:
+
+- `request_enqueued(request_task)` is called when the processor accepts a task, before the task is visible to the reactor. It is guaranteed to arrive before `request_start`, so observers can set up durable tracking (e.g. a crash-recovery registry entry) before `Processor#enqueue` returns.
+- `request_rejected(request_task)` is called when an announced task is not accepted (not running or at capacity), so observers can tear down anything they set up in `request_enqueued`.
+- `request_requeued(request_task)` is called when an incomplete task is re-enqueued through its task handler (processor shutdown or reactor failure). The job system owns the request again once this is sent.
+
+Use `Processor#tracked_request_ids` to get the IDs of all tasks in the pipeline (queued, pending, and in-flight), for example to keep heartbeats alive for tasks that have not started yet.
+
 ## Testing
 
 Use `SynchronousExecutor` to execute requests synchronously in tests. This class can be used in place of the async processor for testing your request handling logic without needing to start the full async infrastructure.
