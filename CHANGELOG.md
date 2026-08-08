@@ -8,8 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `ProcessorObserver` events for the full task pipeline: `request_enqueued` is sent when the processor accepts a task, before the task is visible to the reactor, so observers can set up durable tracking (e.g. a crash-recovery registry entry) before `Processor#enqueue` returns. `request_rejected` is sent when an announced task is not accepted (not running or at capacity). `request_requeued` is sent when an incomplete task is re-enqueued through its task handler, so observers can tear down tracking for tasks the job system owns again. Redirect tasks are announced with `request_enqueued` as well.
-- `Processor#tracked_request_ids` returns the IDs of all tasks in the pipeline (queued, pending, and in-flight), so durable tracking can keep heartbeats alive for tasks that have not started yet.
+ - `ProcessorObserver` events for the full task pipeline: `request_enqueued` is sent when a task is announced to the processor, before the task is visible to the reactor, so observers can set up durable tracking (e.g. a crash-recovery registry entry) before `Processor#enqueue` returns or raises. `request_rejected` is sent when an announced task is not accepted (not running or at capacity). `request_requeued` is sent when an incomplete task is re-enqueued through its task handler, so observers can tear down tracking for tasks the job system owns again. Redirect tasks are announced with `request_enqueued` as well.
+ - `Processor#tracked_request_ids` returns the IDs of all tasks in the pipeline (queued, pending, and in-flight), so durable tracking can keep heartbeats alive for tasks that have not started yet.
 
 ### Fixed
 
