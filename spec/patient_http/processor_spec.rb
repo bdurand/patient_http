@@ -366,6 +366,29 @@ RSpec.describe PatientHttp::Processor do
       expect(events_named(:request_rejected)).to eq([[:request_rejected, task.id]])
     end
 
+    it "rejects the task when a request_enqueued observer raises" do
+      failing_observer = Class.new(PatientHttp::ProcessorObserver) do
+        def request_enqueued(_task)
+          raise "durable tracking setup failed"
+        end
+      end.new
+
+      task = create_request_task
+      processor.start
+      processor.observe(failing_observer)
+      processor.observe(observer)
+      # Prove the error propagates on the production path, not through the
+      # testing-mode re-raise in notify_observer.
+      allow(PatientHttp).to receive(:testing?).and_return(false)
+
+      expect do
+        processor.enqueue(task)
+      end.to raise_error(RuntimeError, "durable tracking setup failed")
+
+      expect(processor.tracked_request_ids).to be_empty
+      expect(events_named(:request_rejected)).to eq([[:request_rejected, task.id]])
+    end
+
     it "does not announce a task when the processor is stopped" do
       task = create_request_task
       processor.observe(observer)

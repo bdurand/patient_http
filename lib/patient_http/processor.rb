@@ -666,12 +666,14 @@ module PatientHttp
 
     # Announce a task to observers and make it visible to the reactor. The
     # task is announced before it can start, finish, or be re-enqueued, so
-    # observers can set up durable tracking first. The block runs while
-    # {@tasks_lock} is held and decides whether the task is accepted; when it
-    # returns false or raises, observers receive request_rejected so they can
-    # tear down anything they set up for the request_enqueued announcement.
-    # The rejection notification never replaces an exception that is already
-    # being raised.
+    # observers can set up durable tracking first. Errors from the
+    # request_enqueued announcement propagate and reject the task, because a
+    # failed tracking setup must not let the task be accepted as if it were
+    # durable. The block runs while {@tasks_lock} is held and decides whether
+    # the task is accepted; when it returns false or raises, observers receive
+    # request_rejected so they can tear down anything they set up for the
+    # request_enqueued announcement. The rejection notification never replaces
+    # an exception that is already being raised.
     #
     # @param task [RequestTask] the request task to announce and enqueue
     # @return [Boolean] true if the task was accepted
@@ -680,7 +682,7 @@ module PatientHttp
       accepted = false
 
       begin
-        notify_observers { |observer| observer.request_enqueued(task) }
+        notify_observers! { |observer| observer.request_enqueued(task) }
 
         @tasks_lock.synchronize do
           if yield
@@ -709,6 +711,16 @@ module PatientHttp
       observers = @tasks_lock.synchronize { @observers.dup }
       observers.each do |observer|
         notify_observer(observer, &block)
+      end
+    end
+
+    # Notify all observers of an event and let observer errors propagate.
+    # Used for notifications the caller must be able to react to, such as
+    # durable tracking setup in request_enqueued.
+    def notify_observers!
+      observers = @tasks_lock.synchronize { @observers.dup }
+      observers.each do |observer|
+        yield(observer)
       end
     end
 

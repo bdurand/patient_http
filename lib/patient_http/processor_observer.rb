@@ -29,7 +29,10 @@ module PatientHttp
     # request_start for the task, so observers can set up durable tracking
     # (e.g. a crash-recovery registry entry) with no risk that the task
     # completes first. If the processor does not accept the task,
-    # request_rejected is sent afterward.
+    # request_rejected is sent afterward. Unlike other notifications, an error
+    # raised here propagates from Processor#enqueue and rejects the task, so a
+    # failed tracking setup does not let the task be accepted as if it were
+    # durable.
     #
     # @param request_task [RequestTask] the request task that was enqueued
     # @return [void]
