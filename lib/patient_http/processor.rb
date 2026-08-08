@@ -33,6 +33,10 @@ module PatientHttp
       @reactor_generation = 0
       @inflight_requests = Concurrent::Hash.new
       @pending_tasks = Concurrent::Hash.new
+      # Tasks pushed onto @queue but not yet popped by the reactor. Kept in a
+      # hash because Thread::Queue cannot be enumerated; used to report all
+      # tracked task ids (e.g. for heartbeat updates on queued tasks).
+      @queued_tasks = Concurrent::Hash.new
       @tasks_lock = Mutex.new
       @idle_condition = ConditionVariable.new
       @testing_callback = nil
@@ -76,14 +80,21 @@ module PatientHttp
           # lock; re-enqueueing runs outside it. This is idempotent with stop()'s
           # reenqueue_pending_requests: whichever runs second snapshots an empty
           # set.
+          current_generation = false
           orphaned_tasks = @tasks_lock.synchronize do
             if @reactor_generation == generation
+              current_generation = true
               drain_tracked_tasks_locked
             else
               []
             end
           end
           reenqueue_tasks(orphaned_tasks)
+          # Hand back tasks still sitting in the queue as well; a reactor that
+          # exits without a stop() call is the last owner of those tasks.
+          # stop() performs the same drain after reaping the reactor, and
+          # whichever drain runs second finds nothing left.
+          reenqueue_remaining_queue_items if current_generation
         end
 
         # The transition can fail if the reactor thread already failed and
@@ -198,22 +209,18 @@ module PatientHttp
     # @raise [MaxCapacityError] if at max capacity
     # @return [void]
     def enqueue(task)
-      at_capacity = false
+      raise NotRunningError.new("Cannot enqueue request: processor is #{state}") unless running?
 
-      @tasks_lock.synchronize do
+      accepted = announce_and_enqueue(task) do
+        # The pre-check above is advisory; re-check the running state under
+        # the lock since observers were notified outside of it.
         raise NotRunningError.new("Cannot enqueue request: processor is #{state}") unless running?
 
-        # Check capacity - raise error if at max connections
-        total = @queue.size + @pending_tasks.size + @inflight_requests.size
-        if total >= @config.max_connections
-          at_capacity = true
-        else
-          task.enqueued!
-          @queue.push(task)
-        end
+        # Check capacity - the task is only accepted below max connections.
+        @queue.size + @pending_tasks.size + @inflight_requests.size < @config.max_connections
       end
 
-      if at_capacity
+      unless accepted
         notify_observers { |observer| observer.capacity_exceeded }
         raise MaxCapacityError.new("Cannot enqueue request: already at max capacity (#{@config.max_connections} connections)")
       end
@@ -307,6 +314,17 @@ module PatientHttp
       end
     end
 
+    # Get the IDs of all tasks in the pipeline (queued, pending, and in-flight).
+    # Use this to keep durable tracking (e.g. heartbeats) alive for tasks the
+    # processor has accepted but not yet started.
+    #
+    # @return [Array<String>]
+    def tracked_request_ids
+      @tasks_lock.synchronize do
+        (@queued_tasks.keys + @pending_tasks.keys + @inflight_requests.keys).uniq
+      end
+    end
+
     # Add an observer for processor events.
     #
     # @param observer [ProcessorObserver] the observer to add
@@ -393,6 +411,7 @@ module PatientHttp
 
           # Track as pending immediately to avoid race condition with stop()
           @tasks_lock.synchronize do
+            @queued_tasks.delete(request_task.id)
             @pending_tasks[request_task.id] = request_task
           end
 
@@ -473,12 +492,15 @@ module PatientHttp
 
         @pending_tasks.delete(task.id)
         @inflight_requests[task.id] = task
+        # Mark the task started in the same locked section that tracks it so
+        # a shutdown snapshot always sees a consistent started state. The
+        # shutdown re-enqueue path uses started? to pair request_end with
+        # request_start.
+        task.started!
       end
 
       notify_observers { |observer| observer.request_start(task) }
 
-      # Mark task as started
-      task.started!
       claimed = false
 
       begin
@@ -611,13 +633,9 @@ module PatientHttp
       # from in-flight) and enqueue the redirect. If the claim fails the
       # shutdown sequence already re-enqueued the original, so drop the redirect.
       redirect_task = task.redirect_task(location: location, status: status)
-      redirect_task.enqueued!
 
-      claimed = @tasks_lock.synchronize do
-        next false if @inflight_requests.delete(task.id).nil?
-
-        @queue.push(redirect_task)
-        true
+      claimed = announce_and_enqueue(redirect_task) do
+        !@inflight_requests.delete(task.id).nil?
       end
       return false unless claimed
 
@@ -646,12 +664,63 @@ module PatientHttp
       raise if PatientHttp.testing?
     end
 
+    # Announce a task to observers and make it visible to the reactor. The
+    # task is announced before it can start, finish, or be re-enqueued, so
+    # observers can set up durable tracking first. Errors from the
+    # request_enqueued announcement propagate and reject the task, because a
+    # failed tracking setup must not let the task be accepted as if it were
+    # durable. The block runs while {@tasks_lock} is held and decides whether
+    # the task is accepted; when it returns false or raises, observers receive
+    # request_rejected so they can tear down anything they set up for the
+    # request_enqueued announcement. The rejection notification never replaces
+    # an exception that is already being raised.
+    #
+    # @param task [RequestTask] the request task to announce and enqueue
+    # @return [Boolean] true if the task was accepted
+    def announce_and_enqueue(task)
+      task.enqueued!
+      accepted = false
+
+      begin
+        notify_observers! { |observer| observer.request_enqueued(task) }
+
+        @tasks_lock.synchronize do
+          if yield
+            @queued_tasks[task.id] = task
+            @queue.push(task)
+            accepted = true
+          end
+        end
+      ensure
+        unless accepted
+          pending_error = $!
+          begin
+            notify_observers { |observer| observer.request_rejected(task) }
+          rescue
+            raise unless pending_error
+          end
+        end
+      end
+
+      accepted
+    end
+
     # Notify all observers of an event. Observers are called outside of any
     # internal lock so they can safely call back into the processor.
     def notify_observers(&block)
       observers = @tasks_lock.synchronize { @observers.dup }
       observers.each do |observer|
         notify_observer(observer, &block)
+      end
+    end
+
+    # Notify all observers of an event and let observer errors propagate.
+    # Used for notifications the caller must be able to react to, such as
+    # durable tracking setup in request_enqueued.
+    def notify_observers!
+      observers = @tasks_lock.synchronize { @observers.dup }
+      observers.each do |observer|
+        yield(observer)
       end
     end
 
@@ -697,16 +766,27 @@ module PatientHttp
     end
 
     def reenqueue_remaining_queue_items
-      tasks_to_reenqueue = []
+      tasks_to_reenqueue = @tasks_lock.synchronize do
+        tasks = []
 
-      # Drain remaining items from the queue (skip nil sentinels from stop)
-      until @queue.empty?
-        begin
-          task = @queue.pop(true)
-          tasks_to_reenqueue << task if task
-        rescue ThreadError
-          break
+        # Drain remaining items from the queue (skip nil sentinels from stop)
+        until @queue.empty?
+          begin
+            task = @queue.pop(true)
+            tasks << task if task
+          rescue ThreadError
+            break
+          end
         end
+
+        tasks.each { |task| @queued_tasks.delete(task.id) }
+        # The reactor has exited and no new tasks can be accepted, so any id
+        # still tracked as queued belongs to a task that left the queue
+        # without reaching pending or in-flight tracking. Reclaim those tasks
+        # as well so they are not tracked forever.
+        tasks.concat(@queued_tasks.values)
+        @queued_tasks.clear
+        tasks
       end
 
       reenqueue_tasks(tasks_to_reenqueue)
@@ -715,6 +795,10 @@ module PatientHttp
     def reenqueue_tasks(tasks_to_reenqueue)
       tasks_to_reenqueue.each do |task|
         task.retry
+        # The task handler's job system owns the request again; let observers
+        # tear down any durable tracking for the task. Only sent after a
+        # successful retry so a failed retry leaves the tracking in place.
+        notify_observers { |observer| observer.request_requeued(task) }
         # Only emit request_end for tasks that actually started, so observers
         # that pair request_start/request_end (e.g. an in-flight gauge) stay
         # balanced. Queued-but-never-started tasks emit neither.

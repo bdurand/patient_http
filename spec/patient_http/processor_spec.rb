@@ -264,6 +264,216 @@ RSpec.describe PatientHttp::Processor do
     end
   end
 
+  describe "pipeline observer notifications" do
+    let(:recording_observer_class) do
+      Class.new(PatientHttp::ProcessorObserver) do
+        attr_reader :events
+
+        def initialize
+          @events = Concurrent::Array.new
+        end
+
+        def request_enqueued(task)
+          @events << [:request_enqueued, task.id]
+        end
+
+        def request_rejected(task)
+          @events << [:request_rejected, task.id]
+        end
+
+        def request_requeued(task)
+          @events << [:request_requeued, task.id]
+        end
+
+        def request_start(task)
+          @events << [:request_start, task.id, task.started?]
+        end
+
+        def request_end(task)
+          @events << [:request_end, task.id]
+        end
+      end
+    end
+
+    let(:observer) { recording_observer_class.new }
+
+    def events_named(name)
+      observer.events.select { |event| event.first == name }
+    end
+
+    it "notifies request_enqueued before enqueue returns and before request_start" do
+      stub_request(:get, "https://api.example.com/users")
+        .to_return(status: 200, body: "", headers: {})
+
+      task = create_request_task
+      processor.start
+      processor.observe(observer)
+
+      processor.enqueue(task)
+      expect(events_named(:request_enqueued)).to eq([[:request_enqueued, task.id]])
+
+      processor.wait_for_idle(timeout: 2)
+
+      event_names = observer.events.map(&:first)
+      expect(event_names.index(:request_enqueued)).to be < event_names.index(:request_start)
+    end
+
+    it "marks the task as started before sending request_start" do
+      stub_request(:get, "https://api.example.com/users")
+        .to_return(status: 200, body: "", headers: {})
+
+      task = create_request_task
+      processor.start
+      processor.observe(observer)
+      processor.enqueue(task)
+      processor.wait_for_idle(timeout: 2)
+
+      expect(events_named(:request_start)).to eq([[:request_start, task.id, true]])
+    end
+
+    it "notifies request_rejected when the processor is at max capacity" do
+      small_processor = described_class.new(PatientHttp::Configuration.new(max_connections: 1))
+      # Never let the reactor consume the queue so the first task stays queued.
+      allow(small_processor).to receive(:dequeue_request) { |**_args| nil }
+      small_processor.start
+      small_processor.observe(observer)
+
+      accepted_task = create_request_task
+      rejected_task = create_request_task
+      small_processor.enqueue(accepted_task)
+      expect do
+        small_processor.enqueue(rejected_task)
+      end.to raise_error(PatientHttp::MaxCapacityError)
+
+      expect(events_named(:request_rejected)).to eq([[:request_rejected, rejected_task.id]])
+    ensure
+      small_processor&.stop(timeout: 0)
+    end
+
+    it "notifies request_rejected when the processor stops after the task is announced" do
+      task = create_request_task
+      processor.start
+      processor.observe(observer)
+      # Pass the advisory pre-check, then fail the authoritative check under
+      # the lock, as when the processor stops between the two.
+      allow(processor).to receive(:running?).and_return(true, false)
+
+      expect do
+        processor.enqueue(task)
+      end.to raise_error(PatientHttp::NotRunningError)
+
+      expect(events_named(:request_enqueued)).to eq([[:request_enqueued, task.id]])
+      expect(events_named(:request_rejected)).to eq([[:request_rejected, task.id]])
+    end
+
+    it "rejects the task when a request_enqueued observer raises" do
+      failing_observer = Class.new(PatientHttp::ProcessorObserver) do
+        def request_enqueued(_task)
+          raise "durable tracking setup failed"
+        end
+      end.new
+
+      task = create_request_task
+      processor.start
+      processor.observe(failing_observer)
+      processor.observe(observer)
+      # Prove the error propagates on the production path, not through the
+      # testing-mode re-raise in notify_observer.
+      allow(PatientHttp).to receive(:testing?).and_return(false)
+
+      expect do
+        processor.enqueue(task)
+      end.to raise_error(RuntimeError, "durable tracking setup failed")
+
+      expect(processor.tracked_request_ids).to be_empty
+      expect(events_named(:request_rejected)).to eq([[:request_rejected, task.id]])
+    end
+
+    it "does not announce a task when the processor is stopped" do
+      task = create_request_task
+      processor.observe(observer)
+
+      expect do
+        processor.enqueue(task)
+      end.to raise_error(PatientHttp::NotRunningError)
+
+      expect(observer.events).to be_empty
+    end
+
+    it "notifies request_requeued when a queued task is re-enqueued at shutdown" do
+      # Never let the reactor consume the queue, so the enqueued task is
+      # retried straight from the queue without ever starting.
+      allow(processor).to receive(:dequeue_request) { |**_args| nil }
+
+      task = create_request_task
+      processor.start
+      processor.observe(observer)
+      processor.enqueue(task)
+      processor.stop(timeout: 0)
+
+      expect(task.task_handler.retries.size).to eq(1)
+      expect(events_named(:request_requeued)).to eq([[:request_requeued, task.id]])
+      expect(events_named(:request_end)).to be_empty
+    end
+
+    it "notifies request_requeued when a started task is re-enqueued at shutdown" do
+      stub_request(:get, "https://api.example.com/users")
+        .to_return do
+          sleep(0.2) # keep the request in-flight past the shutdown deadline
+          {status: 200, body: "", headers: {}}
+        end
+
+      task = create_request_task
+      processor.start
+      processor.observe(observer)
+      processor.enqueue(task)
+      processor.wait_for_processing
+      processor.stop(timeout: 0.001)
+
+      expect(task.task_handler.retries.size).to eq(1)
+      expect(events_named(:request_requeued)).to eq([[:request_requeued, task.id]])
+      expect(events_named(:request_end)).to eq([[:request_end, task.id]])
+    end
+
+    it "announces a redirect task with request_enqueued" do
+      stub_request(:get, "https://api.example.com/start")
+        .to_return(status: 302, headers: {"Location" => "https://api.example.com/finish"})
+      stub_request(:get, "https://api.example.com/finish")
+        .to_return(status: 200, body: "ok", headers: {})
+
+      task = create_request_task(url: "https://api.example.com/start")
+      processor.start
+      processor.observe(observer)
+      processor.enqueue(task)
+      processor.wait_for_idle(timeout: 2)
+
+      enqueued_ids = events_named(:request_enqueued).map { |event| event[1] }
+      expect(enqueued_ids).to eq([task.id, "#{task.id}/2"])
+
+      event_keys = observer.events.map { |event| [event[0], event[1]] }
+      redirect_enqueued = event_keys.index([:request_enqueued, "#{task.id}/2"])
+      redirect_start = event_keys.index([:request_start, "#{task.id}/2"])
+      expect(redirect_enqueued).to be < redirect_start
+    end
+  end
+
+  describe "#tracked_request_ids" do
+    it "includes queued tasks that have not started" do
+      # Never let the reactor consume the queue so the task stays queued.
+      allow(processor).to receive(:dequeue_request) { |**_args| nil }
+
+      task = create_request_task
+      processor.start
+      processor.enqueue(task)
+
+      expect(processor.tracked_request_ids).to eq([task.id])
+      expect(processor.inflight_request_ids).to be_empty
+
+      processor.stop(timeout: 0)
+      expect(processor.tracked_request_ids).to be_empty
+    end
+  end
+
   describe "state predicates" do
     describe "#running?" do
       it "returns true when state is running" do
