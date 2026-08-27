@@ -34,7 +34,7 @@ RSpec.describe PatientHttp::CompletionExecutor do
       expect { executor.enqueue(-> {}) }.to raise_error(ClosedQueueError)
     end
 
-    it "keeps running after a job raises" do
+    it "keeps running after a job raises", :disable_testing_mode do
       results = Concurrent::Array.new
       latch = Concurrent::CountDownLatch.new(1)
       quiet_executor = described_class.new(threads: 1, logger: Logger.new(StringIO.new))

@@ -867,11 +867,13 @@ RSpec.describe PatientHttp::Processor do
       captured_response = nil
       allow(processor).to receive(:handle_completion) do |_req, resp|
         captured_response = resp
+        nil
       end
 
       Async do
         processor.send(:process_request, mock_request)
       end
+      processor.wait_for_idle(timeout: 2)
 
       expect(captured_response.status).to eq(201)
       expect(captured_response.body).to eq("response body")
@@ -889,6 +891,7 @@ RSpec.describe PatientHttp::Processor do
       Async do
         processor.send(:process_request, mock_request)
       end
+      processor.wait_for_idle(timeout: 2)
     end
 
     # Parameterized error handling tests
@@ -907,6 +910,7 @@ RSpec.describe PatientHttp::Processor do
         Async do
           processor.send(:process_request, mock_request)
         end
+        processor.wait_for_idle(timeout: 2)
       end
     end
 
@@ -921,24 +925,22 @@ RSpec.describe PatientHttp::Processor do
       Async do
         processor.send(:process_request, mock_request)
       end
+      processor.wait_for_idle(timeout: 2)
     end
 
     it "raises ResponseTooLargeError when body size exceeds max during read" do
+      # Simulate large body chunks that exceed max_response_size
       large_chunk = "x" * 6_000_000
       stub_request(:get, "https://api.example.com/users")
         .to_return(status: 200, body: large_chunk + large_chunk, headers: {})
-
-      # Simulate large body chunks that exceed max_response_size
-      large_chunk = "x" * 6_000_000
       allow(response_body).to receive(:each).and_yield(large_chunk).and_yield(large_chunk)
 
       expect(processor).to receive(:handle_error).with(mock_request, kind_of(PatientHttp::ResponseTooLargeError))
 
-      processor.run do
-        Async do
-          processor.send(:process_request, mock_request)
-        end
+      Async do
+        processor.send(:process_request, mock_request)
       end
+      processor.wait_for_idle(timeout: 2)
     end
 
     it "handles ResponseTooLargeError correctly" do
@@ -952,6 +954,7 @@ RSpec.describe PatientHttp::Processor do
       Async do
         processor.send(:process_request, mock_request)
       end
+      processor.wait_for_idle(timeout: 2)
     end
 
     it "cleans up Fiber storage in ensure block" do
