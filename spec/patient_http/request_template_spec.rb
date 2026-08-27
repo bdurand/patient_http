@@ -346,4 +346,27 @@ RSpec.describe PatientHttp::RequestTemplate do
       expect(client.timeout).to eq(45)
     end
   end
+
+  describe "processor name" do
+    it "applies the template default to requests" do
+      template = described_class.new(base_url: "https://api.example.com", processor: :llm)
+      request = template.get("/users")
+
+      expect(request.processor).to eq("llm")
+    end
+
+    it "lets a request override the template default" do
+      template = described_class.new(base_url: "https://api.example.com", processor: :llm)
+      request = template.get("/users", processor: :webhooks)
+
+      expect(request.processor).to eq("webhooks")
+    end
+
+    it "defaults to nil when the template has no processor" do
+      template = described_class.new(base_url: "https://api.example.com")
+      request = template.get("/users")
+
+      expect(request.processor).to be_nil
+    end
+  end
 end

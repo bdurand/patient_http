@@ -15,7 +15,7 @@ module PatientHttp
       http2: Async::HTTP::Protocol::HTTP2
     }.freeze
 
-    def initialize(max_size:, connection_timeout: nil, proxy_url: nil, retries: 3, protocol: nil)
+    def initialize(max_size:, connection_timeout: nil, proxy_url: nil, retries: 3, protocol: nil, connection_limit: nil)
       if protocol && !PROTOCOLS.include?(protocol)
         raise ArgumentError.new("protocol must be one of #{PROTOCOLS.keys.inspect}, got: #{protocol.inspect}")
       end
@@ -26,16 +26,17 @@ module PatientHttp
       @proxy_url = proxy_url
       @retries = retries
       @protocol = protocol
+      @connection_limit = connection_limit
       @mutex = Mutex.new
       @proxy_client = nil
     end
 
-    attr_reader :max_size, :connection_timeout, :proxy_url, :retries, :protocol
+    attr_reader :max_size, :connection_timeout, :proxy_url, :retries, :protocol, :connection_limit
 
     # Get or create a client for the given endpoint.
     #
     # @param endpoint [Async::HTTP::Endpoint] the target endpoint
-    # @return [Protocol::HTTP::AcceptEncoding] wrapped client
+    # @return [Async::HTTP::Client] the client for the endpoint's host
     def client_for(endpoint)
       key = host_key(endpoint)
 
@@ -154,13 +155,15 @@ module PatientHttp
     end
 
     def make_client(endpoint)
-      client = @proxy_url ? make_proxied_client(endpoint) : make_direct_client(endpoint)
-      ::Protocol::HTTP::AcceptEncoding.new(client)
+      # Response bodies are decoded by ResponseReader on a completion worker
+      # thread instead of a Protocol::HTTP::AcceptEncoding wrapper, so the
+      # reactor thread never pays for inflating compressed bodies.
+      @proxy_url ? make_proxied_client(endpoint) : make_direct_client(endpoint)
     end
 
     def make_direct_client(endpoint)
       configured_endpoint = configure_endpoint(endpoint)
-      Async::HTTP::Client.new(configured_endpoint, retries: @retries)
+      Async::HTTP::Client.new(configured_endpoint, retries: @retries, **client_options)
     end
 
     def make_proxied_client(endpoint)
@@ -170,7 +173,11 @@ module PatientHttp
       configured_endpoint = configure_endpoint(endpoint)
 
       proxy = @proxy_client.proxy(configured_endpoint)
-      Async::HTTP::Client.new(proxy.wrap_endpoint(configured_endpoint), retries: @retries)
+      Async::HTTP::Client.new(proxy.wrap_endpoint(configured_endpoint), retries: @retries, **client_options)
+    end
+
+    def client_options
+      @connection_limit ? {limit: @connection_limit} : {}
     end
 
     def create_proxy_client

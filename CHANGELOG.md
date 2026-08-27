@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.5.0
+
+### Added
+
+- Completion executor: finished results are now delivered on a small pool of worker threads (`Configuration#completion_threads`, default 2, minimum 1) instead of the reactor thread. Response decoding, payload encoding, task-handler callbacks, and `request_end` observers all run on these threads, so the reactor only performs socket I/O and light bookkeeping.
+- `Configuration#completion_retries` (default 2): delivery of a finished result is retried with a short backoff before the failure is reported. A retry calls `on_complete`/`on_error` again, so handlers must be idempotent; set `completion_retries: 0` to report the first failure without retrying.
+- `ProcessorObserver#completion_failed(request_task, error)`: sent when a result could not be delivered after all retries. `request_end` is NOT sent in this case, so durable tracking (crash-recovery records) stays in place and the request can be recovered by an external process instead of being silently lost. This replaces the previous behavior where a delivery failure was logged, swallowed, and the tracking was torn down.
+- `Configuration#max_connections_per_host` (default nil = unlimited): bounds the number of connections each host's HTTP client may open, which bounds file descriptor usage.
+- `Processor#remaining_capacity` and `Processor#capacity_available?`: cheap, advisory capacity checks with no observer notifications, so integrations can reject work before paying registration costs.
+- Named processors: `Processor.new(config, name:)` names a processor (used in its thread names), and `Request` accepts a `processor:` option that survives serialization (`as_json` / `load`), so integrations can route requests to one of several processors in the same process. `RequestTemplate`, `RequestHelper`, and `PatientHttp.request` pass the option through. `PatientHttp::UnknownProcessorError` is defined for handlers to raise for unrecognized names. Serialized output for requests without a processor name is unchanged.
+
+### Changed
+
+- Compressed response bodies (gzip/deflate) are now inflated on a completion worker thread instead of the reactor thread. The size limit still applies to the inflated bytes, so gzip-bomb protection is unchanged. The `content-encoding` header is removed from the response after decoding, as before.
+- Requests send `accept-encoding: gzip` by default, but a request that sets the header keeps its own value. Set `accept-encoding: identity` on a request to opt out of compression, or name another encoding to receive the body still encoded. Previously the header was set unconditionally.
+- Inline and synchronous execution decodes response bodies through the same reader as the async path instead of a `Protocol::HTTP::AcceptEncoding` middleware. The middleware overwrote the request's `accept-encoding` header, so a request opting out of compression was previously honored only when it ran on the processor.
+- A `content-encoding` header naming more than one encoding is now decoded from the outermost encoding inward, and `identity` is recognized. Previously only a header holding exactly one supported name was decoded, so a value such as `gzip, identity` delivered the body still compressed.
+- A response body carrying an encoding the reader cannot decode is delivered unchanged with a `content-encoding` header naming only the encodings still applied, and the condition is now logged as a warning. Such a body keeps its binary encoding, because the Content-Type charset does not describe encoded bytes.
+- `ProcessorObserver` hooks no longer all run on the reactor thread; see the class documentation for the thread each hook runs on. `request_end` and `request_error` for completed requests now run on completion worker threads.
+- **Breaking for callbacks:** `TaskHandler` callbacks and completion-time observer hooks must now be thread-safe. The reactor thread previously serialized them; they now run concurrently on `completion_threads` workers, in an order unrelated to the order the requests completed. Set `completion_threads: 1` to restore serialized delivery.
+- On shutdown, results that were already handed off for delivery are delivered before remaining tasks are re-enqueued.
+
+### Fixed
+
+- A `deflate` response body carrying a zlib header, which is the format RFC 9110 specifies for that encoding, failed to inflate with `Zlib::DataError: invalid stored block lengths`. Both the zlib and the raw deflate wire formats are now supported.
+- A response body that a text content type claims is text, but that does not hold text, is now stored as a binary payload instead of as text. Such a body could not be serialized, so `JSON.generate` raised `JSON::GeneratorError` and the result could never be delivered. This happened for a body still carrying a content encoding the reader cannot decode (for example `br`), and for text holding an invalid byte sequence.
+
 ## 1.4.0
 
 ### Added

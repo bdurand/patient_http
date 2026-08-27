@@ -58,7 +58,7 @@ RSpec.describe PatientHttp::Client do
           )
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:status]).to eq(200)
@@ -94,7 +94,7 @@ RSpec.describe PatientHttp::Client do
           )
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:status]).to eq(201)
@@ -129,7 +129,7 @@ RSpec.describe PatientHttp::Client do
           )
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:status]).to eq(200)
@@ -154,7 +154,7 @@ RSpec.describe PatientHttp::Client do
           .to_return(status: 204, body: "")
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:status]).to eq(204)
@@ -176,7 +176,7 @@ RSpec.describe PatientHttp::Client do
           .to_return(status: 200, body: "OK")
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:status]).to eq(200)
@@ -197,7 +197,7 @@ RSpec.describe PatientHttp::Client do
           .to_return(status: 200, body: "Slow response")
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:status]).to eq(200)
@@ -220,7 +220,7 @@ RSpec.describe PatientHttp::Client do
 
         expect {
           Async do
-            client.make_request(request, request_id)
+            client.decode_response(client.make_request(request, request_id))
           end.wait
         }.to raise_error(Async::TimeoutError)
       end
@@ -236,7 +236,7 @@ RSpec.describe PatientHttp::Client do
           )
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:status]).to eq(404)
@@ -254,11 +254,73 @@ RSpec.describe PatientHttp::Client do
           )
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:status]).to eq(500)
         expect(result[:body]).to eq("Internal Server Error")
+      end
+    end
+
+    context "with a content-encoding header" do
+      it "inflates a gzip body and drops the header" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_return(status: 200, body: Zlib.gzip("Hello, World!"), headers: {"Content-Encoding" => "gzip"})
+
+        result = Async do
+          client.decode_response(client.make_request(request, request_id))
+        end.wait
+
+        expect(result[:body]).to eq("Hello, World!")
+        expect(result[:headers]).not_to have_key("content-encoding")
+      end
+
+      it "drops the header when the list is fully decoded" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_return(status: 200, body: Zlib.gzip("Hello, World!"), headers: {"Content-Encoding" => "gzip, identity"})
+
+        result = Async do
+          client.decode_response(client.make_request(request, request_id))
+        end.wait
+
+        expect(result[:body]).to eq("Hello, World!")
+        expect(result[:headers]).not_to have_key("content-encoding")
+      end
+
+      it "keeps the header when the encoding is not supported" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_return(status: 200, body: "raw-bytes", headers: {"Content-Encoding" => "br"})
+
+        result = Async do
+          client.decode_response(client.make_request(request, request_id))
+        end.wait
+
+        expect(result[:body]).to eq("raw-bytes")
+        expect(result[:headers]["content-encoding"]).to eq("br")
+      end
+
+      it "keeps only the encodings still applied to the body" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_return(status: 200, body: Zlib.gzip("raw-bytes"), headers: {"Content-Encoding" => "br, gzip"})
+
+        result = Async do
+          client.decode_response(client.make_request(request, request_id))
+        end.wait
+
+        expect(result[:body]).to eq("raw-bytes")
+        expect(result[:headers]["content-encoding"]).to eq("br")
+      end
+
+      it "drops the header when there is no body to describe" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_return(status: 204, body: nil, headers: {"Content-Encoding" => "gzip"})
+
+        result = Async do
+          client.decode_response(client.make_request(request, request_id))
+        end.wait
+
+        expect(result[:body]).to be_nil
+        expect(result[:headers]).not_to have_key("content-encoding")
       end
     end
 
@@ -268,7 +330,7 @@ RSpec.describe PatientHttp::Client do
           .to_return(status: 204, body: "")
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:status]).to eq(204)
@@ -301,7 +363,7 @@ RSpec.describe PatientHttp::Client do
           .to_return(status: 200, body: "OK")
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:status]).to eq(200)
@@ -326,7 +388,7 @@ RSpec.describe PatientHttp::Client do
           .to_return(status: 200, body: "OK")
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:status]).to eq(200)
@@ -363,7 +425,7 @@ RSpec.describe PatientHttp::Client do
           .to_return(status: 200, body: "OK")
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:status]).to eq(200)
@@ -377,7 +439,7 @@ RSpec.describe PatientHttp::Client do
 
         expect {
           Async do
-            client.make_request(request, request_id)
+            client.decode_response(client.make_request(request, request_id))
           end.wait
         }.to raise_error(SocketError, "Failed to connect")
       end
@@ -391,7 +453,7 @@ RSpec.describe PatientHttp::Client do
 
         expect {
           Async do
-            client.make_request(request, request_id)
+            client.decode_response(client.make_request(request, request_id))
           end.wait
         }.to raise_error(Errno::ECONNABORTED)
 
@@ -413,7 +475,7 @@ RSpec.describe PatientHttp::Client do
           )
 
         result = Async do
-          client.make_request(request, request_id)
+          client.decode_response(client.make_request(request, request_id))
         end.wait
 
         expect(result[:headers]["content-type"]).to eq("application/json")

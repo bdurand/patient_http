@@ -349,6 +349,17 @@ RSpec.describe PatientHttp do
 
         expect(result).to eq("request-id")
       end
+
+      it "passes the processor name through to the handler's request" do
+        described_class.request(
+          :get,
+          "https://api.example.com/test",
+          callback: "TestCallback",
+          processor: :llm
+        )
+
+        expect(@captured_request.processor).to eq("llm")
+      end
     end
   end
 

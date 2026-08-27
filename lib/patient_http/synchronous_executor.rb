@@ -20,6 +20,7 @@ module PatientHttp
       @on_error = on_error
       @proxy_client = nil
       @request_preparer = RequestPreparer.new(config)
+      @response_reader = ResponseReader.new(nil, config: config)
     end
 
     # Execute the request synchronously.
@@ -62,11 +63,12 @@ module PatientHttp
               # flattened to a single joined string value.
               headers_hash = async_response.headers.to_h.transform_values(&:to_s)
 
-              body_content = read_response_body(async_response, headers_hash)
+              chunks = read_response_body(async_response, headers_hash)
+              body_content = @response_reader.decode_body(chunks, headers_hash)
 
               {
                 status: async_response.status,
-                headers: headers_hash,
+                headers: ResponseReader.rewrite_content_encoding(headers_hash),
                 body: body_content
               }
             end
@@ -133,19 +135,22 @@ module PatientHttp
 
     # Create HTTP client with config settings (retries, proxy, connection timeout).
     #
+    # The client is not wrapped in a Protocol::HTTP::AcceptEncoding middleware.
+    # That wrapper overwrites the request's accept-encoding header, which would
+    # ignore a caller opting out of compression, so response bodies are decoded
+    # by ResponseReader here exactly as they are on the async path.
+    #
     # @param url [String] the resolved request URL
-    # @return [Protocol::HTTP::AcceptEncoding] wrapped HTTP client
+    # @return [Async::HTTP::Client] the HTTP client
     def create_http_client(url)
       endpoint = Async::HTTP::Endpoint.parse(url)
       endpoint = configure_endpoint(endpoint) if @config.connection_timeout
 
-      client = if @config.proxy_url
+      if @config.proxy_url
         create_proxied_client(endpoint)
       else
         Async::HTTP::Client.new(endpoint, retries: @config.retries)
       end
-
-      Protocol::HTTP::AcceptEncoding.new(client)
     end
 
     # Create a proxied HTTP client.
@@ -174,11 +179,13 @@ module PatientHttp
       )
     end
 
-    # Read the response body with size validation.
+    # Read the raw response body chunks with size validation. The chunks are
+    # the wire bytes; ResponseReader#decode_body inflates and applies the
+    # charset, enforcing the same limit on the inflated bytes.
     #
     # @param async_response [Async::HTTP::Protocol::Response] the async HTTP response
     # @param headers_hash [Hash] the response headers
-    # @return [String, nil] the response body
+    # @return [Array<String>, nil] the raw body chunks or nil if no body present
     def read_response_body(async_response, headers_hash)
       return nil unless async_response.body
 
@@ -210,31 +217,7 @@ module PatientHttp
         async_response.body.close unless finished
       end
 
-      body = chunks.join.force_encoding(Encoding::ASCII_8BIT)
-
-      charset = extract_charset(headers_hash)
-      if charset
-        begin
-          encoding = Encoding.find(charset)
-          body.force_encoding(encoding)
-        rescue ArgumentError
-          # Invalid charset, keep binary
-        end
-      end
-
-      body
-    end
-
-    # Extract charset from Content-Type header.
-    def extract_charset(headers_hash)
-      content_type = headers_hash["content-type"]
-      return nil unless content_type
-
-      match = content_type.match(/;\s*charset\s*=\s*([^;\s]+)/i)
-      return nil unless match
-
-      charset = match[1].strip
-      charset.gsub(/\A["']|["']\z/, "")
+      chunks
     end
 
     # Invoke callback synchronously.

@@ -34,12 +34,14 @@ module PatientHttp
     # @param timeout [Float] Default request timeout in seconds
     # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] Default preprocessors
     #   to apply to all requests
-    def initialize(base_url: nil, headers: {}, params: nil, timeout: 30, preprocessors: nil)
+    # @param processor [String, Symbol, nil] Default processor name for all requests
+    def initialize(base_url: nil, headers: {}, params: nil, timeout: 30, preprocessors: nil, processor: nil)
       @base_url = base_url
       @headers = HttpHeaders.new(headers)
       @params = params
       @timeout = timeout
       @preprocessors = preprocessors
+      @processor = processor
     end
 
     # Build an async HTTP request. Returns a Request object.
@@ -52,8 +54,10 @@ module PatientHttp
     # @param params [Hash, nil] query parameters to add to URL
     # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] preprocessors to apply
     #   to the request (overrides the template default)
+    # @param processor [String, Symbol, nil] processor name for the request (overrides the
+    #   template default)
     # @return [Request] request object
-    def request(method, uri, body: nil, json: nil, headers: nil, params: nil, timeout: nil, preprocessors: nil)
+    def request(method, uri, body: nil, json: nil, headers: nil, params: nil, timeout: nil, preprocessors: nil, processor: nil)
       full_uri = @base_url ? URI.join(@base_url, uri.to_s) : URI(uri)
 
       merged_headers = headers&.any? ? @headers.merge(headers) : @headers
@@ -68,7 +72,8 @@ module PatientHttp
         json: json,
         params: merged_params,
         timeout: timeout || @timeout,
-        preprocessors: preprocessors || @preprocessors
+        preprocessors: preprocessors || @preprocessors,
+        processor: processor || @processor
       )
     end
 

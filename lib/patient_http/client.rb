@@ -9,13 +9,18 @@ module PatientHttp
         connection_timeout: config.connection_timeout,
         proxy_url: config.proxy_url,
         retries: config.retries,
-        protocol: config.protocol
+        protocol: config.protocol,
+        connection_limit: config.max_connections_per_host
       )
       @response_reader = ResponseReader.new(@processor)
       @request_preparer = RequestPreparer.new(config)
     end
 
     # Make an asynchronous HTTP request.
+    #
+    # The returned body is the array of raw (possibly compressed) body chunks;
+    # use {#decode_response} to produce the final body string. Splitting the
+    # decode out keeps CPU-bound work off the reactor thread.
     #
     # @param request [Request] the request to make
     # @param request_id [String] unique request identifier
@@ -35,7 +40,7 @@ module PatientHttp
           # Note: headers that appear multiple times (e.g. set-cookie) are
           # flattened to a single joined string value.
           headers_hash = async_response.headers.to_h.transform_values(&:to_s)
-          body = @response_reader.read_body(async_response, headers_hash)
+          body = @response_reader.read_raw_body(async_response, headers_hash)
 
           {
             status: async_response.status,
@@ -52,6 +57,26 @@ module PatientHttp
         end
         raise
       end
+    end
+
+    # Decode raw response data into deliverable response data.
+    #
+    # Joins and inflates the raw body chunks, applies the charset, and rewrites
+    # the content-encoding header to name only the encodings still applied to
+    # the body. The header is removed when nothing is left, and kept when the
+    # server used an encoding the reader cannot decode, so the delivered
+    # response always describes the body it carries. This is CPU-bound work
+    # intended to run on a completion worker thread.
+    #
+    # @param response_data [Hash] raw response data from {#make_request}
+    # @return [Hash] response data with the decoded body string
+    # @raise [ResponseTooLargeError] if the inflated body exceeds max_response_size
+    def decode_response(response_data)
+      headers = response_data[:headers]
+      body = @response_reader.decode_body(response_data[:body], headers)
+      headers = ResponseReader.rewrite_content_encoding(headers)
+
+      response_data.merge(headers: headers, body: body)
     end
 
     # Close all clients and release resources.

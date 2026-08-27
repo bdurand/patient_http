@@ -20,6 +20,38 @@ RSpec.describe PatientHttp::SynchronousExecutor do
     TestCallback.reset_calls!
   end
 
+  describe "response compression" do
+    def run(headers)
+      request = PatientHttp::Request.new(:get, "https://api.example.com/data", headers: headers)
+      task_handler = TestTaskHandler.new({"class" => "TestWorker", "jid" => SecureRandom.uuid, "args" => []})
+      task = PatientHttp::RequestTask.new(request: request, task_handler: task_handler, callback: TestCallback)
+      described_class.new(task, config: config).call
+    end
+
+    it "asks for gzip by default and inflates the body" do
+      stub_request(:get, "https://api.example.com/data")
+        .with(headers: {"Accept-Encoding" => "gzip"})
+        .to_return(status: 200, body: Zlib.gzip("hello"), headers: {"Content-Encoding" => "gzip"})
+
+      run({})
+
+      response = TestCallback.completion_calls.first
+      expect(response.body).to eq("hello")
+      expect(response.headers["content-encoding"]).to be_nil
+    end
+
+    it "keeps an accept-encoding header set on the request" do
+      stub_request(:get, "https://api.example.com/data")
+        .with(headers: {"Accept-Encoding" => "identity"})
+        .to_return(status: 200, body: "hello")
+
+      run({"accept-encoding" => "identity"})
+
+      expect(TestCallback.error_calls).to be_empty
+      expect(TestCallback.completion_calls.first.body).to eq("hello")
+    end
+  end
+
   describe "#call" do
     it "invokes the callback on_complete with the response" do
       stub_request(:get, "https://api.example.com/data")

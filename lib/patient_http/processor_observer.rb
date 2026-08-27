@@ -2,9 +2,31 @@
 
 module PatientHttp
   # Interface for observing request processing. A process observer can be registered with
-  # a Processor and receive events as requests are processed. Observers will run on the main
-  # processor thread and so should be lightweight and not do processing other than recording
-  # metrics or similar.
+  # a Processor and receive events as requests are processed. Observers should be
+  # lightweight and not do processing other than recording metrics or similar.
+  #
+  # Hooks run on different threads depending on where the event originates:
+  # - request_enqueued, request_rejected: the thread calling Processor#enqueue
+  #   (usually an application thread), and the reactor thread for each task
+  #   created to follow a redirect. Work done in these hooks blocks the reactor
+  #   for redirected requests, so keep it off the critical path or accept the
+  #   delay it adds to every other in-flight request
+  # - capacity_exceeded: the thread calling Processor#enqueue (usually an
+  #   application thread)
+  # - request_start: the reactor thread
+  # - request_end, request_error, completion_failed: a completion worker
+  #   thread (request_end also fires on the reactor thread for followed
+  #   redirects, and on the stopping thread for shutdown re-enqueues)
+  # - request_requeued: the stopping thread or the reactor thread
+  # - start, stop: the thread calling Processor#start / Processor#stop
+  #
+  # Observers must be thread-safe. Hooks are called from several threads, and
+  # the completion-time hooks run on any of the completion worker threads, so
+  # two of them can run at the same time and in an order unrelated to the
+  # order the requests completed. Guard any counter or buffer an observer
+  # shares between calls. Setting completion_threads to 1 serializes the
+  # completion-time hooks but does not serialize them against the hooks that
+  # fire on other threads.
   class ProcessorObserver
     # Called when the processor starts.
     #
@@ -78,6 +100,17 @@ module PatientHttp
     # @param error [StandardError] the error that occurred
     # @return [void]
     def request_error(error)
+    end
+
+    # Called when a finished result could not be delivered to the task handler
+    # after all retries. request_end is NOT sent for the task, so durable
+    # tracking set up in request_enqueued stays in place and an external
+    # recovery process (e.g. an orphan collector) can re-enqueue the request.
+    #
+    # @param request_task [RequestTask] the request task whose result was not delivered
+    # @param error [StandardError] the delivery failure
+    # @return [void]
+    def completion_failed(request_task, error)
     end
   end
 end
