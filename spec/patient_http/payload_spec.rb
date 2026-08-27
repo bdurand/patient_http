@@ -68,6 +68,36 @@ RSpec.describe PatientHttp::Payload do
       end
     end
 
+    context "with a text mimetype and a value that is not text" do
+      it "encodes a body still carrying an undecodable content encoding as binary" do
+        value = Zlib.gzip(%({"key":"value"})).b
+
+        encoding, encoded, charset = described_class.encode(value, "application/json")
+
+        expect(encoding).to eq(:binary)
+        expect(charset).to eq(Encoding::BINARY.name)
+        expect(described_class.decode(encoded, encoding, charset)).to eq(value)
+      end
+
+      it "encodes text holding an invalid byte sequence as binary" do
+        value = (+"caf\xE9").force_encoding(Encoding::UTF_8)
+
+        encoding, encoded, charset = described_class.encode(value, "text/plain; charset=utf-8")
+
+        expect(encoding).to eq(:binary)
+        expect(described_class.decode(encoded, encoding, charset).b).to eq(value.b)
+      end
+
+      it "produces a payload that can be serialized as JSON" do
+        value = Zlib.gzip(%({"key":"value"})).b
+
+        encoding, encoded, charset = described_class.encode(value, "application/json")
+        payload = described_class.new(encoding, encoded, charset)
+
+        expect { JSON.generate(payload.as_json) }.not_to raise_error
+      end
+    end
+
     context "with binary mimetype" do
       let(:mimetype) { "application/octet-stream" }
 

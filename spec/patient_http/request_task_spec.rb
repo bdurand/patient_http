@@ -311,6 +311,19 @@ RSpec.describe PatientHttp::RequestTask do
       expect(redirect_task.redirects).to eq(["https://example.com/first", "https://api.example.com/users"])
     end
 
+    it "preserves the processor name" do
+      named_request = PatientHttp::Request.new(:get, "https://api.example.com/users", processor: :llm)
+      task = described_class.new(
+        request: named_request,
+        task_handler: task_handler,
+        callback: callback
+      )
+
+      redirect_task = task.redirect_task(location: "https://api.example.com/new-location", status: 302)
+
+      expect(redirect_task.request.processor).to eq("llm")
+    end
+
     it "preserves callback and callback_args" do
       task = described_class.new(
         request: request,

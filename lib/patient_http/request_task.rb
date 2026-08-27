@@ -236,7 +236,8 @@ module PatientHttp
         body: redirect_body,
         timeout: request.timeout,
         max_redirects: request.max_redirects,
-        preprocessors: redirect_preprocessors
+        preprocessors: redirect_preprocessors,
+        processor: request.processor
       )
 
       redirect_task_id = "#{id.split("/").first}/#{@redirects.size + 2}"

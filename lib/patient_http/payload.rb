@@ -29,7 +29,9 @@ module PatientHttp
       # Encodes a value based on its MIME type.
       #
       # For text-based content types, applies gzip compression if beneficial.
-      # For binary content, uses Base64 encoding.
+      # For binary content, uses Base64 encoding. A value that a text MIME type
+      # claims is text but that does not hold text is encoded as binary as
+      # well, because the serialized form must survive JSON encoding.
       #
       # @param value [String] the value to encode
       # @param mimetype [String, nil] the MIME type of the content
@@ -38,21 +40,11 @@ module PatientHttp
         return nil if value.nil?
 
         if is_text_mimetype?(mimetype)
-          value = text_value(value, charset(mimetype))
-
-          if value.bytesize < 4096
-            [:text, value, value.encoding.name]
-          else
-            gzipped = Zlib.gzip(value)
-            if gzipped.bytesize < value.bytesize
-              [:gzipped, [gzipped].pack("m0"), value.encoding.name]
-            else
-              [:text, value, value.encoding.name]
-            end
-          end
-        else
-          [:binary, [value].pack("m0"), Encoding::BINARY.name]
+          text = text_value(value, charset(mimetype))
+          return encode_text(text) if text?(text)
         end
+
+        [:binary, [value].pack("m0"), Encoding::BINARY.name]
       end
 
       # Decodes an encoded value based on its encoding type.
@@ -77,6 +69,36 @@ module PatientHttp
       end
 
       private
+
+      # Encode a text value, compressing it when that makes it smaller.
+      #
+      # @param value [String] the text to encode
+      # @return [Array(Symbol, String, String)] [encoding, encoded_value, charset]
+      def encode_text(value)
+        return [:text, value, value.encoding.name] if value.bytesize < 4096
+
+        gzipped = Zlib.gzip(value)
+        if gzipped.bytesize < value.bytesize
+          [:gzipped, [gzipped].pack("m0"), value.encoding.name]
+        else
+          [:text, value, value.encoding.name]
+        end
+      end
+
+      # Whether a value can be serialized as text. JSON encoding converts a
+      # string to UTF-8, so the value must either be valid text in its own
+      # encoding or hold bytes that are already valid UTF-8. A body still
+      # carrying a content encoding the reader could not decode holds neither,
+      # even though its MIME type names a text type.
+      #
+      # @param value [String] the value to check
+      # @return [Boolean]
+      def text?(value)
+        return value.valid_encoding? unless value.encoding == Encoding::BINARY
+        return true if value.ascii_only?
+
+        value.dup.force_encoding(Encoding::UTF_8).valid_encoding?
+      end
 
       def is_text_mimetype?(mimetype)
         mimetype&.match?(/\Atext\/|application\/(?:json|xml|javascript)/)

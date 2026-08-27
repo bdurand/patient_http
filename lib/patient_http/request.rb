@@ -42,6 +42,11 @@ module PatientHttp
     #   to apply to the request when it is sent
     attr_reader :preprocessors
 
+    # @return [String, nil] Name of the processor that should execute the request.
+    #   Integrations use this to route the request to a named processor; nil
+    #   uses the default processor.
+    attr_reader :processor
+
     class << self
       # Reconstruct a Request from a hash
       #
@@ -56,7 +61,8 @@ module PatientHttp
           params: load_secret_params(hash["secret_params"]),
           timeout: hash["timeout"],
           max_redirects: hash["max_redirects"],
-          preprocessors: hash["preprocessors"]
+          preprocessors: hash["preprocessors"],
+          processor: hash["processor"]
         )
       end
 
@@ -91,6 +97,8 @@ module PatientHttp
     # @param max_redirects [Integer, nil] Maximum redirects to follow (nil uses config, 0 disables).
     # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] Names of preprocessors
     #   registered on the configuration to apply to the request when it is sent.
+    # @param processor [String, Symbol, nil] Name of the processor that should execute the
+    #   request. Integrations use this to route the request to a named processor.
     def initialize(
       http_method,
       url,
@@ -100,7 +108,8 @@ module PatientHttp
       params: nil,
       timeout: nil,
       max_redirects: nil,
-      preprocessors: nil
+      preprocessors: nil,
+      processor: nil
     )
       @http_method = http_method.is_a?(String) ? http_method.downcase.to_sym : http_method
 
@@ -117,6 +126,7 @@ module PatientHttp
       @timeout = timeout
       @max_redirects = max_redirects
       @preprocessors = normalized_preprocessors(preprocessors)
+      @processor = normalized_processor(processor)
 
       if json
         raise ArgumentError.new("Cannot provide both body and json") if @body
@@ -158,6 +168,7 @@ module PatientHttp
       end
 
       hash["preprocessors"] = @preprocessors if @preprocessors.any?
+      hash["processor"] = @processor if @processor
 
       hash
     end
@@ -169,6 +180,16 @@ module PatientHttp
       @headers.to_h.transform_values do |value|
         value.is_a?(SecretReference) ? value.as_json : value
       end
+    end
+
+    # Normalize the processor name to a frozen string or nil.
+    def normalized_processor(processor)
+      return nil if processor.nil?
+
+      name = processor.to_s
+      raise ArgumentError.new("processor name cannot be empty") if name.empty?
+
+      name.freeze
     end
 
     # Normalize preprocessor names to a frozen array of strings.

@@ -30,6 +30,12 @@ module PatientHttp
 
   class ResponseTooLargeError < StandardError; end
 
+  # Raised when a request names a processor that is not configured. Handlers
+  # that support named processors raise this at enqueue time; the executing
+  # side raises it for a job that names an unconfigured processor so the job
+  # lands in the job system's retry mechanism instead of being dropped.
+  class UnknownProcessorError < StandardError; end
+
   # HTTP redirect status codes that should be followed
   FOLLOWABLE_REDIRECT_STATUSES = [301, 302, 303, 307, 308].freeze
 
@@ -45,6 +51,7 @@ module PatientHttp
   autoload :Client, File.join(__dir__, "patient_http/client")
   autoload :ClientError, File.join(__dir__, "patient_http/http_error")
   autoload :ClientPool, File.join(__dir__, "patient_http/client_pool")
+  autoload :CompletionExecutor, File.join(__dir__, "patient_http/completion_executor")
   autoload :Configuration, File.join(__dir__, "patient_http/configuration")
   autoload :Encryptor, File.join(__dir__, "patient_http/encryptor")
   autoload :Error, File.join(__dir__, "patient_http/error")
@@ -323,6 +330,8 @@ module PatientHttp
     # @param callback_args [Hash, nil] JSON-compatible callback arguments
     # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] names of preprocessors
     #   registered on the configuration to apply to the request when it is sent
+    # @param processor [String, Symbol, nil] name of the processor that should execute
+    #   the request; handlers that support named processors route on this value
     # @return [Object] return value from the registered request handler
     def request(
       method,
@@ -335,7 +344,8 @@ module PatientHttp
       timeout: nil,
       raise_error_responses: nil,
       callback_args: nil,
-      preprocessors: nil
+      preprocessors: nil,
+      processor: nil
     )
       request = Request.new(
         method,
@@ -345,7 +355,8 @@ module PatientHttp
         headers: headers,
         params: params,
         timeout: timeout,
-        preprocessors: preprocessors
+        preprocessors: preprocessors,
+        processor: processor
       )
       execute(
         request: request,

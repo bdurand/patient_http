@@ -34,8 +34,8 @@ class MyTaskHandler < PatientHttp::TaskHandler
 
   def on_complete(response, callback)
     # Enqueue a message for your application to process the response.
-    # Keep this lightweight -- don't do heavy processing here since
-    # it runs on the processor thread.
+    # Keep this lightweight and thread-safe -- it runs on a completion
+    # worker thread, concurrently with other completions.
     MyJobSystem.enqueue(callback, :on_complete, response.as_json)
   end
 
@@ -51,7 +51,11 @@ class MyTaskHandler < PatientHttp::TaskHandler
 end
 ```
 
-> **Important:** TaskHandler callbacks run on the processor's reactor thread. They should be lightweight and fast -- typically just enqueuing a message for another system to pick up. Doing heavy processing in a callback will block the reactor and delay other in-flight requests.
+> **Important:** TaskHandler callbacks run on the processor's completion worker threads (see `completion_threads`), not the reactor thread, so they no longer block the event loop. Keep them lightweight anyway -- typically just enqueuing a message for another system to pick up. Heavy callbacks compete with the reactor for the GVL, and because a task stays in the capacity count until its result is delivered, callbacks that back up consume request capacity.
+>
+> Callbacks must be thread-safe. Results are delivered concurrently on `completion_threads` workers (default 2), so two callbacks can run at the same time and in an order unrelated to the order the requests completed. Set `completion_threads: 1` to serialize delivery.
+>
+> Callbacks must also be idempotent. A callback that raises is retried `completion_retries` times (default 2), so one that raises after enqueuing its message enqueues it again. Set `completion_retries: 0` if that is not acceptable.
 
 ### 2. Create and Enqueue Requests
 
@@ -685,9 +689,14 @@ config.register_secret(:api_token, ENV["MY_API_TOKEN"])
 ### Tuning Tips
 
 - **max_connections**: Each connection uses memory and file descriptors. A tuned system can handle thousands.
+- **max_connections_per_host**: Bounds sockets per host (default unlimited). Set a value such as 32 for high-concurrency deployments so one host cannot consume every file descriptor. Verify the process file descriptor limit covers `max_connections` plus pooled idle host connections plus the application's own connections.
 - **request_timeout**: Set based on expected API response times. AI/LLM APIs may need minutes.
 - **connection_pool_size**: Increase for applications calling many different API hosts.
-- **max_response_size**: Keeps memory usage bounded. Large responses may need external payload storage.
+- **max_response_size**: Keeps memory usage bounded. Large responses may need external payload storage. The limit applies to the inflated bytes of compressed responses.
+- **Response compression**: Requests ask for `gzip` by default and the body is inflated on a completion worker thread. Set `accept-encoding` on a request to change this: `identity` skips compression, and any other encoding is delivered still encoded with its `content-encoding` header kept so you can decode it yourself.
+- **completion_threads**: Number of threads that decode responses and deliver results (default 2). Increase when callbacks do heavier work (serialization, encryption) and completions back up behind them. Any value above 1 delivers results concurrently, so `TaskHandler` callbacks and completion-time observers must be thread-safe. Use 1 to serialize delivery.
+- **completion_retries**: Delivery retries before a result is reported through `completion_failed` (default 2). A retry calls `on_complete`/`on_error` again, so a handler that raises *after* enqueuing its message delivers that message twice. Make handlers idempotent, or set `completion_retries: 0` to report the first failure without retrying.
+- **shutdown_timeout**: Set below the process supervisor's termination window so the drain (including handed-off completions) finishes before a hard kill.
 
 ## Processor Lifecycle
 

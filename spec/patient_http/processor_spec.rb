@@ -1423,13 +1423,14 @@ RSpec.describe PatientHttp::Processor do
     # Observer that counts start / request_start / request_end callbacks.
     let(:counting_observer_class) do
       Class.new(PatientHttp::ProcessorObserver) do
-        attr_reader :starts, :stops, :request_starts, :request_ends
+        attr_reader :starts, :stops, :request_starts, :request_ends, :completion_failures
 
         def initialize
           @starts = Concurrent::AtomicFixnum.new(0)
           @stops = Concurrent::AtomicFixnum.new(0)
           @request_starts = Concurrent::AtomicFixnum.new(0)
           @request_ends = Concurrent::AtomicFixnum.new(0)
+          @completion_failures = Concurrent::AtomicFixnum.new(0)
         end
 
         def start
@@ -1446,6 +1447,10 @@ RSpec.describe PatientHttp::Processor do
 
         def request_end(_task)
           @request_ends.increment
+        end
+
+        def completion_failed(_task, _error)
+          @completion_failures.increment
         end
       end
     end
@@ -1583,9 +1588,9 @@ RSpec.describe PatientHttp::Processor do
 
     describe "completion callback failures", :disable_testing_mode do
       let(:log_output) { StringIO.new }
-      let(:config) { PatientHttp::Configuration.new(logger: Logger.new(log_output)) }
+      let(:config) { PatientHttp::Configuration.new(logger: Logger.new(log_output), completion_retries: 0) }
 
-      it "logs the failure and still finishes the task" do
+      it "logs the failure and fires completion_failed without request_end" do
         stub_request(:get, "https://api.example.com/users")
           .to_return(status: 200, body: "", headers: {})
 
@@ -1598,12 +1603,38 @@ RSpec.describe PatientHttp::Processor do
         processor.enqueue(request)
 
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 2
-        Thread.pass until observer.request_ends.value == 1 || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        Thread.pass until observer.completion_failures.value == 1 || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
         expect(log_output.string).to match(/Failed to enqueue completion callback for request #{Regexp.escape(request.id)}/)
         expect(observer.request_starts.value).to eq(1)
-        expect(observer.request_ends.value).to eq(1)
+        # request_end is suppressed so durable tracking survives for recovery.
+        expect(observer.request_ends.value).to eq(0)
+        expect(observer.completion_failures.value).to eq(1)
         expect(processor.inflight_count).to eq(0)
+      end
+
+      it "retries the delivery before giving up" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_return(status: 200, body: "", headers: {})
+
+        config.completion_retries = 2
+        observer = counting_observer_class.new
+        request = create_request_task
+        attempts = Concurrent::AtomicFixnum.new(0)
+        allow(request.task_handler).to receive(:on_complete) do
+          raise StandardError.new("job system blip") if attempts.increment < 3
+        end
+
+        processor.start
+        processor.observe(observer)
+        processor.enqueue(request)
+
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+        Thread.pass until observer.request_ends.value == 1 || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+        expect(attempts.value).to eq(3)
+        expect(observer.request_ends.value).to eq(1)
+        expect(observer.completion_failures.value).to eq(0)
       end
     end
 
@@ -1899,6 +1930,188 @@ RSpec.describe PatientHttp::Processor do
       expect(request.task_handler.completions.size).to eq(1)
       response = request.task_handler.completions.first[:response]
       expect(response.callback_args.as_json).to eq({"user_id" => 123, "action" => "fetch"})
+    end
+  end
+
+  describe "completion executor integration" do
+    it "delivers results on a completion worker thread, not the reactor" do
+      stub_request(:get, "https://api.example.com/users")
+        .to_return(status: 200, body: "OK", headers: {})
+
+      thread_name = nil
+      handler_class = Class.new(PatientHttp::TaskHandler) do
+        define_method(:on_complete) do |_response, _callback|
+          thread_name = Thread.current.name
+        end
+        define_method(:on_error) { |_error, _callback| }
+        define_method(:retry) { "retry-id" }
+      end
+
+      request = PatientHttp::Request.new(:get, "https://api.example.com/users")
+      task = PatientHttp::RequestTask.new(
+        request: request,
+        task_handler: handler_class.new,
+        callback: "TestCallback"
+      )
+
+      processor.start
+      processor.enqueue(task)
+      processor.wait_for_idle(timeout: 2)
+
+      expect(thread_name).to match(/\Apatient-http-completion-\d+\z/)
+    end
+
+    it "decodes gzip response bodies before delivering the response" do
+      gzipped = Zlib.gzip('{"users": []}')
+      stub_request(:get, "https://api.example.com/users")
+        .to_return(
+          status: 200,
+          body: gzipped,
+          headers: {"Content-Type" => "application/json", "Content-Encoding" => "gzip"}
+        )
+
+      processor.start
+      request = create_request_task
+      processor.enqueue(request)
+      processor.wait_for_idle(timeout: 2)
+
+      expect(request.task_handler.completions.size).to eq(1)
+      response = request.task_handler.completions.first[:response]
+      expect(response.body).to eq('{"users": []}')
+      expect(response.headers["content-encoding"]).to be_nil
+    end
+
+    it "delivers an error when the inflated body exceeds max_response_size" do
+      config.max_response_size = 64
+      gzipped = Zlib.gzip("a" * 10_000)
+      expect(gzipped.bytesize).to be < 64
+      stub_request(:get, "https://api.example.com/users")
+        .to_return(status: 200, body: gzipped, headers: {"Content-Encoding" => "gzip"})
+
+      processor.start
+      request = create_request_task
+      processor.enqueue(request)
+      processor.wait_for_idle(timeout: 2)
+
+      expect(request.task_handler.completions).to be_empty
+      expect(request.task_handler.errors.size).to eq(1)
+      error = request.task_handler.errors.first[:error]
+      expect(error.error_type).to eq(:response_too_large)
+    end
+
+    it "does not return from wait_for_idle before delivery completes" do
+      stub_request(:get, "https://api.example.com/users")
+        .to_return(status: 200, body: "OK", headers: {})
+
+      delivered = Concurrent::AtomicBoolean.new(false)
+      handler_class = Class.new(PatientHttp::TaskHandler) do
+        define_method(:on_complete) do |_response, _callback|
+          sleep(0.2)
+          delivered.value = true
+        end
+        define_method(:on_error) { |_error, _callback| }
+        define_method(:retry) { "retry-id" }
+      end
+
+      request = PatientHttp::Request.new(:get, "https://api.example.com/users")
+      task = PatientHttp::RequestTask.new(
+        request: request,
+        task_handler: handler_class.new,
+        callback: "TestCallback"
+      )
+
+      processor.start
+      processor.enqueue(task)
+      expect(processor.wait_for_idle(timeout: 2)).to be(true)
+
+      expect(delivered.value).to be(true)
+    end
+
+    it "delivers results already handed off when the processor stops" do
+      stub_request(:get, "https://api.example.com/users")
+        .to_return(status: 200, body: "OK", headers: {})
+
+      processor.start
+      request = create_request_task
+      processor.enqueue(request)
+      processor.wait_for_processing
+      processor.stop
+
+      expect(request.task_handler.completions.size).to eq(1)
+      expect(request.task_handler.retries).to be_empty
+    end
+  end
+
+  describe "named processors" do
+    it "runs two independent processors in one process" do
+      stub_request(:get, "https://api.example.com/users")
+        .to_return(status: 200, body: "OK", headers: {})
+
+      llm_processor = described_class.new(PatientHttp::Configuration.new(max_connections: 5), name: :llm)
+      webhook_processor = described_class.new(PatientHttp::Configuration.new(max_connections: 1), name: :webhooks)
+
+      begin
+        llm_processor.start
+        webhook_processor.start
+
+        expect(llm_processor.instance_variable_get(:@reactor_thread).name).to eq("patient-http-processor-llm")
+        expect(webhook_processor.instance_variable_get(:@reactor_thread).name).to eq("patient-http-processor-webhooks")
+        expect(llm_processor.name).to eq("llm")
+        expect(llm_processor.remaining_capacity).to eq(5)
+        expect(webhook_processor.remaining_capacity).to eq(1)
+
+        llm_request = create_request_task
+        llm_processor.enqueue(llm_request)
+        llm_processor.wait_for_idle(timeout: 2)
+        expect(llm_request.task_handler.completions.size).to eq(1)
+
+        # Stopping one processor does not disturb the other.
+        webhook_processor.stop
+        expect(webhook_processor).to be_stopped
+        expect(llm_processor).to be_running
+
+        second_request = create_request_task
+        llm_processor.enqueue(second_request)
+        llm_processor.wait_for_idle(timeout: 2)
+        expect(second_request.task_handler.completions.size).to eq(1)
+      ensure
+        llm_processor.stop
+        webhook_processor.stop
+      end
+    end
+
+    it "keeps the default thread name for the default processor" do
+      processor.start
+      expect(processor.name).to eq("default")
+      expect(processor.instance_variable_get(:@reactor_thread).name).to eq("patient-http-processor")
+    end
+  end
+
+  describe "#remaining_capacity" do
+    let(:config) { PatientHttp::Configuration.new(max_connections: 2) }
+
+    it "reports the configured capacity when idle" do
+      processor.start
+
+      expect(processor.remaining_capacity).to eq(2)
+      expect(processor.capacity_available?).to be(true)
+    end
+
+    it "reports zero when the pipeline is full" do
+      stub_request(:get, "https://api.example.com/users")
+        .to_return do
+          sleep(0.2)
+          {status: 200, body: "", headers: {}}
+        end
+
+      processor.start
+      2.times { processor.enqueue(create_request_task) }
+
+      expect(processor.remaining_capacity).to eq(0)
+      expect(processor.capacity_available?).to be(false)
+
+      processor.wait_for_idle(timeout: 2)
+      expect(processor.capacity_available?).to be(true)
     end
   end
 end

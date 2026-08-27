@@ -292,4 +292,68 @@ RSpec.describe PatientHttp::Configuration do
       expect(hash.to_s).not_to include("super-secret")
     end
   end
+
+  describe "#max_connections_per_host=" do
+    it "defaults to nil (unlimited)" do
+      expect(config.max_connections_per_host).to be_nil
+    end
+
+    it "accepts a positive integer" do
+      config.max_connections_per_host = 32
+      expect(config.max_connections_per_host).to eq(32)
+    end
+
+    it "accepts nil to remove the limit" do
+      config.max_connections_per_host = 32
+      config.max_connections_per_host = nil
+      expect(config.max_connections_per_host).to be_nil
+    end
+
+    it "rejects non-positive values" do
+      expect { config.max_connections_per_host = 0 }.to raise_error(ArgumentError, /positive integer/)
+    end
+
+    it "is included in to_h" do
+      config.max_connections_per_host = 16
+      expect(config.to_h["max_connections_per_host"]).to eq(16)
+    end
+  end
+
+  describe "#completion_threads=" do
+    it "defaults to 2" do
+      expect(config.completion_threads).to eq(2)
+    end
+
+    it "accepts a positive integer" do
+      config.completion_threads = 4
+      expect(config.completion_threads).to eq(4)
+    end
+
+    it "rejects zero" do
+      expect { config.completion_threads = 0 }.to raise_error(ArgumentError, /positive integer/)
+    end
+
+    it "is included in to_h" do
+      expect(config.to_h["completion_threads"]).to eq(2)
+    end
+  end
+
+  describe "#completion_retries=" do
+    it "defaults to 2" do
+      expect(config.completion_retries).to eq(2)
+    end
+
+    it "accepts zero to disable retries" do
+      config.completion_retries = 0
+      expect(config.completion_retries).to eq(0)
+    end
+
+    it "rejects negative values" do
+      expect { config.completion_retries = -1 }.to raise_error(ArgumentError, /non-negative integer/)
+    end
+
+    it "is included in to_h" do
+      expect(config.to_h["completion_retries"]).to eq(2)
+    end
+  end
 end

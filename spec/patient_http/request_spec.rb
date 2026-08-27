@@ -261,4 +261,37 @@ RSpec.describe PatientHttp::Request do
       expect(request.as_json).not_to have_key("preprocessors")
     end
   end
+
+  describe "processor name" do
+    it "defaults to nil" do
+      request = described_class.new(:get, "https://api.example.com")
+      expect(request.processor).to be_nil
+    end
+
+    it "normalizes a symbol to a frozen string" do
+      request = described_class.new(:get, "https://api.example.com", processor: :llm)
+      expect(request.processor).to eq("llm")
+      expect(request.processor).to be_frozen
+    end
+
+    it "rejects an empty name" do
+      expect {
+        described_class.new(:get, "https://api.example.com", processor: "")
+      }.to raise_error(ArgumentError, /processor name cannot be empty/)
+    end
+
+    it "is omitted from as_json when not set" do
+      request = described_class.new(:get, "https://api.example.com")
+      expect(request.as_json).not_to have_key("processor")
+      expect(request.as_json.keys).to match_array(%w[http_method url headers body timeout max_redirects])
+    end
+
+    it "round-trips through as_json and load" do
+      request = described_class.new(:get, "https://api.example.com", processor: :webhooks)
+      loaded = described_class.load(JSON.parse(JSON.generate(request.as_json)))
+
+      expect(request.as_json["processor"]).to eq("webhooks")
+      expect(loaded.processor).to eq("webhooks")
+    end
+  end
 end

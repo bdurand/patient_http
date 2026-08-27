@@ -28,6 +28,13 @@ module PatientHttp
       headers = @config.secret_manager.resolve_headers(request.headers.to_h)
       headers["x-request-id"] = request_id
       headers["user-agent"] ||= @config.user_agent if @config.user_agent
+      # Compressed responses are inflated by ResponseReader during response
+      # decoding rather than by a client middleware wrapper. Requesting gzip is
+      # the default because it is what the reader can decode, but a caller that
+      # sets the header keeps its own value: "identity" opts out of compression,
+      # and any other encoding is delivered still encoded with its
+      # content-encoding header intact.
+      headers["accept-encoding"] ||= "gzip"
       url = @config.secret_manager.resolve_url(request.url, request.secret_params)
 
       outgoing = OutgoingRequest.new(

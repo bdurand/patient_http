@@ -38,6 +38,24 @@ RSpec.describe PatientHttp::RequestPreparer do
       expect(outgoing.headers["user-agent"]).to eq("Custom/2.0")
     end
 
+    it "requests gzip by default" do
+      request = PatientHttp::Request.new(:get, "https://api.example.com")
+      outgoing = preparer.prepare(request, "req-1")
+      expect(outgoing.headers["accept-encoding"]).to eq("gzip")
+    end
+
+    it "does not override an accept-encoding set on the request" do
+      request = PatientHttp::Request.new(:get, "https://api.example.com", headers: {"Accept-Encoding" => "br"})
+      outgoing = preparer.prepare(request, "req-1")
+      expect(outgoing.headers["accept-encoding"]).to eq("br")
+    end
+
+    it "lets a request opt out of compression with identity" do
+      request = PatientHttp::Request.new(:get, "https://api.example.com", headers: {"accept-encoding" => "identity"})
+      outgoing = preparer.prepare(request, "req-1")
+      expect(outgoing.headers["accept-encoding"]).to eq("identity")
+    end
+
     it "invokes preprocessors with the resolved outgoing request" do
       seen = nil
       config.register_preprocessor(:signer) do |outgoing_request|

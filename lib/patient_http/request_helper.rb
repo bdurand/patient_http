@@ -116,14 +116,16 @@ module PatientHttp
       # @param timeout [Float] default timeout in seconds
       # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] default names of
       #   preprocessors registered on the configuration to apply to requests
+      # @param processor [String, Symbol, nil] default processor name for requests
       # @return [void]
-      def request_template(base_url: nil, headers: {}, params: nil, timeout: 30, preprocessors: nil)
+      def request_template(base_url: nil, headers: {}, params: nil, timeout: 30, preprocessors: nil, processor: nil)
         @patient_http_request_template = RequestTemplate.new(
           base_url: base_url,
           headers: headers,
           params: params,
           timeout: timeout,
-          preprocessors: preprocessors
+          preprocessors: preprocessors,
+          processor: processor
         )
       end
 
@@ -145,6 +147,8 @@ module PatientHttp
       # @param callback_args [Hash, nil] JSON-compatible callback arguments
       # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] names of preprocessors
       #   registered on the configuration to apply to the request when it is sent
+      # @param processor [String, Symbol, nil] name of the processor that should execute
+      #   the request
       # @return [Object] return value from the registered request handler
       def async_request(
         method,
@@ -157,10 +161,11 @@ module PatientHttp
         timeout: nil,
         raise_error_responses: nil,
         callback_args: nil,
-        preprocessors: nil
+        preprocessors: nil,
+        processor: nil
       )
         template = async_request_template
-        kwargs = {body: body, json: json, headers: headers, params: params, timeout: timeout, preprocessors: preprocessors}
+        kwargs = {body: body, json: json, headers: headers, params: params, timeout: timeout, preprocessors: preprocessors, processor: processor}
         request = if template
           template.request(method, url, **kwargs)
         else
@@ -206,6 +211,8 @@ module PatientHttp
     # @param callback_args [Hash, nil] JSON-compatible callback arguments
     # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] names of preprocessors
     #   registered on the configuration to apply to the request when it is sent
+    # @param processor [String, Symbol, nil] name of the processor that should execute
+    #   the request
     # @return [Object] return value from the registered request handler
     def async_request(
       method,
@@ -218,7 +225,8 @@ module PatientHttp
       timeout: nil,
       raise_error_responses: nil,
       callback_args: nil,
-      preprocessors: nil
+      preprocessors: nil,
+      processor: nil
     )
       self.class.async_request(
         method,
@@ -231,7 +239,8 @@ module PatientHttp
         timeout: timeout,
         raise_error_responses: raise_error_responses,
         callback_args: callback_args,
-        preprocessors: preprocessors
+        preprocessors: preprocessors,
+        processor: processor
       )
     end
 

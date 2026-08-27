@@ -54,7 +54,16 @@ The `TaskHandler` abstract class defines how the processor communicates results 
 - **on_error(error, callback)**: Called when an HTTP request fails. Your implementation should enqueue the error for handling.
 - **retry**: Called when the processor shuts down with in-flight requests. Your implementation should re-enqueue the original job.
 
-> **Important:** TaskHandler callbacks run on the processor's reactor thread. They should be lightweight and fast -- typically just enqueuing a message for another system to pick up. Doing heavy processing in a callback will block the reactor and delay other in-flight requests.
+> **Important:** TaskHandler callbacks run on the processor's completion worker threads (see `completion_threads`), not the reactor thread, so they no longer block the event loop. They can still slow the processor down by two routes, so keep them fast -- typically just enqueuing a message for another system to pick up:
+>
+> - Callbacks compete with the reactor thread for the GVL, so heavy CPU work in a callback can still add latency to in-flight requests.
+> - A task stays in the capacity count until its result is delivered, so callbacks that back up consume request capacity and eventually make `enqueue` raise `MaxCapacityError`.
+>
+> **Callbacks must be thread-safe.** With the default `completion_threads` of 2, results are delivered concurrently, so two callbacks can run at the same time and in an order unrelated to the order the requests completed. Guard any state a handler shares between calls. Set `completion_threads: 1` to serialize delivery on a single worker thread.
+>
+> **Callbacks must be idempotent.** A failed delivery is retried `completion_retries` times (default 2), and each retry calls the callback again, so a callback that raises after enqueuing its message enqueues it more than once. Set `completion_retries: 0` if the callback cannot be made idempotent.
+>
+> If a callback keeps raising after the configured retries, the processor sends `completion_failed` to observers and does NOT send `request_end`, so durable tracking survives for external recovery.
 
 Example:
 ```ruby
@@ -230,10 +239,12 @@ erDiagram
 
 ## Process Model
 
-Each application process can run:
-- Multiple application threads
-- **One** async HTTP processor thread
+Each `Processor` instance runs:
+- **One** async HTTP processor (reactor) thread
 - **One** fiber reactor within the processor thread
+- A small pool of completion worker threads (`completion_threads`, default 2) that decode responses and deliver results
+
+A process usually runs one processor, but `Processor` is fully instance-based: a process can run several named processors (`Processor.new(config, name: :llm)`), each with its own capacity, timeouts, and threads. Requests carry an optional `processor` name (serialized with the request) that integrations use for routing.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -266,9 +277,10 @@ Each application process can run:
 The processor uses Ruby's Fiber scheduler (`async` gem) for non-blocking I/O:
 
 1. **Application threads** remain free while HTTP requests execute
-2. **Fiber reactor** multiplexes hundreds of HTTP connections
-3. **Connection pooling** and HTTP/2 reuse connections efficiently
-4. **TaskHandler callbacks** execute on the reactor thread and should be lightweight
+2. **Fiber reactor** multiplexes hundreds of HTTP connections and performs only socket I/O and light bookkeeping
+3. **Connection pooling** and HTTP/2 reuse connections efficiently; `max_connections_per_host` bounds sockets per host
+4. **Completion worker threads** decode response bodies (join, inflate, charset), build responses, and execute TaskHandler callbacks and `request_end` observers off the reactor. Decoding is CPU-bound and has no fiber yield point, so running it inline on the reactor would stop every other in-flight request until it finished. On a worker thread the Ruby scheduler can preempt it, and Zlib releases the GVL for part of the inflate
+5. **Delivery is concurrent, not serialized.** Callbacks and completion-time observers run on any of the `completion_threads` workers, so they must be thread-safe. Completions are also bounded: a task stays in the capacity count until a worker claims its result, so the completion backlog can never exceed `max_connections`
 
 ## State Management
 

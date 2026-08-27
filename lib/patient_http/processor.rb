@@ -9,8 +9,21 @@ module PatientHttp
     # Timing constants for the reactor loop
     DEQUEUE_TIMEOUT = 1.0 # Seconds to wait when dequeueing requests
 
+    # Base delay between attempts when delivering a completed result fails.
+    # The delay grows linearly with each attempt.
+    COMPLETION_RETRY_DELAY = 0.5
+
+    # Seconds allowed for the completion executor to drain during shutdown.
+    # The reactor's teardown and stop() share this budget so the reactor can
+    # never spend longer draining than stop() is willing to wait for it.
+    COMPLETION_SHUTDOWN_TIMEOUT = 5
+
     # @return [Configuration] the configuration object for the processor
     attr_reader :config
+
+    # @return [String] the processor's name; used in thread names so multiple
+    #   named processors in one process are distinguishable
+    attr_reader :name
 
     # Callback to invoke after each request. Only available in testing mode.
     # @api private
@@ -19,9 +32,12 @@ module PatientHttp
     # Initialize the processor.
     #
     # @param config [Configuration] the configuration object
+    # @param name [String, Symbol] optional name to distinguish this processor
+    #   when a process runs more than one
     # @return [void]
-    def initialize(config)
+    def initialize(config, name: "default")
       @config = config
+      @name = name.to_s
       @lifecycle = LifecycleManager.new
       @queue = Thread::Queue.new
       @reactor_thread = nil
@@ -42,6 +58,7 @@ module PatientHttp
       @testing_callback = nil
       @http_client = Client.new(self)
       @observers = []
+      @completion_executor = nil
     end
 
     # Start the processor.
@@ -61,8 +78,20 @@ module PatientHttp
           @reactor_generation += 1
         end
 
+        # The completion executor delivers finished results on its own worker
+        # threads so the reactor thread never blocks on response decoding,
+        # serialization, or callback delivery. A new executor is created for
+        # each run, like the reactor thread.
+        executor = CompletionExecutor.new(
+          threads: @config.completion_threads,
+          logger: @config.logger,
+          thread_name_prefix: thread_name("patient-http-completion"),
+          on_finished: -> { signal_idle }
+        )
+        @tasks_lock.synchronize { @completion_executor = executor }
+
         @reactor_thread = Thread.new do
-          Thread.current.name = "patient-http-processor"
+          Thread.current.name = thread_name("patient-http-processor")
           run_reactor
         rescue => e
           @config.logger&.error("[PatientHttp] Processor error: #{e.message}\n#{e.backtrace.join("\n")}")
@@ -80,21 +109,33 @@ module PatientHttp
           # lock; re-enqueueing runs outside it. This is idempotent with stop()'s
           # reenqueue_pending_requests: whichever runs second snapshots an empty
           # set.
-          current_generation = false
-          orphaned_tasks = @tasks_lock.synchronize do
-            if @reactor_generation == generation
-              current_generation = true
-              drain_tracked_tasks_locked
-            else
-              []
+          current_generation = @tasks_lock.synchronize { @reactor_generation == generation }
+          if current_generation
+            begin
+              # Drain the completion executor before stealing tracked tasks so
+              # results already handed off are delivered rather than retried.
+              # Tasks whose completion job never ran stay in in-flight tracking
+              # and are re-enqueued below. The drain is bounded so it cannot
+              # outlast stop()'s own shutdown budget, and it runs in its own
+              # block so the re-enqueue still happens if a stop() that gave up
+              # waiting kills this thread mid-drain.
+              executor.shutdown(timeout: COMPLETION_SHUTDOWN_TIMEOUT)
+            ensure
+              orphaned_tasks = @tasks_lock.synchronize do
+                if @reactor_generation == generation
+                  drain_tracked_tasks_locked
+                else
+                  []
+                end
+              end
+              reenqueue_tasks(orphaned_tasks)
+              # Hand back tasks still sitting in the queue as well; a reactor
+              # that exits without a stop() call is the last owner of those
+              # tasks. stop() performs the same drain after reaping the
+              # reactor, and whichever drain runs second finds nothing left.
+              reenqueue_remaining_queue_items
             end
           end
-          reenqueue_tasks(orphaned_tasks)
-          # Hand back tasks still sitting in the queue as well; a reactor that
-          # exits without a stop() call is the last owner of those tasks.
-          # stop() performs the same drain after reaping the reactor, and
-          # whichever drain runs second finds nothing left.
-          reenqueue_remaining_queue_items if current_generation
         end
 
         # The transition can fail if the reactor thread already failed and
@@ -137,14 +178,15 @@ module PatientHttp
         # Interrupt the reactor's queue wait by pushing a sentinel value
         @queue.push(nil)
 
-        # Wait for in-flight and pending requests to complete.
+        # Wait for in-flight and pending requests to complete, including
+        # results still being delivered by the completion executor.
         # Queue items are not checked here — they will be re-enqueued by
         # reenqueue_remaining_queue_items after the reactor thread exits.
         if timeout > 0
           deadline = monotonic_time + timeout
           @tasks_lock.synchronize do
             loop do
-              break if @pending_tasks.empty? && @inflight_requests.empty?
+              break if @pending_tasks.empty? && @inflight_requests.empty? && completion_executor_settled?
               remaining = deadline - monotonic_time
               break if remaining <= 0
               @idle_condition.wait(@tasks_lock, remaining)
@@ -160,6 +202,10 @@ module PatientHttp
         # exits on its own once the callback returns (its loop sees the stopped
         # state) and its ensure block performs the same cleanup.
         if reactor && !reactor.equal?(Thread.current)
+          # The join stays short: the reactor's teardown drains the completion
+          # executor, which can join this very thread when stop was called from
+          # a completion callback. Killing the reactor breaks that standoff and
+          # its teardown still re-enqueues from an ensure block.
           reactor.join(1) if reactor.alive?
           if reactor.alive?
             reactor.kill
@@ -171,6 +217,12 @@ module PatientHttp
         @tasks_lock.synchronize do
           @reactor_thread = nil if @reactor_thread.equal?(reactor)
         end
+
+        # Shut down the completion executor. The reactor's own teardown
+        # normally drains it already; this pass reaps any worker that is still
+        # stuck past the deadline. Remaining queued jobs belong to tasks that
+        # were re-enqueued above, so they no-op when their claim fails.
+        @completion_executor&.shutdown(timeout: COMPLETION_SHUTDOWN_TIMEOUT)
 
         # Run a second pass now that the reactor has exited to catch any task
         # that slipped into pending/in-flight tracking after the first snapshot
@@ -275,13 +327,39 @@ module PatientHttp
       @lifecycle.stopping?
     end
 
-    # Check if processor is idle (no queued or in-flight requests).
+    # Check if processor is idle (no queued or in-flight requests, and no
+    # results still being delivered by the completion executor).
     #
     # @return [Boolean]
     def idle?
-      @tasks_lock.synchronize do
+      executor = @completion_executor
+      tracking_empty = @tasks_lock.synchronize do
         @queue.empty? && @pending_tasks.empty? && @inflight_requests.empty?
       end
+
+      tracking_empty && (executor.nil? || executor.idle?)
+    end
+
+    # Check how many more requests the processor can accept before reaching
+    # max capacity. This is an advisory value: the authoritative check happens
+    # inside {#enqueue}, so a concurrent enqueue can still hit
+    # {MaxCapacityError}. It performs no observer notifications and no durable
+    # registration, so it is cheap to call before paying enqueue costs.
+    #
+    # @return [Integer] remaining capacity (never negative)
+    def remaining_capacity
+      @tasks_lock.synchronize do
+        remaining = @config.max_connections - (@queue.size + @pending_tasks.size + @inflight_requests.size)
+        (remaining > 0) ? remaining : 0
+      end
+    end
+
+    # Check if the processor can accept at least one more request. Advisory
+    # only; see {#remaining_capacity}.
+    #
+    # @return [Boolean]
+    def capacity_available?
+      remaining_capacity > 0
     end
 
     # Get the number of in-flight requests (actively executing HTTP calls).
@@ -390,6 +468,16 @@ module PatientHttp
     end
 
     private
+
+    # Build a thread name for this processor. The default processor keeps the
+    # bare prefix; named processors append their name so multiple processors
+    # in one process are distinguishable.
+    #
+    # @param prefix [String] the base thread name
+    # @return [String]
+    def thread_name(prefix)
+      (@name == "default") ? prefix : "#{prefix}-#{@name}"
+    end
 
     # Run the async reactor loop.
     #
@@ -501,8 +589,6 @@ module PatientHttp
 
       notify_observers { |observer| observer.request_start(task) }
 
-      claimed = false
-
       begin
         response_data = @http_client.make_request(task.request, task.id)
 
@@ -510,24 +596,14 @@ module PatientHttp
         # shutdown sequence has re-enqueued the task; discard the response.
         return if stopped?
 
-        # Check for redirect handling. handle_redirect claims the task itself
-        # (atomically with enqueueing the redirect) and returns whether this
-        # caller owns delivery, so the ensure block can finish the task.
         if should_follow_redirect?(task, response_data)
-          claimed = handle_redirect(task, response_data)
-          return
-        end
-
-        response = task.build_response(**response_data)
-        claimed = claim_task(task)
-        if claimed
-          if task.raise_error_responses && !response.success?
-            http_error = HttpError.new(response)
-            notify_observers { |observer| observer.request_error(http_error) }
-            handle_error(task, http_error)
-          else
-            handle_completion(task, response)
-          end
+          handle_redirect(task, response_data)
+        else
+          # Hand the result to the completion executor without claiming the
+          # task. The task stays in in-flight tracking until a completion
+          # worker claims it, so the shutdown re-enqueue protocol covers
+          # results that are queued but not yet delivered.
+          dispatch_completion(task, response_data: response_data)
         end
       rescue ResponseReader::ReadAbortedError
         # The processor stopped past its shutdown deadline while the response
@@ -535,24 +611,103 @@ module PatientHttp
         # there is nothing to deliver.
         nil
       rescue => e
-        # A failure raised after the task was claimed came from the delivery
-        # attempt itself (only reachable in testing mode; the delivery helpers
-        # rescue their own failures in production). Re-raise rather than
-        # claiming again — claimed must stay true so the ensure block still
-        # finishes the task.
-        raise if claimed
+        dispatch_completion(task, error: e)
+      end
+    end
 
-        claimed = claim_task(task)
-        if claimed
-          notify_observers { |observer| observer.request_error(e) }
-          handle_error(task, e)
+    # Hand off a finished HTTP exchange to the completion executor.
+    #
+    # @param task [RequestTask] the request task
+    # @param response_data [Hash, nil] raw response data on success
+    # @param error [Exception, nil] the error on failure
+    # @return [void]
+    def dispatch_completion(task, response_data: nil, error: nil)
+      executor = @completion_executor
+      executor.enqueue(-> { run_completion(task, response_data: response_data, error: error) })
+    rescue ClosedQueueError
+      # The executor is already shut down. The task is still tracked, so the
+      # shutdown sequence re-enqueues it.
+      nil
+    end
+
+    # Deliver a finished result on a completion worker thread: decode the
+    # response, claim the task, run the result callbacks, and notify
+    # observers. When delivery fails after all retries, request_end is NOT
+    # fired so durable tracking (crash-recovery records) stays in place and
+    # the request can be recovered instead of silently lost.
+    #
+    # @param task [RequestTask] the request task
+    # @param response_data [Hash, nil] raw response data on success
+    # @param error [Exception, nil] the error on failure
+    # @return [void]
+    def run_completion(task, response_data: nil, error: nil)
+      response = nil
+
+      if error.nil?
+        begin
+          response = task.build_response(**@http_client.decode_response(response_data))
+          if task.raise_error_responses && !response.success?
+            error = HttpError.new(response)
+          end
+        rescue => e
+          error = e
+        end
+      end
+
+      # A claim failure means the shutdown sequence already re-enqueued the
+      # task; the result must not be delivered.
+      return unless claim_task(task)
+
+      failure = nil
+      begin
+        if error
+          notify_observers { |observer| observer.request_error(error) }
+          failure = handle_error(task, error)
+        else
+          failure = handle_completion(task, response)
+        end
+
+        if failure.nil?
+          finish_task(task)
+        else
+          notify_observers { |observer| observer.completion_failed(task, failure) }
         end
       ensure
-        finish_task(task) if claimed
-        # Only fire the testing hook for tasks this caller actually owns.
-        # A task discarded during shutdown (claimed == false) is re-enqueued
-        # by the shutdown sequence, not processed here.
-        @testing_callback&.call(task) if claimed && PatientHttp.testing?
+        @testing_callback&.call(task) if PatientHttp.testing?
+      end
+
+      raise failure if failure && PatientHttp.testing?
+    end
+
+    # Run a delivery block with bounded retries. Returns nil when the block
+    # succeeds or the final exception when all attempts fail. Retries back off
+    # linearly; sleeping is safe here because delivery runs on a completion
+    # worker thread, not the reactor.
+    #
+    # The block calls into the task handler, so a retry calls the handler
+    # again. A handler that raises after its side effect therefore repeats that
+    # side effect; handlers must be idempotent, or completion_retries must be
+    # set to zero.
+    #
+    # @param task [RequestTask] the request task (for log context)
+    # @return [Exception, nil] the final failure or nil on success
+    def deliver_with_retries(task)
+      attempts = 0
+
+      begin
+        yield
+        nil
+      rescue => e
+        attempts += 1
+        if attempts <= @config.completion_retries
+          @config.logger&.warn(
+            "[PatientHttp] Retrying result delivery for request #{task.id} " \
+            "(attempt #{attempts + 1}): #{e.class} - #{e.message}"
+          )
+          sleep(COMPLETION_RETRY_DELAY * attempts) unless PatientHttp.testing?
+          retry
+        end
+        e
       end
     end
 
@@ -576,12 +731,33 @@ module PatientHttp
     # @param task [RequestTask] the request task
     # @return [void]
     def finish_task(task)
+      signal_idle
+      notify_observers { |observer| observer.request_end(task) }
+    end
+
+    # Broadcast the idle condition when the pipeline is empty. Called after a
+    # claimed task finishes and by the completion executor after each job, so
+    # stop() waiters wake once the last delivery completes.
+    #
+    # @return [void]
+    def signal_idle
+      executor = @completion_executor
       @tasks_lock.synchronize do
-        if @pending_tasks.empty? && @inflight_requests.empty?
+        if @pending_tasks.empty? && @inflight_requests.empty? && (executor.nil? || executor.idle?)
           @idle_condition.broadcast
         end
       end
-      notify_observers { |observer| observer.request_end(task) }
+    end
+
+    # Check whether stop() should keep waiting on the completion executor.
+    # When stop is called from a completion worker itself (via a result
+    # callback), its own in-progress job would never settle, so it is treated
+    # as settled to avoid waiting out the full timeout.
+    #
+    # @return [Boolean]
+    def completion_executor_settled?
+      executor = @completion_executor
+      executor.nil? || executor.worker_thread? || executor.idle?
     end
 
     # Handle successful response. The caller must have claimed the task via
@@ -589,32 +765,36 @@ module PatientHttp
     #
     # @param task [RequestTask] the request task
     # @param response [Response] the response object
-    # @return [void]
+    # @return [Exception, nil] the delivery failure or nil on success
     def handle_completion(task, response)
-      task.completed!(response)
+      failure = deliver_with_retries(task) { task.completed!(response) }
 
-      @config.logger&.debug(
-        "[PatientHttp] Request #{task.id} succeeded with status #{response.status}, " \
-        "enqueued callback #{task.callback}"
-      )
-    rescue => e
-      @config.logger&.error(
-        "[PatientHttp] Failed to enqueue completion callback for request #{task.id}: #{e.class} - #{e.message}"
-      )
-      raise if PatientHttp.testing?
+      if failure
+        @config.logger&.error(
+          "[PatientHttp] Failed to enqueue completion callback for request #{task.id}: " \
+          "#{failure.class} - #{failure.message}"
+        )
+      else
+        @config.logger&.debug(
+          "[PatientHttp] Request #{task.id} succeeded with status #{response.status}, " \
+          "enqueued callback #{task.callback}"
+        )
+      end
+
+      failure
     end
 
-    # Handle a redirect response.
+    # Handle a redirect response on the reactor thread.
     #
-    # Claims the task before delivering an error or enqueueing the redirect so
-    # the result is delivered exactly once. When following a redirect, the
-    # original task is removed from in-flight tracking and the redirect task is
-    # pushed onto the queue within a single {@tasks_lock} section, so a
-    # concurrent {#idle?} never observes a moment where neither is tracked.
+    # Redirect errors are handed to the completion executor for delivery.
+    # When following a redirect, the original task is removed from in-flight
+    # tracking and the redirect task is pushed onto the queue within a single
+    # {@tasks_lock} section, so a concurrent {#idle?} never observes a moment
+    # where neither is tracked.
     #
     # @param task [RequestTask] the request task
     # @param response_data [Hash] the response data with status, headers, body
-    # @return [Boolean] true if this caller owns delivery of the task's result
+    # @return [void]
     def handle_redirect(task, response_data)
       status = response_data[:status]
       location = response_data[:headers]["location"]
@@ -622,11 +802,8 @@ module PatientHttp
       # Check for redirect errors
       error = check_redirect_error(task, response_data)
       if error
-        return false unless claim_task(task)
-
-        notify_observers { |observer| observer.request_error(error) }
-        handle_error(task, error)
-        return true
+        dispatch_completion(task, error: error)
+        return
       end
 
       # Create the redirect task, then atomically claim the original (remove it
@@ -634,14 +811,23 @@ module PatientHttp
       # shutdown sequence already re-enqueued the original, so drop the redirect.
       redirect_task = task.redirect_task(location: location, status: status)
 
-      claimed = announce_and_enqueue(redirect_task) do
-        !@inflight_requests.delete(task.id).nil?
+      begin
+        claimed = announce_and_enqueue(redirect_task) do
+          !@inflight_requests.delete(task.id).nil?
+        end
+      rescue => e
+        # The redirect could not be registered (e.g. durable tracking setup
+        # failed). Deliver the failure as the original task's result.
+        dispatch_completion(task, error: e)
+        return
       end
-      return false unless claimed
+      return unless claimed
 
       redirect_url = resolve_redirect_url(task.request.url, location)
       @config.logger&.debug("[PatientHttp] Request #{task.id} redirected (#{status}) to #{redirect_url}")
-      true
+
+      finish_task(task)
+      @testing_callback&.call(task) if PatientHttp.testing?
     end
 
     # Handle error response. The caller must have claimed the task via
@@ -649,19 +835,23 @@ module PatientHttp
     #
     # @param task [RequestTask] the request task
     # @param exception [Exception] the exception
-    # @return [void]
+    # @return [Exception, nil] the delivery failure or nil on success
     def handle_error(task, exception)
-      task.error!(exception)
+      failure = deliver_with_retries(task) { task.error!(exception) }
 
-      @config.logger&.warn(
-        "[PatientHttp] Request #{task.id} failed with #{exception.class.name}: #{exception.message}, " \
-        "enqueued callback #{task.callback}\n#{exception.backtrace&.join("\n")}"
-      )
-    rescue => e
-      @config.logger&.error(
-        "[PatientHttp] Failed to enqueue error worker for request #{task.id}: #{e.class} - #{e.message}"
-      )
-      raise if PatientHttp.testing?
+      if failure
+        @config.logger&.error(
+          "[PatientHttp] Failed to enqueue error worker for request #{task.id}: " \
+          "#{failure.class} - #{failure.message}"
+        )
+      else
+        @config.logger&.warn(
+          "[PatientHttp] Request #{task.id} failed with #{exception.class.name}: #{exception.message}, " \
+          "enqueued callback #{task.callback}\n#{exception.backtrace&.join("\n")}"
+        )
+      end
+
+      failure
     end
 
     # Announce a task to observers and make it visible to the reactor. The

@@ -15,6 +15,16 @@ module PatientHttp
     # @return [Integer] Maximum number of concurrent connections
     attr_reader :max_connections
 
+    # @return [Integer, nil] Maximum number of connections per host (nil for unlimited)
+    attr_reader :max_connections_per_host
+
+    # @return [Integer] Number of threads that deliver completed results
+    attr_reader :completion_threads
+
+    # @return [Integer] Number of retries when delivering a completed result fails.
+    #   A retry calls the task handler again, so handlers must be idempotent.
+    attr_reader :completion_retries
+
     # @return [Numeric] Default request timeout in seconds
     attr_reader :request_timeout
 
@@ -68,6 +78,12 @@ module PatientHttp
     # @param proxy_url [String, nil] HTTP/HTTPS proxy URL (supports authentication)
     # @param retries [Integer] Number of retries for failed requests
     # @param protocol [Symbol, nil] HTTP protocol to use (:http1 or :http2); nil to negotiate
+    # @param max_connections_per_host [Integer, nil] Maximum number of connections per host (nil for unlimited)
+    # @param completion_threads [Integer] Number of threads that deliver completed results
+    # @param completion_retries [Integer] Number of retries when delivering a completed result fails.
+    #   A retry calls TaskHandler#on_complete or #on_error again, so a handler that raises after
+    #   its side effect delivers the callback more than once unless it is idempotent. Set to 0 to
+    #   report the first failure without retrying.
     def initialize(
       max_connections: 256,
       request_timeout: 60,
@@ -82,7 +98,10 @@ module PatientHttp
       proxy_url: nil,
       retries: 3,
       protocol: nil,
-      encryption_key: nil
+      encryption_key: nil,
+      max_connections_per_host: nil,
+      completion_threads: 2,
+      completion_retries: 2
     )
       @mutex = Mutex.new
 
@@ -113,6 +132,9 @@ module PatientHttp
       self.retries = retries
       self.protocol = protocol
       self.encryption_key = encryption_key
+      self.max_connections_per_host = max_connections_per_host
+      self.completion_threads = completion_threads
+      self.completion_retries = completion_retries
     end
 
     # Get the logger to use to report pool events. Default is to log errors to STDERR.
@@ -122,6 +144,26 @@ module PatientHttp
     def max_connections=(value)
       validate_positive(:max_connections, value)
       @max_connections = value
+    end
+
+    def max_connections_per_host=(value)
+      if value.nil?
+        @max_connections_per_host = nil
+        return
+      end
+
+      validate_positive_integer(:max_connections_per_host, value)
+      @max_connections_per_host = value
+    end
+
+    def completion_threads=(value)
+      validate_positive_integer(:completion_threads, value)
+      @completion_threads = value
+    end
+
+    def completion_retries=(value)
+      validate_non_negative_integer(:completion_retries, value)
+      @completion_retries = value
     end
 
     def request_timeout=(value)
@@ -388,6 +430,9 @@ module PatientHttp
         "proxy_url" => proxy_url,
         "retries" => retries,
         "protocol" => protocol,
+        "max_connections_per_host" => max_connections_per_host,
+        "completion_threads" => completion_threads,
+        "completion_retries" => completion_retries,
         "payload_stores" => payload_stores.keys,
         "default_payload_store" => default_payload_store_name,
         "secrets" => @mutex.synchronize { @secrets.keys },
