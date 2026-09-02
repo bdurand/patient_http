@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.6.0
+
+### Added
+
+- `Configuration#redirect_downgrade` and `Request#redirect_downgrade` (default true): when false, a redirect that would change the HTTP method (such as POST to GET on a 301, 302, or 303) is not followed and the redirect response is delivered to the callback instead. Redirects that preserve the method are still followed. The request setting overrides the configuration.
+- `Configuration#redirect_strip_headers` and `Request#redirect_strip_headers`: header names or regular expressions (matched case insensitively) that are always removed from redirected requests, so sensitive headers are never sent to a redirect target. Request-level patterns are applied in addition to the configured ones and survive serialization.
+- `HEAD` and `QUERY` HTTP methods are supported by `Request`, `RequestTemplate`, `RequestHelper` (`async_head`, `async_query`), and `PatientHttp.head` / `PatientHttp.query`. `HEAD` requests cannot carry a body.
+
+### Changed
+
+- The HTTP method used when following a redirect now follows RFC 9110. On 301 and 302 responses only `POST` is changed to `GET`; `HEAD`, `PUT`, `PATCH`, `DELETE`, and `QUERY` are re-sent unchanged with their body. On 303 responses `GET` and `HEAD` are preserved and every other method becomes `GET`. Previously every method was changed to `GET` on 301, 302, and 303.
+- A 300 Multiple Choices response with a `Location` header is now followed, preserving the method and body. A 300 response without `Location` is delivered as a response, as before.
+- `RequestTask#redirect_task` accepts a `strip_headers:` option with the configured header patterns to remove.
+
 ## 1.5.0
 
 ### Added

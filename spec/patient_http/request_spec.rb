@@ -83,7 +83,7 @@ RSpec.describe PatientHttp::Request do
       end
 
       it "accepts all valid HTTP methods" do
-        %i[get post put patch delete].each do |method|
+        %i[get head post put patch delete query].each do |method|
           expect do
             described_class.new(method, "https://example.com")
           end.not_to raise_error
@@ -106,6 +106,17 @@ RSpec.describe PatientHttp::Request do
         expect do
           described_class.new(:get, 123)
         end.to raise_error(ArgumentError, "url must be a String or URI, got: Integer")
+      end
+
+      it "validates body is not allowed for HEAD requests" do
+        expect do
+          described_class.new(:head, "https://example.com", body: "some body")
+        end.to raise_error(ArgumentError, /body is not allowed for HEAD requests/)
+      end
+
+      it "allows a body for QUERY requests" do
+        request = described_class.new(:query, "https://example.com", body: "q=1")
+        expect(request.body).to eq("q=1")
       end
 
       it "validates body is not allowed for GET requests" do
@@ -137,6 +148,67 @@ RSpec.describe PatientHttp::Request do
           described_class.new(:post, "https://example.com", body: '{"data":"value"}')
         end.not_to raise_error
       end
+    end
+  end
+
+  describe "redirect options" do
+    it "defaults redirect_downgrade to nil" do
+      request = described_class.new(:get, "https://api.example.com")
+      expect(request.redirect_downgrade).to be_nil
+    end
+
+    it "accepts redirect_downgrade true or false" do
+      expect(described_class.new(:get, "https://api.example.com", redirect_downgrade: false).redirect_downgrade).to be false
+      expect(described_class.new(:get, "https://api.example.com", redirect_downgrade: true).redirect_downgrade).to be true
+    end
+
+    it "rejects a redirect_downgrade value that is not a boolean" do
+      expect {
+        described_class.new(:get, "https://api.example.com", redirect_downgrade: "no")
+      }.to raise_error(ArgumentError, /redirect_downgrade must be true, false, or nil/)
+    end
+
+    it "defaults redirect_strip_headers to an empty array" do
+      request = described_class.new(:get, "https://api.example.com")
+      expect(request.redirect_strip_headers).to eq([])
+    end
+
+    it "normalizes redirect_strip_headers to lowercase names and case insensitive patterns" do
+      request = described_class.new(:get, "https://api.example.com", redirect_strip_headers: ["X-Api-Key", /^X-Internal-/])
+      expect(request.redirect_strip_headers.first).to eq("x-api-key")
+      expect(request.redirect_strip_headers.last).to match("x-internal-id")
+    end
+
+    it "rejects patterns that are not strings or regular expressions" do
+      expect {
+        described_class.new(:get, "https://api.example.com", redirect_strip_headers: [1])
+      }.to raise_error(ArgumentError, /strings or regular expressions/)
+    end
+
+    it "serializes and reloads redirect options including regular expressions" do
+      request = described_class.new(
+        :get,
+        "https://api.example.com",
+        redirect_downgrade: false,
+        redirect_strip_headers: ["X-Api-Key", /^X-Internal-/]
+      )
+      json = JSON.parse(JSON.generate(request.as_json))
+
+      expect(json["redirect_downgrade"]).to be false
+      expect(json["redirect_strip_headers"]).to eq(["x-api-key", {"$regexp" => "(?i-mx:^X-Internal-)"}])
+
+      reloaded = described_class.load(json)
+      expect(reloaded.redirect_downgrade).to be false
+      expect(reloaded.redirect_strip_headers.first).to eq("x-api-key")
+      expect(reloaded.redirect_strip_headers.last).to be_a(Regexp)
+      expect(reloaded.redirect_strip_headers.last).to match("x-internal-id")
+      expect(reloaded.redirect_strip_headers.last).not_to match("x-other")
+    end
+
+    it "omits redirect options from as_json when they are not set" do
+      json = described_class.new(:get, "https://api.example.com").as_json
+      expect(json).not_to have_key("redirect_downgrade")
+      expect(json).not_to have_key("redirect_strip_headers")
     end
   end
 

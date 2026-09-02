@@ -12,7 +12,7 @@ module PatientHttp
   #
   # @see Configuration#register_preprocessor
   class OutgoingRequest
-    # @return [Symbol] HTTP method (:get, :post, :put, :patch, :delete)
+    # @return [Symbol] HTTP method (:get, :head, :post, :put, :patch, :delete, :query)
     attr_reader :http_method
 
     # @return [String] the request URL with any secret query params already resolved

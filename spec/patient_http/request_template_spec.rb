@@ -326,6 +326,46 @@ RSpec.describe PatientHttp::RequestTemplate do
     end
   end
 
+  describe "#head" do
+    let(:template) { described_class.new(base_url: base_url) }
+
+    it "calls request with :head method" do
+      expect(template).to receive(:request).with(:head, "/users/1")
+      template.head("/users/1")
+    end
+
+    it "returns an Request" do
+      result = template.head("/users/1")
+      expect(result).to be_a(PatientHttp::Request)
+      expect(result.http_method).to eq(:head)
+    end
+  end
+
+  describe "#query" do
+    let(:template) { described_class.new(base_url: base_url) }
+
+    it "calls request with :query method" do
+      expect(template).to receive(:request).with(:query, "/users/search")
+      template.query("/users/search")
+    end
+
+    it "forwards all keyword arguments" do
+      expect(template).to receive(:request).with(
+        :query,
+        "/users/search",
+        body: "name=John"
+      )
+      template.query("/users/search", body: "name=John")
+    end
+
+    it "returns an Request" do
+      result = template.query("/users/search", body: "name=John")
+      expect(result).to be_a(PatientHttp::Request)
+      expect(result.http_method).to eq(:query)
+      expect(result.body).to eq("name=John")
+    end
+  end
+
   describe "attribute accessors" do
     it "allows setting and getting base_url" do
       client = described_class.new

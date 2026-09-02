@@ -81,8 +81,7 @@ module PatientHttp
             redirect_error = check_redirect_error(@task, response_data)
             break if redirect_error
 
-            location = response_data[:headers]["location"]
-            @task = @task.redirect_task(location: location, status: response_data[:status])
+            @task = build_redirect_task(@task, response_data)
           end
 
           if redirect_error

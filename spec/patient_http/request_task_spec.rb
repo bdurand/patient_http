@@ -377,34 +377,54 @@ RSpec.describe PatientHttp::RequestTask do
       expect(redirect_task.request.preprocessors).to eq([])
     end
 
-    context "with 301, 302, 303 redirects" do
-      it "converts POST to GET and removes body for 301" do
-        task = described_class.new(
-          request: post_request,
-          task_handler: task_handler,
-          callback: callback
-        )
+    context "with 301 and 302 redirects" do
+      [301, 302].each do |status|
+        it "converts POST to GET and removes body for #{status}" do
+          task = described_class.new(
+            request: post_request,
+            task_handler: task_handler,
+            callback: callback
+          )
 
-        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 301)
+          redirect_task = task.redirect_task(location: "https://api.example.com/new", status: status)
 
-        expect(redirect_task.request.http_method).to eq(:get)
-        expect(redirect_task.request.body).to be_nil
+          expect(redirect_task.request.http_method).to eq(:get)
+          expect(redirect_task.request.body).to be_nil
+        end
+
+        it "preserves PUT and its body for #{status}" do
+          put_request = PatientHttp::Request.new(:put, "https://api.example.com/item", body: "payload")
+          task = described_class.new(request: put_request, task_handler: task_handler, callback: callback)
+
+          redirect_task = task.redirect_task(location: "https://api.example.com/new", status: status)
+
+          expect(redirect_task.request.http_method).to eq(:put)
+          expect(redirect_task.request.body).to eq("payload")
+        end
+
+        it "preserves QUERY and its body for #{status}" do
+          query_request = PatientHttp::Request.new(:query, "https://api.example.com/search", body: "q=1")
+          task = described_class.new(request: query_request, task_handler: task_handler, callback: callback)
+
+          redirect_task = task.redirect_task(location: "https://api.example.com/new", status: status)
+
+          expect(redirect_task.request.http_method).to eq(:query)
+          expect(redirect_task.request.body).to eq("q=1")
+        end
+
+        it "preserves HEAD for #{status}" do
+          head_request = PatientHttp::Request.new(:head, "https://api.example.com/item")
+          task = described_class.new(request: head_request, task_handler: task_handler, callback: callback)
+
+          redirect_task = task.redirect_task(location: "https://api.example.com/new", status: status)
+
+          expect(redirect_task.request.http_method).to eq(:head)
+        end
       end
+    end
 
-      it "converts POST to GET and removes body for 302" do
-        task = described_class.new(
-          request: post_request,
-          task_handler: task_handler,
-          callback: callback
-        )
-
-        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 302)
-
-        expect(redirect_task.request.http_method).to eq(:get)
-        expect(redirect_task.request.body).to be_nil
-      end
-
-      it "converts POST to GET and removes body for 303" do
+    context "with 303 redirects" do
+      it "converts POST to GET and removes body" do
         task = described_class.new(
           request: post_request,
           task_handler: task_handler,
@@ -415,6 +435,49 @@ RSpec.describe PatientHttp::RequestTask do
 
         expect(redirect_task.request.http_method).to eq(:get)
         expect(redirect_task.request.body).to be_nil
+      end
+
+      it "converts QUERY to GET and removes body" do
+        query_request = PatientHttp::Request.new(:query, "https://api.example.com/search", body: "q=1")
+        task = described_class.new(request: query_request, task_handler: task_handler, callback: callback)
+
+        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 303)
+
+        expect(redirect_task.request.http_method).to eq(:get)
+        expect(redirect_task.request.body).to be_nil
+      end
+
+      it "converts DELETE to GET" do
+        delete_request = PatientHttp::Request.new(:delete, "https://api.example.com/item")
+        task = described_class.new(request: delete_request, task_handler: task_handler, callback: callback)
+
+        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 303)
+
+        expect(redirect_task.request.http_method).to eq(:get)
+      end
+
+      it "preserves HEAD" do
+        head_request = PatientHttp::Request.new(:head, "https://api.example.com/item")
+        task = described_class.new(request: head_request, task_handler: task_handler, callback: callback)
+
+        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 303)
+
+        expect(redirect_task.request.http_method).to eq(:head)
+      end
+    end
+
+    context "with 300 redirects" do
+      it "preserves method and body" do
+        task = described_class.new(
+          request: post_request,
+          task_handler: task_handler,
+          callback: callback
+        )
+
+        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 300)
+
+        expect(redirect_task.request.http_method).to eq(:post)
+        expect(redirect_task.request.body).to eq('{"data":"value"}')
       end
     end
 
@@ -483,6 +546,76 @@ RSpec.describe PatientHttp::RequestTask do
         redirect_task = task.redirect_task(location: "https://other.example.com/path", status: 302)
 
         expect(redirect_task.request.url).to eq("https://other.example.com/path")
+      end
+    end
+
+    context "with redirect options on the request" do
+      it "preserves redirect_downgrade and redirect_strip_headers" do
+        request = PatientHttp::Request.new(
+          :get,
+          "https://api.example.com/users",
+          redirect_downgrade: false,
+          redirect_strip_headers: ["X-Api-Key", /^x-internal-/]
+        )
+        task = described_class.new(request: request, task_handler: task_handler, callback: callback)
+
+        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 302)
+
+        expect(redirect_task.request.redirect_downgrade).to be false
+        expect(redirect_task.request.redirect_strip_headers).to eq(request.redirect_strip_headers)
+      end
+    end
+
+    context "with stripped headers" do
+      let(:headers) do
+        {
+          "X-Api-Key" => "key",
+          "X-Internal-Token" => "token",
+          "X-Internal-Trace" => "trace",
+          "Accept" => "application/json"
+        }
+      end
+
+      it "strips headers named on the request case insensitively on same-origin redirects" do
+        request = PatientHttp::Request.new(:get, "https://api.example.com/users", headers: headers, redirect_strip_headers: "x-API-key")
+        task = described_class.new(request: request, task_handler: task_handler, callback: callback)
+
+        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 302)
+
+        expect(redirect_task.request.headers["x-api-key"]).to be_nil
+        expect(redirect_task.request.headers["x-internal-token"]).to eq("token")
+        expect(redirect_task.request.headers["accept"]).to eq("application/json")
+      end
+
+      it "strips headers matching a regular expression on the request" do
+        request = PatientHttp::Request.new(:get, "https://api.example.com/users", headers: headers, redirect_strip_headers: /^X-Internal-/)
+        task = described_class.new(request: request, task_handler: task_handler, callback: callback)
+
+        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 302)
+
+        expect(redirect_task.request.headers["x-internal-token"]).to be_nil
+        expect(redirect_task.request.headers["x-internal-trace"]).to be_nil
+        expect(redirect_task.request.headers["x-api-key"]).to eq("key")
+        expect(redirect_task.request.headers["accept"]).to eq("application/json")
+      end
+
+      it "strips headers matching the given patterns in addition to the request patterns" do
+        request = PatientHttp::Request.new(:get, "https://api.example.com/users", headers: headers, redirect_strip_headers: "X-Api-Key")
+        task = described_class.new(request: request, task_handler: task_handler, callback: callback)
+        patterns = PatientHttp::RedirectHelper.normalize_header_patterns([/^x-internal-/])
+
+        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 302, strip_headers: patterns)
+
+        expect(redirect_task.request.headers.to_h.keys).to eq(["accept"])
+      end
+
+      it "does not modify the original request headers" do
+        request = PatientHttp::Request.new(:get, "https://api.example.com/users", headers: headers, redirect_strip_headers: "X-Api-Key")
+        task = described_class.new(request: request, task_handler: task_handler, callback: callback)
+
+        task.redirect_task(location: "https://api.example.com/new", status: 302)
+
+        expect(request.headers["x-api-key"]).to eq("key")
       end
     end
 

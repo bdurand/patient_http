@@ -809,7 +809,7 @@ module PatientHttp
       # Create the redirect task, then atomically claim the original (remove it
       # from in-flight) and enqueue the redirect. If the claim fails the
       # shutdown sequence already re-enqueued the original, so drop the redirect.
-      redirect_task = task.redirect_task(location: location, status: status)
+      redirect_task = build_redirect_task(task, response_data)
 
       begin
         claimed = announce_and_enqueue(redirect_task) do

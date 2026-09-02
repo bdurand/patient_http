@@ -43,6 +43,15 @@ module PatientHttp
     # @return [Integer] Maximum number of redirects to follow (0 disables redirects)
     attr_reader :max_redirects
 
+    # @return [Boolean] Whether a redirect that requires changing the HTTP method
+    #   (for example POST to GET on a 302) may be followed. When false, such a
+    #   redirect response is returned as the result instead of being followed.
+    attr_reader :redirect_downgrade
+
+    # @return [Array<String, Regexp>] Header name patterns (case insensitive) that are
+    #   always stripped from redirected requests
+    attr_reader :redirect_strip_headers
+
     # @return [Integer] This is the maximum number of hosts for which connections
     #   will be kept alive for at one time.
     attr_reader :connection_pool_size
@@ -73,6 +82,12 @@ module PatientHttp
     # @param user_agent [String, nil] Default User-Agent header value
     # @param raise_error_responses [Boolean] Whether to raise HttpError for non-2xx responses by default
     # @param max_redirects [Integer] Maximum number of redirects to follow (0 disables redirects)
+    # @param redirect_downgrade [Boolean] Whether to follow a redirect that requires changing the
+    #   HTTP method, such as POST to GET on a 301, 302, or 303 response. When false, requests
+    #   whose method would change do not follow the redirect and receive the redirect response.
+    # @param redirect_strip_headers [Array<String, Regexp>] Header names or patterns (case
+    #   insensitive) that are always stripped from redirected requests, so sensitive headers
+    #   are never sent to a redirect target
     # @param connection_pool_size [Integer] Maximum number of host clients to pool
     # @param connection_timeout [Numeric, nil] Connection timeout in seconds
     # @param proxy_url [String, nil] HTTP/HTTPS proxy URL (supports authentication)
@@ -93,6 +108,8 @@ module PatientHttp
       user_agent: "PatientHttp",
       raise_error_responses: false,
       max_redirects: 5,
+      redirect_downgrade: true,
+      redirect_strip_headers: [],
       connection_pool_size: 100,
       connection_timeout: nil,
       proxy_url: nil,
@@ -126,6 +143,8 @@ module PatientHttp
       self.user_agent = user_agent
       self.raise_error_responses = raise_error_responses
       self.max_redirects = max_redirects
+      self.redirect_downgrade = redirect_downgrade
+      self.redirect_strip_headers = redirect_strip_headers
       self.connection_pool_size = connection_pool_size
       self.connection_timeout = connection_timeout
       self.proxy_url = proxy_url
@@ -184,6 +203,18 @@ module PatientHttp
     def max_redirects=(value)
       validate_non_negative_integer(:max_redirects, value)
       @max_redirects = value
+    end
+
+    def redirect_downgrade=(value)
+      unless value == true || value == false
+        raise ArgumentError.new("redirect_downgrade must be true or false, got: #{value.inspect}")
+      end
+
+      @redirect_downgrade = value
+    end
+
+    def redirect_strip_headers=(value)
+      @redirect_strip_headers = RedirectHelper.normalize_header_patterns(value)
     end
 
     def connection_pool_size=(value)
@@ -425,6 +456,8 @@ module PatientHttp
         "user_agent" => user_agent,
         "raise_error_responses" => raise_error_responses,
         "max_redirects" => max_redirects,
+        "redirect_downgrade" => redirect_downgrade,
+        "redirect_strip_headers" => redirect_strip_headers,
         "connection_pool_size" => connection_pool_size,
         "connection_timeout" => connection_timeout,
         "proxy_url" => proxy_url,

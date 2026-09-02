@@ -17,9 +17,12 @@ module PatientHttp
     private_constant :UNDEFINED
 
     # Valid HTTP methods
-    VALID_METHODS = %i[get post put patch delete].freeze
+    VALID_METHODS = %i[get head post put patch delete query].freeze
 
-    # @return [Symbol] HTTP method (:get, :post, :put, :patch, :delete)
+    # HTTP methods that must not carry a request body
+    BODYLESS_METHODS = %i[get head delete].freeze
+
+    # @return [Symbol] HTTP method (:get, :head, :post, :put, :patch, :delete, :query)
     attr_reader :http_method
 
     # @return [String] The request URL
@@ -33,6 +36,14 @@ module PatientHttp
 
     # @return [Integer, nil] Maximum number of redirects to follow (nil uses config default, 0 disables)
     attr_reader :max_redirects
+
+    # @return [Boolean, nil] Whether a redirect that requires changing the HTTP method
+    #   (for example POST to GET on a 302) may be followed (nil uses config default)
+    attr_reader :redirect_downgrade
+
+    # @return [Array<String, Regexp>] Header name patterns stripped from redirected requests,
+    #   in addition to those configured on the {Configuration}
+    attr_reader :redirect_strip_headers
 
     # @return [Hash{String, Symbol => SecretReference}] Query parameters whose values are
     #   secret references, kept out of the serialized URL and resolved at send time
@@ -61,12 +72,22 @@ module PatientHttp
           params: load_secret_params(hash["secret_params"]),
           timeout: hash["timeout"],
           max_redirects: hash["max_redirects"],
+          redirect_downgrade: hash["redirect_downgrade"],
+          redirect_strip_headers: load_header_patterns(hash["redirect_strip_headers"]),
           preprocessors: hash["preprocessors"],
           processor: hash["processor"]
         )
       end
 
       private
+
+      # Reconstruct header patterns, turning serialized regular expression markers
+      # back into Regexp objects.
+      def load_header_patterns(patterns)
+        return nil if patterns.nil?
+
+        patterns.map { |value| RedirectHelper.load_header_pattern(value) }
+      end
 
       # Convert serialized secret-reference header markers back into SecretReference
       # objects, leaving plain header values unchanged.
@@ -87,7 +108,7 @@ module PatientHttp
 
     # Initializes a new Request.
     #
-    # @param http_method [Symbol, String] HTTP method (:get, :post, :put, :patch, :delete).
+    # @param http_method [Symbol, String] HTTP method (:get, :head, :post, :put, :patch, :delete, :query).
     # @param url [String, URI::Generic] The request URL.
     # @param headers [Hash, HttpHeaders] Request headers.
     # @param body [String, nil] Request body.
@@ -95,6 +116,12 @@ module PatientHttp
     # @param params [Hash, nil] Query parameters to append to the URL.
     # @param timeout [Numeric, nil] Overall timeout in seconds.
     # @param max_redirects [Integer, nil] Maximum redirects to follow (nil uses config, 0 disables).
+    # @param redirect_downgrade [Boolean, nil] Whether to follow a redirect that requires changing
+    #   the HTTP method (nil uses config). When false, such a redirect response is returned as the
+    #   result instead of being followed.
+    # @param redirect_strip_headers [String, Regexp, Array<String, Regexp>, nil] Header names or
+    #   patterns (case insensitive) to strip from redirected requests, in addition to those
+    #   configured on the {Configuration}.
     # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] Names of preprocessors
     #   registered on the configuration to apply to the request when it is sent.
     # @param processor [String, Symbol, nil] Name of the processor that should execute the
@@ -108,6 +135,8 @@ module PatientHttp
       params: nil,
       timeout: nil,
       max_redirects: nil,
+      redirect_downgrade: nil,
+      redirect_strip_headers: nil,
       preprocessors: nil,
       processor: nil
     )
@@ -125,6 +154,8 @@ module PatientHttp
       @body = (body == "") ? nil : body
       @timeout = timeout
       @max_redirects = max_redirects
+      @redirect_downgrade = normalized_redirect_downgrade(redirect_downgrade)
+      @redirect_strip_headers = RedirectHelper.normalize_header_patterns(redirect_strip_headers)
       @preprocessors = normalized_preprocessors(preprocessors)
       @processor = normalized_processor(processor)
 
@@ -167,6 +198,16 @@ module PatientHttp
         hash["secret_params"] = @secret_params.transform_values(&:as_json)
       end
 
+      unless @redirect_downgrade.nil?
+        hash["redirect_downgrade"] = @redirect_downgrade
+      end
+
+      if @redirect_strip_headers.any?
+        hash["redirect_strip_headers"] = @redirect_strip_headers.map do |pattern|
+          RedirectHelper.dump_header_pattern(pattern)
+        end
+      end
+
       hash["preprocessors"] = @preprocessors if @preprocessors.any?
       hash["processor"] = @processor if @processor
 
@@ -180,6 +221,14 @@ module PatientHttp
       @headers.to_h.transform_values do |value|
         value.is_a?(SecretReference) ? value.as_json : value
       end
+    end
+
+    # Normalize the redirect downgrade flag to true, false, or nil.
+    def normalized_redirect_downgrade(value)
+      return nil if value.nil?
+      return value if value == true || value == false
+
+      raise ArgumentError.new("redirect_downgrade must be true, false, or nil, got: #{value.inspect}")
     end
 
     # Normalize the processor name to a frozen string or nil.
@@ -238,7 +287,7 @@ module PatientHttp
         raise ArgumentError.new("url must be a String or URI, got: #{@url.class}")
       end
 
-      if %i[get delete].include?(@http_method) && !@body.nil?
+      if BODYLESS_METHODS.include?(@http_method) && !@body.nil?
         raise ArgumentError.new("body is not allowed for #{@http_method.upcase} requests")
       end
 

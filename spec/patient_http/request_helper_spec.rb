@@ -101,6 +101,19 @@ RSpec.describe PatientHttp::RequestHelper do
         expect(@captured_request.http_method).to eq(:delete)
         expect(@captured_request.url).to eq("https://api.example.com/path")
       end
+
+      it "async_head sends HEAD requests" do
+        TestService.async_head("/path", callback: TestCallback)
+        expect(@captured_request.http_method).to eq(:head)
+        expect(@captured_request.url).to eq("https://api.example.com/path")
+      end
+
+      it "async_query sends QUERY requests" do
+        TestService.async_query("/path", callback: TestCallback, json: {"name" => "John"})
+        expect(@captured_request.http_method).to eq(:query)
+        expect(@captured_request.url).to eq("https://api.example.com/path")
+        expect(@captured_request.body).to eq('{"name":"John"}')
+      end
     end
   end
 
@@ -167,6 +180,16 @@ RSpec.describe PatientHttp::RequestHelper do
       it "async_delete sends DELETE requests" do
         @service.async_delete("/resource", callback: TestCallback)
         expect(@captured_request.http_method).to eq(:delete)
+      end
+
+      it "async_head sends HEAD requests" do
+        @service.async_head("/resource", callback: TestCallback)
+        expect(@captured_request.http_method).to eq(:head)
+      end
+
+      it "async_query sends QUERY requests" do
+        @service.async_query("/resource", callback: TestCallback, body: "filter=active")
+        expect(@captured_request.http_method).to eq(:query)
       end
     end
   end

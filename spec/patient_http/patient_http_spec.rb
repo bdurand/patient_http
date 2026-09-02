@@ -317,6 +317,32 @@ RSpec.describe PatientHttp do
       end
     end
 
+    describe ".head" do
+      it "creates a HEAD request" do
+        described_class.head(
+          "https://api.example.com/users/1",
+          callback: "HeadCallback"
+        )
+
+        expect(@captured_request.http_method).to eq(:head)
+        expect(@captured_request.url).to eq("https://api.example.com/users/1")
+      end
+    end
+
+    describe ".query" do
+      it "creates a QUERY request with a body" do
+        described_class.query(
+          "https://api.example.com/users/search",
+          callback: "QueryCallback",
+          json: {"name" => "John"}
+        )
+
+        expect(@captured_request.http_method).to eq(:query)
+        expect(@captured_request.url).to eq("https://api.example.com/users/search")
+        expect(@captured_request.body).to eq('{"name":"John"}')
+      end
+    end
+
     describe ".request" do
       it "creates a request with all options" do
         described_class.request(

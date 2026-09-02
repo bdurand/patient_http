@@ -62,6 +62,16 @@ module PatientHttp
         async_request(:get, uri, callback: callback, **kwargs)
       end
 
+      # Enqueues an asynchronous HTTP HEAD request.
+      #
+      # @param uri [String] absolute URL or path (when using a request template)
+      # @param callback [Class, String] callback class to handle the response
+      # @param kwargs [Hash] forwarded to `async_request`
+      # @return [Object] return value from the registered request handler
+      def async_head(uri, callback:, **kwargs)
+        async_request(:head, uri, callback: callback, **kwargs)
+      end
+
       # Enqueues an asynchronous HTTP POST request.
       #
       # @param uri [String] absolute URL or path (when using a request template)
@@ -101,6 +111,16 @@ module PatientHttp
       def async_delete(uri, callback:, **kwargs)
         async_request(:delete, uri, callback: callback, **kwargs)
       end
+
+      # Enqueues an asynchronous HTTP QUERY request.
+      #
+      # @param uri [String] absolute URL or path (when using a request template)
+      # @param callback [Class, String] callback class to handle the response
+      # @param kwargs [Hash] forwarded to `async_request`
+      # @return [Object] return value from the registered request handler
+      def async_query(uri, callback:, **kwargs)
+        async_request(:query, uri, callback: callback, **kwargs)
+      end
     end
 
     module ClassMethods
@@ -134,7 +154,7 @@ module PatientHttp
       # When a request template is configured, the request is built from the template. Otherwise,
       # it is built directly from the provided arguments.
       #
-      # @param method [Symbol] HTTP method (`:get`, `:post`, `:put`, `:patch`, `:delete`)
+      # @param method [Symbol] HTTP method (`:get`, `:head`, `:post`, `:put`, `:patch`, `:delete`, `:query`)
       # @param url [String] absolute URL or path (when using a request template)
       # @param callback [Class, String] callback class to handle the response
       # @param headers [Hash, nil] request headers
@@ -198,7 +218,7 @@ module PatientHttp
     #
     # This delegates to {.ClassMethods#async_request} on the including class.
     #
-    # @param method [Symbol] HTTP method (`:get`, `:post`, `:put`, `:patch`, `:delete`)
+    # @param method [Symbol] HTTP method (`:get`, `:head`, `:post`, `:put`, `:patch`, `:delete`, `:query`)
     # @param url [String] absolute URL or path (when using a request template)
     # @param callback [Class, String] callback class to handle the response
     # @param headers [Hash, nil] request headers

@@ -36,8 +36,9 @@ module PatientHttp
   # lands in the job system's retry mechanism instead of being dropped.
   class UnknownProcessorError < StandardError; end
 
-  # HTTP redirect status codes that should be followed
-  FOLLOWABLE_REDIRECT_STATUSES = [301, 302, 303, 307, 308].freeze
+  # HTTP redirect status codes that are followed when a Location header is present.
+  # A 300 response is followed only when the server names a preferred choice in Location.
+  FOLLOWABLE_REDIRECT_STATUSES = [300, 301, 302, 303, 307, 308].freeze
 
   VERSION = File.read(File.join(__dir__, "../VERSION")).strip
 
@@ -275,6 +276,16 @@ module PatientHttp
       request(:get, uri, callback: callback, **kwargs)
     end
 
+    # Enqueues an HTTP HEAD request.
+    #
+    # @param uri [String] absolute URL
+    # @param callback [Class, String] callback class to handle the response
+    # @param kwargs [Hash] forwarded to `request`
+    # @return [Object] return value from the registered request handler
+    def head(uri, callback:, **kwargs)
+      request(:head, uri, callback: callback, **kwargs)
+    end
+
     # Enqueues an HTTP POST request.
     #
     # @param uri [String] absolute URL
@@ -315,9 +326,19 @@ module PatientHttp
       request(:delete, uri, callback: callback, **kwargs)
     end
 
+    # Enqueues an HTTP QUERY request.
+    #
+    # @param uri [String] absolute URL
+    # @param callback [Class, String] callback class to handle the response
+    # @param kwargs [Hash] forwarded to `request`
+    # @return [Object] return value from the registered request handler
+    def query(uri, callback:, **kwargs)
+      request(:query, uri, callback: callback, **kwargs)
+    end
+
     # Builds and dispatches an HTTP request.
     #
-    # @param method [Symbol] HTTP method (`:get`, `:post`, `:put`, `:patch`, `:delete`)
+    # @param method [Symbol] HTTP method (`:get`, `:head`, `:post`, `:put`, `:patch`, `:delete`, `:query`)
     # @param url [String] absolute URL
     # @param callback [Class, String] callback class to handle the response
     # @param headers [Hash, nil] request headers

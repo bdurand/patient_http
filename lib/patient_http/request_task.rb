@@ -204,20 +204,22 @@ module PatientHttp
 
     # Create a new RequestTask for following a redirect.
     #
+    # The HTTP method follows RFC 9110: 301 and 302 change POST to GET, 303
+    # changes everything except GET and HEAD to GET, and 300, 307, and 308
+    # preserve the method. The body is dropped whenever the method changes.
+    #
+    # Headers matching the request's own redirect_strip_headers or the given
+    # patterns are removed from the redirected request. Authorization and
+    # Cookie headers and preprocessors are removed on cross-origin redirects.
+    #
     # @param location [String] The redirect URL from the Location header
     # @param status [Integer] The HTTP status code of the redirect response
+    # @param strip_headers [Array<String, Regexp>] Additional normalized header
+    #   patterns to strip, typically from the {Configuration}
     # @return [RequestTask] A new task configured for the redirect
-    def redirect_task(location:, status:)
-      # Determine the HTTP method and body for the redirect
-      # 301, 302, 303: Convert to GET (no body) - standard browser behavior
-      # 307, 308: Preserve original method and body
-      if [301, 302, 303].include?(status)
-        redirect_method = :get
-        redirect_body = nil
-      else
-        redirect_method = request.http_method
-        redirect_body = request.body
-      end
+    def redirect_task(location:, status:, strip_headers: [])
+      redirect_method = RedirectHelper.redirect_method(request.http_method, status)
+      redirect_body = (redirect_method == request.http_method) ? request.body : nil
 
       # Resolve the redirect URL (handle relative URLs)
       redirect_url = resolve_redirect_url(location)
@@ -228,6 +230,14 @@ module PatientHttp
       redirect_headers = cross_origin ? request.headers.except(*SENSITIVE_HEADERS) : request.headers
       redirect_preprocessors = cross_origin ? [] : request.preprocessors
 
+      strip_patterns = request.redirect_strip_headers + Array(strip_headers)
+      if strip_patterns.any?
+        stripped = redirect_headers.to_h.keys.select do |name|
+          RedirectHelper.strip_header?(name, strip_patterns)
+        end
+        redirect_headers = redirect_headers.except(*stripped) if stripped.any?
+      end
+
       # Create a new request for the redirect
       redirect_request = Request.new(
         redirect_method,
@@ -236,6 +246,8 @@ module PatientHttp
         body: redirect_body,
         timeout: request.timeout,
         max_redirects: request.max_redirects,
+        redirect_downgrade: request.redirect_downgrade,
+        redirect_strip_headers: request.redirect_strip_headers,
         preprocessors: redirect_preprocessors,
         processor: request.processor
       )

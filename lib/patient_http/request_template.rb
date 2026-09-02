@@ -86,6 +86,15 @@ module PatientHttp
       request(:get, uri, **kwargs)
     end
 
+    # Convenience method for HEAD requests.
+    #
+    # @param uri [String, URI::HTTP] URI path to request
+    # @param kwargs [Hash] additional options (see #request)
+    # @return [Request] request object
+    def head(uri, **kwargs)
+      request(:head, uri, **kwargs)
+    end
+
     # Convenience method for POST requests.
     #
     # @param uri [String, URI::HTTP] URI path to request
@@ -120,6 +129,15 @@ module PatientHttp
     # @return [Request] request object
     def delete(uri, **kwargs)
       request(:delete, uri, **kwargs)
+    end
+
+    # Convenience method for QUERY requests.
+    #
+    # @param uri [String, URI::HTTP] URI path to request
+    # @param kwargs [Hash] additional options (see #request)
+    # @return [Request] request object
+    def query(uri, **kwargs)
+      request(:query, uri, **kwargs)
     end
   end
 end
