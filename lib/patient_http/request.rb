@@ -41,7 +41,7 @@ module PatientHttp
     #   (for example POST to GET on a 302) may be followed (nil uses config default)
     attr_reader :redirect_downgrade
 
-    # @return [Array<String, Regexp>] Header name patterns stripped from redirected requests,
+    # @return [Array<String>] Lowercase header names stripped from redirected requests,
     #   in addition to those configured on the {Configuration}
     attr_reader :redirect_strip_headers
 
@@ -73,21 +73,13 @@ module PatientHttp
           timeout: hash["timeout"],
           max_redirects: hash["max_redirects"],
           redirect_downgrade: hash["redirect_downgrade"],
-          redirect_strip_headers: load_header_patterns(hash["redirect_strip_headers"]),
+          redirect_strip_headers: hash["redirect_strip_headers"],
           preprocessors: hash["preprocessors"],
           processor: hash["processor"]
         )
       end
 
       private
-
-      # Reconstruct header patterns, turning serialized regular expression markers
-      # back into Regexp objects.
-      def load_header_patterns(patterns)
-        return nil if patterns.nil?
-
-        patterns.map { |value| RedirectHelper.load_header_pattern(value) }
-      end
 
       # Convert serialized secret-reference header markers back into SecretReference
       # objects, leaving plain header values unchanged.
@@ -119,9 +111,9 @@ module PatientHttp
     # @param redirect_downgrade [Boolean, nil] Whether to follow a redirect that requires changing
     #   the HTTP method (nil uses config). When false, such a redirect response is returned as the
     #   result instead of being followed.
-    # @param redirect_strip_headers [String, Regexp, Array<String, Regexp>, nil] Header names or
-    #   patterns (case insensitive) to strip from redirected requests, in addition to those
-    #   configured on the {Configuration}.
+    # @param redirect_strip_headers [String, Array<String>, nil] Header names (case insensitive)
+    #   to strip from redirected requests, in addition to those configured on the
+    #   {Configuration}.
     # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] Names of preprocessors
     #   registered on the configuration to apply to the request when it is sent.
     # @param processor [String, Symbol, nil] Name of the processor that should execute the
@@ -155,7 +147,7 @@ module PatientHttp
       @timeout = timeout
       @max_redirects = max_redirects
       @redirect_downgrade = normalized_redirect_downgrade(redirect_downgrade)
-      @redirect_strip_headers = RedirectHelper.normalize_header_patterns(redirect_strip_headers)
+      @redirect_strip_headers = RedirectHelper.normalize_header_names(redirect_strip_headers)
       @preprocessors = normalized_preprocessors(preprocessors)
       @processor = normalized_processor(processor)
 
@@ -202,11 +194,7 @@ module PatientHttp
         hash["redirect_downgrade"] = @redirect_downgrade
       end
 
-      if @redirect_strip_headers.any?
-        hash["redirect_strip_headers"] = @redirect_strip_headers.map do |pattern|
-          RedirectHelper.dump_header_pattern(pattern)
-        end
-      end
+      hash["redirect_strip_headers"] = @redirect_strip_headers if @redirect_strip_headers.any?
 
       hash["preprocessors"] = @preprocessors if @preprocessors.any?
       hash["processor"] = @processor if @processor

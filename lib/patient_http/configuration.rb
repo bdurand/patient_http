@@ -48,8 +48,8 @@ module PatientHttp
     #   redirect response is returned as the result instead of being followed.
     attr_reader :redirect_downgrade
 
-    # @return [Array<String, Regexp>] Header name patterns (case insensitive) that are
-    #   always stripped from redirected requests
+    # @return [Array<String>] Lowercase header names that are always stripped from
+    #   redirected requests
     attr_reader :redirect_strip_headers
 
     # @return [Integer] This is the maximum number of hosts for which connections
@@ -85,9 +85,9 @@ module PatientHttp
     # @param redirect_downgrade [Boolean] Whether to follow a redirect that requires changing the
     #   HTTP method, such as POST to GET on a 301, 302, or 303 response. When false, requests
     #   whose method would change do not follow the redirect and receive the redirect response.
-    # @param redirect_strip_headers [Array<String, Regexp>] Header names or patterns (case
-    #   insensitive) that are always stripped from redirected requests, so sensitive headers
-    #   are never sent to a redirect target
+    # @param redirect_strip_headers [String, Array<String>] Header names (case insensitive)
+    #   that are always stripped from redirected requests, so sensitive headers are never
+    #   sent to a redirect target
     # @param connection_pool_size [Integer] Maximum number of host clients to pool
     # @param connection_timeout [Numeric, nil] Connection timeout in seconds
     # @param proxy_url [String, nil] HTTP/HTTPS proxy URL (supports authentication)
@@ -214,7 +214,7 @@ module PatientHttp
     end
 
     def redirect_strip_headers=(value)
-      @redirect_strip_headers = RedirectHelper.normalize_header_patterns(value)
+      @redirect_strip_headers = RedirectHelper.normalize_header_names(value)
     end
 
     def connection_pool_size=(value)

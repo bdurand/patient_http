@@ -248,4 +248,37 @@ RSpec.describe PatientHttp::RequestHelper do
       expect(@captured_request.preprocessors).to eq(["signer"])
     end
   end
+
+  describe "redirect options" do
+    before do
+      @captured_request = nil
+      PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+        @captured_request = request
+      end
+    end
+
+    it "passes redirect options through async_request" do
+      TestService.async_post("/path", callback: TestCallback, redirect_downgrade: false, redirect_strip_headers: "X-Api-Key")
+
+      expect(@captured_request.redirect_downgrade).to be false
+      expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
+    end
+
+    it "passes redirect options through instance-level async_request" do
+      TestService.new.async_post("/path", callback: TestCallback, redirect_downgrade: false, redirect_strip_headers: ["X-Api-Key"])
+
+      expect(@captured_request.redirect_downgrade).to be false
+      expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
+    end
+
+    it "passes redirect options without a request template" do
+      service_class = Class.new do
+        include PatientHttp::RequestHelper
+      end
+
+      service_class.async_post("https://api.example.com/path", callback: TestCallback, redirect_downgrade: false)
+
+      expect(@captured_request.redirect_downgrade).to be false
+    end
+  end
 end

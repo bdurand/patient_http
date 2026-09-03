@@ -51,6 +51,12 @@ RSpec.describe PatientHttp::RequestTemplate do
       expect(result.timeout).to eq(30)
     end
 
+    it "passes redirect options to the Request" do
+      result = template.request(:post, "/users", redirect_downgrade: false, redirect_strip_headers: "X-Api-Key")
+      expect(result.redirect_downgrade).to be false
+      expect(result.redirect_strip_headers).to eq(["x-api-key"])
+    end
+
     context "with URI joining" do
       it "joins base_url with relative path" do
         template.request(:get, "/users")

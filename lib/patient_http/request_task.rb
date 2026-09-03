@@ -10,6 +10,9 @@ module PatientHttp
     # Headers that are sensitive to origin and should be stripped on cross-origin redirects
     SENSITIVE_HEADERS = %w[authorization cookie].freeze
 
+    # Headers that describe a request body. They are removed when a redirect drops the body.
+    BODY_HEADERS = %w[content-type content-length content-encoding content-language content-location].freeze
+
     # @return [String] Unique UUID for tracking the task
     attr_reader :id
 
@@ -206,20 +209,22 @@ module PatientHttp
     #
     # The HTTP method follows RFC 9110: 301 and 302 change POST to GET, 303
     # changes everything except GET and HEAD to GET, and 300, 307, and 308
-    # preserve the method. The body is dropped whenever the method changes.
+    # preserve the method. The body and the headers that describe it are
+    # dropped whenever the method changes.
     #
-    # Headers matching the request's own redirect_strip_headers or the given
-    # patterns are removed from the redirected request. Authorization and
-    # Cookie headers and preprocessors are removed on cross-origin redirects.
+    # Headers named in the request's own redirect_strip_headers or in the given
+    # list are removed from the redirected request. Authorization and Cookie
+    # headers and preprocessors are removed on cross-origin redirects.
     #
     # @param location [String] The redirect URL from the Location header
     # @param status [Integer] The HTTP status code of the redirect response
-    # @param strip_headers [Array<String, Regexp>] Additional normalized header
-    #   patterns to strip, typically from the {Configuration}
+    # @param strip_headers [Array<String>] Additional header names to strip,
+    #   typically from the {Configuration}
     # @return [RequestTask] A new task configured for the redirect
     def redirect_task(location:, status:, strip_headers: [])
       redirect_method = RedirectHelper.redirect_method(request.http_method, status)
-      redirect_body = (redirect_method == request.http_method) ? request.body : nil
+      method_changed = (redirect_method != request.http_method)
+      redirect_body = method_changed ? nil : request.body
 
       # Resolve the redirect URL (handle relative URLs)
       redirect_url = resolve_redirect_url(location)
@@ -228,15 +233,11 @@ module PatientHttp
       # prevent credential leakage
       cross_origin = cross_origin?(request.url, redirect_url)
       redirect_headers = cross_origin ? request.headers.except(*SENSITIVE_HEADERS) : request.headers
+      redirect_headers = redirect_headers.except(*BODY_HEADERS) if method_changed
       redirect_preprocessors = cross_origin ? [] : request.preprocessors
 
-      strip_patterns = request.redirect_strip_headers + Array(strip_headers)
-      if strip_patterns.any?
-        stripped = redirect_headers.to_h.keys.select do |name|
-          RedirectHelper.strip_header?(name, strip_patterns)
-        end
-        redirect_headers = redirect_headers.except(*stripped) if stripped.any?
-      end
+      strip_names = request.redirect_strip_headers + Array(strip_headers)
+      redirect_headers = redirect_headers.except(*strip_names) if strip_names.any?
 
       # Create a new request for the redirect
       redirect_request = Request.new(

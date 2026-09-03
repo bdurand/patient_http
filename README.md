@@ -188,7 +188,7 @@ PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_
 end
 
 # Now you can make requests directly through the PatientHttp interface with the .request,
-# .get, .post, .patch, .put, and .delete class methods:
+# .get, .head, .post, .patch, .put, .delete, and .query class methods:
 PatientHttp.get(
   "https://api.example.com/users/123",
   callback: FetchUserCallback,
@@ -229,7 +229,7 @@ Use `PatientHttp::RequestHelper` when you want a simple API for creating and dis
 1. Register a request handler with `PatientHttp.register_handler` that defines how requests are dispatched to your job queue or background processing system.
 2. Include `PatientHttp::RequestHelper` in your class.
 3. Optionally define a `request_template` for shared `base_url`, headers, and timeout.
-4. Call `async_get`, `async_post`, `async_put`, `async_patch`, `async_delete`, or `async_request`.
+4. Call `async_get`, `async_head`, `async_post`, `async_put`, `async_patch`, `async_delete`, `async_query`, or `async_request`.
 
 ```ruby
 class ApiClient
@@ -645,16 +645,21 @@ request = PatientHttp::Request.new(:post, "https://api.example.com/submit", body
 
 ### Stripping headers on redirects
 
-`Authorization` and `Cookie` headers are always removed on cross-origin redirects. To make sure other sensitive headers are never sent to a redirect target, list them in `redirect_strip_headers`. Entries can be header names or regular expressions and are matched case insensitively against the header name. Headers matching an entry are removed from every redirected request, same-origin or not.
+`Authorization` and `Cookie` headers are always removed on cross-origin redirects. To make sure other sensitive headers are never sent to a redirect target, list them in `redirect_strip_headers`. Header names are matched case insensitively. Listed headers are removed from every redirected request, same-origin or not.
 
 ```ruby
-config = PatientHttp::Configuration.new(redirect_strip_headers: ["X-Api-Key", /^x-internal-/])
+config = PatientHttp::Configuration.new(redirect_strip_headers: ["X-Api-Key", "X-Internal-Token"])
 
 # Or per request; these are stripped in addition to the configured headers
 request = PatientHttp::Request.new(:get, "https://api.example.com/data", headers: headers, redirect_strip_headers: "X-Signature")
+
+# The same options are accepted by PatientHttp.request, the async_* helpers, and RequestTemplate
+PatientHttp.get("https://api.example.com/data", callback: FetchCallback, redirect_strip_headers: "X-Signature")
 ```
 
-Per-request patterns survive serialization into the job queue, so they apply no matter which process follows the redirect.
+Per-request header names survive serialization into the job queue, so they apply no matter which process follows the redirect.
+
+Stripping applies to the headers set on the request. Preprocessors run again on each same-origin redirect and can add headers after the strip, so a header that a preprocessor sets is sent to the redirect target. When a redirect changes the method and drops the body, the headers that describe the body (`Content-Type`, `Content-Length`, `Content-Encoding`, `Content-Language`, and `Content-Location`) are removed as well.
 
 ## Troubleshooting
 
@@ -702,10 +707,10 @@ config = PatientHttp::Configuration.new(
   # a 302 (default: true). When false, those requests receive the redirect response.
   redirect_downgrade: true,
 
-  # Header names or patterns (case insensitive) always stripped from redirected
-  # requests (default: []). Authorization and Cookie are always stripped on
-  # cross-origin redirects.
-  redirect_strip_headers: ["X-Api-Key", /^x-internal-/],
+  # Header names (case insensitive) always stripped from redirected requests
+  # (default: []). Authorization and Cookie are always stripped on cross-origin
+  # redirects.
+  redirect_strip_headers: ["X-Api-Key", "X-Internal-Token"],
 
   # Maximum number of hosts to maintain persistent connections for (default: 100)
   connection_pool_size: 100,

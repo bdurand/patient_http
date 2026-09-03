@@ -41,58 +41,22 @@ module PatientHttp
         redirect_method(http_method, status) != http_method
       end
 
-      # Normalize header patterns used to strip headers from redirected requests.
-      # Header names are matched case insensitively: strings are downcased and
-      # regular expressions are made case insensitive.
+      # Normalize header names used to strip headers from redirected requests.
+      # Names are downcased so they match header names case insensitively.
       #
-      # @param patterns [String, Symbol, Regexp, Array<String, Symbol, Regexp>, nil] header patterns
-      # @return [Array<String, Regexp>] frozen normalized patterns
-      # @raise [ArgumentError] if a pattern is not a string, symbol, or regular expression
-      def normalize_header_patterns(patterns)
-        Array(patterns).map do |pattern|
-          case pattern
-          when Regexp
-            Regexp.new(pattern.source, pattern.options | Regexp::IGNORECASE)
-          when String, Symbol
-            name = pattern.to_s.downcase
-            raise ArgumentError.new("header names cannot be empty") if name.empty?
-            name.freeze
-          else
-            raise ArgumentError.new("header patterns must be strings or regular expressions, got: #{pattern.inspect}")
+      # @param names [String, Symbol, Array<String, Symbol>, nil] header names
+      # @return [Array<String>] frozen lowercase header names
+      # @raise [ArgumentError] if a name is not a string or symbol, or is empty
+      def normalize_header_names(names)
+        Array(names).map do |name|
+          unless name.is_a?(String) || name.is_a?(Symbol)
+            raise ArgumentError.new("header names must be strings, got: #{name.inspect}")
           end
+
+          name = name.to_s.downcase
+          raise ArgumentError.new("header names cannot be empty") if name.empty?
+          name.freeze
         end.freeze
-      end
-
-      # Check if a header name matches any of the normalized patterns.
-      #
-      # @param name [String] the header name
-      # @param patterns [Array<String, Regexp>] normalized patterns
-      # @return [Boolean] true if the header should be stripped
-      def strip_header?(name, patterns)
-        name = name.to_s.downcase
-        patterns.any? do |pattern|
-          pattern.is_a?(Regexp) ? pattern.match?(name) : pattern == name
-        end
-      end
-
-      # Serialize a header pattern to a JSON-compatible value.
-      #
-      # @param pattern [String, Regexp] normalized pattern
-      # @return [String, Hash] the serialized pattern
-      def dump_header_pattern(pattern)
-        pattern.is_a?(Regexp) ? {"$regexp" => pattern.to_s} : pattern
-      end
-
-      # Reconstruct a header pattern from its serialized value.
-      #
-      # @param value [String, Hash] the serialized pattern
-      # @return [String, Regexp] the pattern
-      def load_header_pattern(value)
-        if value.is_a?(Hash) && value.key?("$regexp")
-          Regexp.new(value["$regexp"])
-        else
-          value
-        end
       end
     end
 

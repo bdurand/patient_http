@@ -197,33 +197,28 @@ RSpec.describe "Redirect handling" do
     end
   end
 
-  describe "RedirectHelper.normalize_header_patterns" do
+  describe "RedirectHelper.normalize_header_names" do
     it "downcases header names" do
-      expect(PatientHttp::RedirectHelper.normalize_header_patterns(["X-Api-Key", :Cookie])).to eq(["x-api-key", "cookie"])
-    end
-
-    it "makes regular expressions case insensitive" do
-      patterns = PatientHttp::RedirectHelper.normalize_header_patterns(/^X-Internal-/)
-      expect(patterns.first).to match("x-internal-token")
+      expect(PatientHttp::RedirectHelper.normalize_header_names(["X-Api-Key", :Cookie])).to eq(["x-api-key", "cookie"])
     end
 
     it "accepts a single value" do
-      expect(PatientHttp::RedirectHelper.normalize_header_patterns("X-Api-Key")).to eq(["x-api-key"])
+      expect(PatientHttp::RedirectHelper.normalize_header_names("X-Api-Key")).to eq(["x-api-key"])
     end
 
     it "returns an empty array for nil" do
-      expect(PatientHttp::RedirectHelper.normalize_header_patterns(nil)).to eq([])
+      expect(PatientHttp::RedirectHelper.normalize_header_names(nil)).to eq([])
     end
 
-    it "rejects values that are not strings or regular expressions" do
+    it "rejects values that are not strings" do
       expect {
-        PatientHttp::RedirectHelper.normalize_header_patterns([123])
-      }.to raise_error(ArgumentError, /strings or regular expressions/)
+        PatientHttp::RedirectHelper.normalize_header_names([/^x-internal-/])
+      }.to raise_error(ArgumentError, /must be strings/)
     end
 
     it "rejects empty header names" do
       expect {
-        PatientHttp::RedirectHelper.normalize_header_patterns([""])
+        PatientHttp::RedirectHelper.normalize_header_names([""])
       }.to raise_error(ArgumentError, /cannot be empty/)
     end
   end

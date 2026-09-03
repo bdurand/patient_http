@@ -833,7 +833,7 @@ RSpec.describe PatientHttp::Processor do
 
     let(:client) { instance_double(Async::HTTP::Client) }
     let(:async_response) { instance_double(Async::HTTP::Protocol::Response) }
-    let(:response_body) { instance_double(Protocol::HTTP::Body::Buffered) }
+    let(:response_body) { instance_double(Protocol::HTTP::Body::Buffered, empty?: false) }
 
     around do |example|
       processor.run do
@@ -1832,11 +1832,11 @@ RSpec.describe PatientHttp::Processor do
       expect(response.http_method).to eq(:put)
     end
 
-    it "strips headers matching request patterns on redirect" do
+    it "strips headers named on the request on redirect" do
       stub_request(:get, "https://api.example.com/old")
         .to_return(status: 302, headers: {"Location" => "https://api.example.com/new"})
       stub_request(:get, "https://api.example.com/new")
-        .with { |req| req.headers.keys.none? { |name| name.downcase.start_with?("x-internal-") } && req.headers["Accept"] == "application/json" }
+        .with { |req| req.headers.keys.none? { |name| name.casecmp?("x-internal-token") } && req.headers["Accept"] == "application/json" }
         .to_return(status: 200, body: "final", headers: {})
 
       processor.start
@@ -1845,7 +1845,7 @@ RSpec.describe PatientHttp::Processor do
         :get,
         "https://api.example.com/old",
         headers: {"X-Internal-Token" => "secret", "Accept" => "application/json"},
-        redirect_strip_headers: /^X-Internal-/
+        redirect_strip_headers: "x-internal-TOKEN"
       )
       task = PatientHttp::RequestTask.new(request: request, task_handler: TestTaskHandler.new({"class" => "TestWorker", "jid" => SecureRandom.uuid, "args" => []}), callback: "TestCallback")
       processor.enqueue(task)

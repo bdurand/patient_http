@@ -16,8 +16,8 @@ module PatientHttp
   # 1. Register a global request handler with {PatientHttp.register_handler}.
   # 2. Include this module in a class.
   # 3. Optionally configure defaults with {.request_template}.
-  # 4. Call `async_get`, `async_post`, `async_put`, `async_patch`, `async_delete`, or
-  #    `async_request`.
+  # 4. Call `async_get`, `async_head`, `async_post`, `async_put`, `async_patch`,
+  #    `async_delete`, `async_query`, or `async_request`.
   #
   # @example Register a handler
   #   PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
@@ -165,6 +165,10 @@ module PatientHttp
       # @param raise_error_responses [Boolean, nil] when true, non-success responses are
       #   reported as errors
       # @param callback_args [Hash, nil] JSON-compatible callback arguments
+      # @param redirect_downgrade [Boolean, nil] whether to follow a redirect that changes the
+      #   HTTP method (nil uses the configuration default)
+      # @param redirect_strip_headers [String, Array<String>, nil] header names (case insensitive)
+      #   to strip from redirected requests, in addition to the configured names
       # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] names of preprocessors
       #   registered on the configuration to apply to the request when it is sent
       # @param processor [String, Symbol, nil] name of the processor that should execute
@@ -181,11 +185,23 @@ module PatientHttp
         timeout: nil,
         raise_error_responses: nil,
         callback_args: nil,
+        redirect_downgrade: nil,
+        redirect_strip_headers: nil,
         preprocessors: nil,
         processor: nil
       )
         template = async_request_template
-        kwargs = {body: body, json: json, headers: headers, params: params, timeout: timeout, preprocessors: preprocessors, processor: processor}
+        kwargs = {
+          body: body,
+          json: json,
+          headers: headers,
+          params: params,
+          timeout: timeout,
+          redirect_downgrade: redirect_downgrade,
+          redirect_strip_headers: redirect_strip_headers,
+          preprocessors: preprocessors,
+          processor: processor
+        }
         request = if template
           template.request(method, url, **kwargs)
         else
@@ -229,6 +245,10 @@ module PatientHttp
     # @param raise_error_responses [Boolean, nil] when true, non-success responses are
     #   reported as errors
     # @param callback_args [Hash, nil] JSON-compatible callback arguments
+    # @param redirect_downgrade [Boolean, nil] whether to follow a redirect that changes the
+    #   HTTP method (nil uses the configuration default)
+    # @param redirect_strip_headers [String, Array<String>, nil] header names (case insensitive)
+    #   to strip from redirected requests, in addition to the configured names
     # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] names of preprocessors
     #   registered on the configuration to apply to the request when it is sent
     # @param processor [String, Symbol, nil] name of the processor that should execute
@@ -245,6 +265,8 @@ module PatientHttp
       timeout: nil,
       raise_error_responses: nil,
       callback_args: nil,
+      redirect_downgrade: nil,
+      redirect_strip_headers: nil,
       preprocessors: nil,
       processor: nil
     )
@@ -259,6 +281,8 @@ module PatientHttp
         timeout: timeout,
         raise_error_responses: raise_error_responses,
         callback_args: callback_args,
+        redirect_downgrade: redirect_downgrade,
+        redirect_strip_headers: redirect_strip_headers,
         preprocessors: preprocessors,
         processor: processor
       )

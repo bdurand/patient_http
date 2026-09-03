@@ -423,6 +423,39 @@ RSpec.describe PatientHttp::RequestTask do
       end
     end
 
+    context "with headers that describe the body" do
+      let(:headers) do
+        {
+          "Content-Length" => "7",
+          "Content-Encoding" => "identity",
+          "Content-Language" => "en",
+          "Content-Location" => "/submit",
+          "Accept" => "application/json"
+        }
+      end
+
+      it "removes them when the redirect drops the body" do
+        request = PatientHttp::Request.new(:post, "https://api.example.com/submit", json: {a: 1}, headers: headers)
+        task = described_class.new(request: request, task_handler: task_handler, callback: callback)
+
+        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 302)
+
+        expect(redirect_task.request.body).to be_nil
+        expect(redirect_task.request.headers.to_h).to eq({"accept" => "application/json"})
+      end
+
+      it "keeps them when the redirect preserves the method" do
+        request = PatientHttp::Request.new(:post, "https://api.example.com/submit", json: {a: 1}, headers: headers)
+        task = described_class.new(request: request, task_handler: task_handler, callback: callback)
+
+        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 307)
+
+        expect(redirect_task.request.body).to eq('{"a":1}')
+        expect(redirect_task.request.headers["content-type"]).to eq("application/json; charset=utf-8")
+        expect(redirect_task.request.headers["content-length"]).to eq("7")
+      end
+    end
+
     context "with 303 redirects" do
       it "converts POST to GET and removes body" do
         task = described_class.new(
@@ -555,7 +588,7 @@ RSpec.describe PatientHttp::RequestTask do
           :get,
           "https://api.example.com/users",
           redirect_downgrade: false,
-          redirect_strip_headers: ["X-Api-Key", /^x-internal-/]
+          redirect_strip_headers: ["X-Api-Key", "X-Internal-Token"]
         )
         task = described_class.new(request: request, task_handler: task_handler, callback: callback)
 
@@ -587,8 +620,8 @@ RSpec.describe PatientHttp::RequestTask do
         expect(redirect_task.request.headers["accept"]).to eq("application/json")
       end
 
-      it "strips headers matching a regular expression on the request" do
-        request = PatientHttp::Request.new(:get, "https://api.example.com/users", headers: headers, redirect_strip_headers: /^X-Internal-/)
+      it "strips multiple headers named on the request" do
+        request = PatientHttp::Request.new(:get, "https://api.example.com/users", headers: headers, redirect_strip_headers: ["X-Internal-Token", "X-Internal-Trace"])
         task = described_class.new(request: request, task_handler: task_handler, callback: callback)
 
         redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 302)
@@ -599,12 +632,12 @@ RSpec.describe PatientHttp::RequestTask do
         expect(redirect_task.request.headers["accept"]).to eq("application/json")
       end
 
-      it "strips headers matching the given patterns in addition to the request patterns" do
+      it "strips the given header names in addition to the request header names" do
         request = PatientHttp::Request.new(:get, "https://api.example.com/users", headers: headers, redirect_strip_headers: "X-Api-Key")
         task = described_class.new(request: request, task_handler: task_handler, callback: callback)
-        patterns = PatientHttp::RedirectHelper.normalize_header_patterns([/^x-internal-/])
+        names = PatientHttp::RedirectHelper.normalize_header_names(["X-Internal-Token", "X-Internal-Trace"])
 
-        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 302, strip_headers: patterns)
+        redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 302, strip_headers: names)
 
         expect(redirect_task.request.headers.to_h.keys).to eq(["accept"])
       end

@@ -173,36 +173,32 @@ RSpec.describe PatientHttp::Request do
       expect(request.redirect_strip_headers).to eq([])
     end
 
-    it "normalizes redirect_strip_headers to lowercase names and case insensitive patterns" do
-      request = described_class.new(:get, "https://api.example.com", redirect_strip_headers: ["X-Api-Key", /^X-Internal-/])
-      expect(request.redirect_strip_headers.first).to eq("x-api-key")
-      expect(request.redirect_strip_headers.last).to match("x-internal-id")
+    it "normalizes redirect_strip_headers to lowercase names" do
+      request = described_class.new(:get, "https://api.example.com", redirect_strip_headers: ["X-Api-Key", :"X-Internal-Token"])
+      expect(request.redirect_strip_headers).to eq(["x-api-key", "x-internal-token"])
     end
 
-    it "rejects patterns that are not strings or regular expressions" do
+    it "rejects redirect_strip_headers that are not strings" do
       expect {
-        described_class.new(:get, "https://api.example.com", redirect_strip_headers: [1])
-      }.to raise_error(ArgumentError, /strings or regular expressions/)
+        described_class.new(:get, "https://api.example.com", redirect_strip_headers: [/^x-internal-/])
+      }.to raise_error(ArgumentError, /must be strings/)
     end
 
-    it "serializes and reloads redirect options including regular expressions" do
+    it "serializes and reloads redirect options" do
       request = described_class.new(
         :get,
         "https://api.example.com",
         redirect_downgrade: false,
-        redirect_strip_headers: ["X-Api-Key", /^X-Internal-/]
+        redirect_strip_headers: ["X-Api-Key", "X-Internal-Token"]
       )
       json = JSON.parse(JSON.generate(request.as_json))
 
       expect(json["redirect_downgrade"]).to be false
-      expect(json["redirect_strip_headers"]).to eq(["x-api-key", {"$regexp" => "(?i-mx:^X-Internal-)"}])
+      expect(json["redirect_strip_headers"]).to eq(["x-api-key", "x-internal-token"])
 
       reloaded = described_class.load(json)
       expect(reloaded.redirect_downgrade).to be false
-      expect(reloaded.redirect_strip_headers.first).to eq("x-api-key")
-      expect(reloaded.redirect_strip_headers.last).to be_a(Regexp)
-      expect(reloaded.redirect_strip_headers.last).to match("x-internal-id")
-      expect(reloaded.redirect_strip_headers.last).not_to match("x-other")
+      expect(reloaded.redirect_strip_headers).to eq(["x-api-key", "x-internal-token"])
     end
 
     it "omits redirect options from as_json when they are not set" do

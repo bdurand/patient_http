@@ -63,7 +63,7 @@ module PatientHttp
               # flattened to a single joined string value.
               headers_hash = async_response.headers.to_h.transform_values(&:to_s)
 
-              chunks = read_response_body(async_response, headers_hash)
+              chunks = @response_reader.read_raw_body(async_response, headers_hash)
               body_content = @response_reader.decode_body(chunks, headers_hash)
 
               {
@@ -176,47 +176,6 @@ module PatientHttp
         endpoint.url,
         timeout: @config.connection_timeout
       )
-    end
-
-    # Read the raw response body chunks with size validation. The chunks are
-    # the wire bytes; ResponseReader#decode_body inflates and applies the
-    # charset, enforcing the same limit on the inflated bytes.
-    #
-    # @param async_response [Async::HTTP::Protocol::Response] the async HTTP response
-    # @param headers_hash [Hash] the response headers
-    # @return [Array<String>, nil] the raw body chunks or nil if no body present
-    def read_response_body(async_response, headers_hash)
-      return nil unless async_response.body
-
-      content_length = headers_hash["content-length"]&.to_i
-      if content_length && content_length > @config.max_response_size
-        raise ResponseTooLargeError.new(
-          "Response body size (#{content_length} bytes) exceeds maximum allowed size (#{@config.max_response_size} bytes)"
-        )
-      end
-
-      chunks = []
-      total_size = 0
-      finished = false
-
-      begin
-        async_response.body.each do |chunk|
-          total_size += chunk.bytesize
-          if total_size > @config.max_response_size
-            raise ResponseTooLargeError.new(
-              "Response body size exceeded maximum allowed size (#{@config.max_response_size} bytes)"
-            )
-          end
-          chunks << chunk
-        end
-
-        finished = true
-      ensure
-        # Close the body if the read was interrupted so the connection is released
-        async_response.body.close unless finished
-      end
-
-      chunks
     end
 
     # Invoke callback synchronously.

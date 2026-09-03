@@ -386,6 +386,19 @@ RSpec.describe PatientHttp do
 
         expect(@captured_request.processor).to eq("llm")
       end
+
+      it "passes redirect options through to the handler's request" do
+        described_class.request(
+          :post,
+          "https://api.example.com/test",
+          callback: "TestCallback",
+          redirect_downgrade: false,
+          redirect_strip_headers: "X-Api-Key"
+        )
+
+        expect(@captured_request.redirect_downgrade).to be false
+        expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
+      end
     end
   end
 

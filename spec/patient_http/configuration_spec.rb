@@ -343,10 +343,9 @@ RSpec.describe PatientHttp::Configuration do
       expect(config.redirect_strip_headers).to eq([])
     end
 
-    it "normalizes names to lowercase and patterns to case insensitive" do
-      config.redirect_strip_headers = ["X-Api-Key", /^X-Internal-/]
-      expect(config.redirect_strip_headers.first).to eq("x-api-key")
-      expect(config.redirect_strip_headers.last).to match("x-internal-id")
+    it "normalizes names to lowercase" do
+      config.redirect_strip_headers = ["X-Api-Key", :"X-Internal-Token"]
+      expect(config.redirect_strip_headers).to eq(["x-api-key", "x-internal-token"])
     end
 
     it "accepts a single header name" do
@@ -354,8 +353,8 @@ RSpec.describe PatientHttp::Configuration do
       expect(config.redirect_strip_headers).to eq(["x-api-key"])
     end
 
-    it "rejects values that are not strings or regular expressions" do
-      expect { config.redirect_strip_headers = [42] }.to raise_error(ArgumentError, /strings or regular expressions/)
+    it "rejects values that are not strings" do
+      expect { config.redirect_strip_headers = [/^x-internal-/] }.to raise_error(ArgumentError, /must be strings/)
     end
 
     it "is included in to_h" do
