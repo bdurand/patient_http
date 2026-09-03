@@ -51,6 +51,12 @@ RSpec.describe PatientHttp::RequestTemplate do
       expect(result.timeout).to eq(30)
     end
 
+    it "passes redirect options to the Request" do
+      result = template.request(:post, "/users", follow_method_changing_redirects: false, redirect_strip_headers: "X-Api-Key")
+      expect(result.follow_method_changing_redirects).to be false
+      expect(result.redirect_strip_headers).to eq(["x-api-key"])
+    end
+
     context "with URI joining" do
       it "joins base_url with relative path" do
         template.request(:get, "/users")
@@ -323,6 +329,46 @@ RSpec.describe PatientHttp::RequestTemplate do
     it "returns an Request" do
       result = template.delete("/users/1")
       expect(result).to be_a(PatientHttp::Request)
+    end
+  end
+
+  describe "#head" do
+    let(:template) { described_class.new(base_url: base_url) }
+
+    it "calls request with :head method" do
+      expect(template).to receive(:request).with(:head, "/users/1")
+      template.head("/users/1")
+    end
+
+    it "returns an Request" do
+      result = template.head("/users/1")
+      expect(result).to be_a(PatientHttp::Request)
+      expect(result.http_method).to eq(:head)
+    end
+  end
+
+  describe "#query" do
+    let(:template) { described_class.new(base_url: base_url) }
+
+    it "calls request with :query method" do
+      expect(template).to receive(:request).with(:query, "/users/search")
+      template.query("/users/search")
+    end
+
+    it "forwards all keyword arguments" do
+      expect(template).to receive(:request).with(
+        :query,
+        "/users/search",
+        body: "name=John"
+      )
+      template.query("/users/search", body: "name=John")
+    end
+
+    it "returns an Request" do
+      result = template.query("/users/search", body: "name=John")
+      expect(result).to be_a(PatientHttp::Request)
+      expect(result.http_method).to eq(:query)
+      expect(result.body).to eq("name=John")
     end
   end
 

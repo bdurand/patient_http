@@ -101,6 +101,19 @@ RSpec.describe PatientHttp::RequestHelper do
         expect(@captured_request.http_method).to eq(:delete)
         expect(@captured_request.url).to eq("https://api.example.com/path")
       end
+
+      it "async_head sends HEAD requests" do
+        TestService.async_head("/path", callback: TestCallback)
+        expect(@captured_request.http_method).to eq(:head)
+        expect(@captured_request.url).to eq("https://api.example.com/path")
+      end
+
+      it "async_query sends QUERY requests" do
+        TestService.async_query("/path", callback: TestCallback, json: {"name" => "John"})
+        expect(@captured_request.http_method).to eq(:query)
+        expect(@captured_request.url).to eq("https://api.example.com/path")
+        expect(@captured_request.body).to eq('{"name":"John"}')
+      end
     end
   end
 
@@ -168,6 +181,16 @@ RSpec.describe PatientHttp::RequestHelper do
         @service.async_delete("/resource", callback: TestCallback)
         expect(@captured_request.http_method).to eq(:delete)
       end
+
+      it "async_head sends HEAD requests" do
+        @service.async_head("/resource", callback: TestCallback)
+        expect(@captured_request.http_method).to eq(:head)
+      end
+
+      it "async_query sends QUERY requests" do
+        @service.async_query("/resource", callback: TestCallback, body: "filter=active")
+        expect(@captured_request.http_method).to eq(:query)
+      end
     end
   end
 
@@ -223,6 +246,39 @@ RSpec.describe PatientHttp::RequestHelper do
       service_class.async_get("https://api.example.com/path", callback: TestCallback, preprocessors: :signer)
 
       expect(@captured_request.preprocessors).to eq(["signer"])
+    end
+  end
+
+  describe "redirect options" do
+    before do
+      @captured_request = nil
+      PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+        @captured_request = request
+      end
+    end
+
+    it "passes redirect options through async_request" do
+      TestService.async_post("/path", callback: TestCallback, follow_method_changing_redirects: false, redirect_strip_headers: "X-Api-Key")
+
+      expect(@captured_request.follow_method_changing_redirects).to be false
+      expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
+    end
+
+    it "passes redirect options through instance-level async_request" do
+      TestService.new.async_post("/path", callback: TestCallback, follow_method_changing_redirects: false, redirect_strip_headers: ["X-Api-Key"])
+
+      expect(@captured_request.follow_method_changing_redirects).to be false
+      expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
+    end
+
+    it "passes redirect options without a request template" do
+      service_class = Class.new do
+        include PatientHttp::RequestHelper
+      end
+
+      service_class.async_post("https://api.example.com/path", callback: TestCallback, follow_method_changing_redirects: false)
+
+      expect(@captured_request.follow_method_changing_redirects).to be false
     end
   end
 end

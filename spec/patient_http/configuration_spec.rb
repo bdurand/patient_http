@@ -319,6 +319,50 @@ RSpec.describe PatientHttp::Configuration do
     end
   end
 
+  describe "#follow_method_changing_redirects=" do
+    it "defaults to true" do
+      expect(config.follow_method_changing_redirects).to be true
+    end
+
+    it "accepts false" do
+      config.follow_method_changing_redirects = false
+      expect(config.follow_method_changing_redirects).to be false
+    end
+
+    it "rejects values that are not booleans" do
+      expect { config.follow_method_changing_redirects = nil }.to raise_error(ArgumentError, /true or false/)
+    end
+
+    it "is included in to_h" do
+      expect(config.to_h["follow_method_changing_redirects"]).to be true
+    end
+  end
+
+  describe "#redirect_strip_headers=" do
+    it "defaults to an empty array" do
+      expect(config.redirect_strip_headers).to eq([])
+    end
+
+    it "normalizes names to lowercase" do
+      config.redirect_strip_headers = ["X-Api-Key", :"X-Internal-Token"]
+      expect(config.redirect_strip_headers).to eq(["x-api-key", "x-internal-token"])
+    end
+
+    it "accepts a single header name" do
+      config.redirect_strip_headers = "X-Api-Key"
+      expect(config.redirect_strip_headers).to eq(["x-api-key"])
+    end
+
+    it "rejects values that are not strings" do
+      expect { config.redirect_strip_headers = [/^x-internal-/] }.to raise_error(ArgumentError, /must be strings/)
+    end
+
+    it "is included in to_h" do
+      config.redirect_strip_headers = ["X-Api-Key"]
+      expect(config.to_h["redirect_strip_headers"]).to eq(["x-api-key"])
+    end
+  end
+
   describe "#completion_threads=" do
     it "defaults to 2" do
       expect(config.completion_threads).to eq(2)

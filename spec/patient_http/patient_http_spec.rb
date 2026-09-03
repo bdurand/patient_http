@@ -317,6 +317,32 @@ RSpec.describe PatientHttp do
       end
     end
 
+    describe ".head" do
+      it "creates a HEAD request" do
+        described_class.head(
+          "https://api.example.com/users/1",
+          callback: "HeadCallback"
+        )
+
+        expect(@captured_request.http_method).to eq(:head)
+        expect(@captured_request.url).to eq("https://api.example.com/users/1")
+      end
+    end
+
+    describe ".query" do
+      it "creates a QUERY request with a body" do
+        described_class.query(
+          "https://api.example.com/users/search",
+          callback: "QueryCallback",
+          json: {"name" => "John"}
+        )
+
+        expect(@captured_request.http_method).to eq(:query)
+        expect(@captured_request.url).to eq("https://api.example.com/users/search")
+        expect(@captured_request.body).to eq('{"name":"John"}')
+      end
+    end
+
     describe ".request" do
       it "creates a request with all options" do
         described_class.request(
@@ -359,6 +385,30 @@ RSpec.describe PatientHttp do
         )
 
         expect(@captured_request.processor).to eq("llm")
+      end
+
+      it "passes redirect options through to the handler's request" do
+        described_class.request(
+          :post,
+          "https://api.example.com/test",
+          callback: "TestCallback",
+          follow_method_changing_redirects: false,
+          redirect_strip_headers: "X-Api-Key"
+        )
+
+        expect(@captured_request.follow_method_changing_redirects).to be false
+        expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
+      end
+
+      it "passes max_redirects through to the handler's request" do
+        described_class.request(
+          :get,
+          "https://api.example.com/test",
+          callback: "TestCallback",
+          max_redirects: 0
+        )
+
+        expect(@captured_request.max_redirects).to eq(0)
       end
     end
   end

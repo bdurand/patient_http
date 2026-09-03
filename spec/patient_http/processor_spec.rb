@@ -833,7 +833,7 @@ RSpec.describe PatientHttp::Processor do
 
     let(:client) { instance_double(Async::HTTP::Client) }
     let(:async_response) { instance_double(Async::HTTP::Protocol::Response) }
-    let(:response_body) { instance_double(Protocol::HTTP::Body::Buffered) }
+    let(:response_body) { instance_double(Protocol::HTTP::Body::Buffered, empty?: false) }
 
     around do |example|
       processor.run do
@@ -1793,6 +1793,67 @@ RSpec.describe PatientHttp::Processor do
       response = request.task_handler.completions.first[:response]
       expect(response.status).to eq(200)
       expect(response.http_method).to eq(:get)
+    end
+
+    it "delivers the redirect response when the request disables method-changing redirects and the method would change" do
+      stub_request(:post, "https://api.example.com/submit")
+        .to_return(status: 302, headers: {"Location" => "https://api.example.com/result"})
+
+      processor.start
+
+      request = PatientHttp::Request.new(:post, "https://api.example.com/submit", body: "payload", follow_method_changing_redirects: false)
+      task = PatientHttp::RequestTask.new(request: request, task_handler: TestTaskHandler.new({"class" => "TestWorker", "jid" => SecureRandom.uuid, "args" => []}), callback: "TestCallback")
+      processor.enqueue(task)
+      processor.wait_for_idle(timeout: 2)
+
+      expect(task.task_handler.completions.size).to eq(1)
+      response = task.task_handler.completions.first[:response]
+      expect(response.status).to eq(302)
+      expect(response.http_method).to eq(:post)
+      expect(response.redirects).to eq([])
+    end
+
+    it "preserves PUT method and body on 301 redirect" do
+      stub_request(:put, "https://api.example.com/item")
+        .to_return(status: 301, headers: {"Location" => "https://api.example.com/moved"})
+      stub_request(:put, "https://api.example.com/moved")
+        .with(body: "payload")
+        .to_return(status: 200, body: "ok", headers: {})
+
+      processor.start
+
+      request = create_request_task(method: :put, url: "https://api.example.com/item", body: "payload")
+      processor.enqueue(request)
+      processor.wait_for_idle(timeout: 2)
+
+      expect(request.task_handler.completions.size).to eq(1)
+      response = request.task_handler.completions.first[:response]
+      expect(response.status).to eq(200)
+      expect(response.http_method).to eq(:put)
+    end
+
+    it "strips headers named on the request on redirect" do
+      stub_request(:get, "https://api.example.com/old")
+        .to_return(status: 302, headers: {"Location" => "https://api.example.com/new"})
+      stub_request(:get, "https://api.example.com/new")
+        .with { |req| req.headers.keys.none? { |name| name.casecmp?("x-internal-token") } && req.headers["Accept"] == "application/json" }
+        .to_return(status: 200, body: "final", headers: {})
+
+      processor.start
+
+      request = PatientHttp::Request.new(
+        :get,
+        "https://api.example.com/old",
+        headers: {"X-Internal-Token" => "secret", "Accept" => "application/json"},
+        redirect_strip_headers: "x-internal-TOKEN"
+      )
+      task = PatientHttp::RequestTask.new(request: request, task_handler: TestTaskHandler.new({"class" => "TestWorker", "jid" => SecureRandom.uuid, "args" => []}), callback: "TestCallback")
+      processor.enqueue(task)
+      processor.wait_for_idle(timeout: 2)
+
+      expect(task.task_handler.errors).to be_empty
+      expect(task.task_handler.completions.size).to eq(1)
+      expect(task.task_handler.completions.first[:response].status).to eq(200)
     end
 
     it "preserves POST method on 307 redirect" do

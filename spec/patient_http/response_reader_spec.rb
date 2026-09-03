@@ -16,7 +16,7 @@ RSpec.describe PatientHttp::ResponseReader do
   end
 
   describe "#read_raw_body" do
-    let(:body_double) { instance_double(Protocol::HTTP::Body::Buffered) }
+    let(:body_double) { instance_double(Protocol::HTTP::Body::Buffered, empty?: false) }
     let(:async_response) { instance_double("Async::HTTP::Protocol::Response", body: body_double) }
     let(:headers_hash) { {} }
 
@@ -25,6 +25,19 @@ RSpec.describe PatientHttp::ResponseReader do
 
       it "returns nil" do
         expect(response_reader.read_raw_body(async_response, headers_hash)).to be_nil
+      end
+    end
+
+    context "when the response is for a HEAD request" do
+      let(:body_double) { Protocol::HTTP::Body::Head.new(50_000_000) }
+      let(:headers_hash) { {"content-length" => "50000000"} }
+
+      before do
+        config.max_response_size = 1_000_000
+      end
+
+      it "does not apply the size limit to the content-length header" do
+        expect(response_reader.read_raw_body(async_response, headers_hash)).to eq([])
       end
     end
 

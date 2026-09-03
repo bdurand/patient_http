@@ -19,7 +19,7 @@ RSpec.describe "Redirect handling" do
 
   describe "redirect status codes" do
     describe "followable redirects" do
-      [301, 302, 303, 307, 308].each do |status|
+      [300, 301, 302, 303, 307, 308].each do |status|
         it "follows #{status} redirects" do
           task = PatientHttp::RequestTask.new(
             request: request,
@@ -39,7 +39,7 @@ RSpec.describe "Redirect handling" do
     end
 
     describe "non-followable redirects" do
-      [300, 304, 305, 306, 399].each do |status|
+      [304, 305, 306, 399].each do |status|
         it "does not follow #{status} status" do
           task = PatientHttp::RequestTask.new(
             request: request,
@@ -109,6 +109,117 @@ RSpec.describe "Redirect handling" do
       }
 
       expect(processor.send(:should_follow_redirect?, task, response_data)).to be false
+    end
+  end
+
+  describe "follow_method_changing_redirects" do
+    def redirect_response(status)
+      {status: status, headers: {"location" => "https://example.com/new"}, body: nil}
+    end
+
+    def task_for(request)
+      PatientHttp::RequestTask.new(request: request, task_handler: task_handler, callback: TestCallback)
+    end
+
+    context "when the configuration disables method-changing redirects" do
+      let(:processor) { PatientHttp::Processor.new(PatientHttp::Configuration.new(follow_method_changing_redirects: false)) }
+
+      it "does not follow a 302 for a POST since the method would change" do
+        task = task_for(PatientHttp::Request.new(:post, "https://example.com/start", body: "data"))
+        expect(processor.send(:should_follow_redirect?, task, redirect_response(302))).to be false
+      end
+
+      it "does not follow a 303 for a QUERY since the method would change" do
+        task = task_for(PatientHttp::Request.new(:query, "https://example.com/start", body: "data"))
+        expect(processor.send(:should_follow_redirect?, task, redirect_response(303))).to be false
+      end
+
+      it "follows a 302 for a PUT since the method is preserved" do
+        task = task_for(PatientHttp::Request.new(:put, "https://example.com/start", body: "data"))
+        expect(processor.send(:should_follow_redirect?, task, redirect_response(302))).to be true
+      end
+
+      it "follows a 307 for a POST since the method is preserved" do
+        task = task_for(PatientHttp::Request.new(:post, "https://example.com/start", body: "data"))
+        expect(processor.send(:should_follow_redirect?, task, redirect_response(307))).to be true
+      end
+
+      it "follows a 303 for a HEAD since the method is preserved" do
+        task = task_for(PatientHttp::Request.new(:head, "https://example.com/start"))
+        expect(processor.send(:should_follow_redirect?, task, redirect_response(303))).to be true
+      end
+
+      it "lets the request enable method-changing redirects" do
+        task = task_for(PatientHttp::Request.new(:post, "https://example.com/start", body: "data", follow_method_changing_redirects: true))
+        expect(processor.send(:should_follow_redirect?, task, redirect_response(302))).to be true
+      end
+    end
+
+    context "when the configuration allows method-changing redirects" do
+      it "follows a 302 for a POST" do
+        task = task_for(PatientHttp::Request.new(:post, "https://example.com/start", body: "data"))
+        expect(processor.send(:should_follow_redirect?, task, redirect_response(302))).to be true
+      end
+
+      it "lets the request disable method-changing redirects" do
+        task = task_for(PatientHttp::Request.new(:post, "https://example.com/start", body: "data", follow_method_changing_redirects: false))
+        expect(processor.send(:should_follow_redirect?, task, redirect_response(302))).to be false
+      end
+    end
+  end
+
+  describe "RedirectHelper.redirect_method" do
+    all_methods = %i[get head post put patch delete query]
+
+    [300, 307, 308].each do |status|
+      it "preserves every method for #{status}" do
+        all_methods.each do |method|
+          expect(PatientHttp::RedirectHelper.redirect_method(method, status)).to eq(method)
+        end
+      end
+    end
+
+    [301, 302].each do |status|
+      it "changes only POST to GET for #{status}" do
+        expect(PatientHttp::RedirectHelper.redirect_method(:post, status)).to eq(:get)
+        (all_methods - [:post]).each do |method|
+          expect(PatientHttp::RedirectHelper.redirect_method(method, status)).to eq(method)
+        end
+      end
+    end
+
+    it "preserves GET and HEAD and changes every other method to GET for 303" do
+      expect(PatientHttp::RedirectHelper.redirect_method(:get, 303)).to eq(:get)
+      expect(PatientHttp::RedirectHelper.redirect_method(:head, 303)).to eq(:head)
+      (all_methods - %i[get head]).each do |method|
+        expect(PatientHttp::RedirectHelper.redirect_method(method, 303)).to eq(:get)
+      end
+    end
+  end
+
+  describe "RedirectHelper.normalize_header_names" do
+    it "downcases header names" do
+      expect(PatientHttp::RedirectHelper.normalize_header_names(["X-Api-Key", :Cookie])).to eq(["x-api-key", "cookie"])
+    end
+
+    it "accepts a single value" do
+      expect(PatientHttp::RedirectHelper.normalize_header_names("X-Api-Key")).to eq(["x-api-key"])
+    end
+
+    it "returns an empty array for nil" do
+      expect(PatientHttp::RedirectHelper.normalize_header_names(nil)).to eq([])
+    end
+
+    it "rejects values that are not strings" do
+      expect {
+        PatientHttp::RedirectHelper.normalize_header_names([/^x-internal-/])
+      }.to raise_error(ArgumentError, /must be strings/)
+    end
+
+    it "rejects empty header names" do
+      expect {
+        PatientHttp::RedirectHelper.normalize_header_names([""])
+      }.to raise_error(ArgumentError, /cannot be empty/)
     end
   end
 

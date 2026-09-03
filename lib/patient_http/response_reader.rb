@@ -113,15 +113,21 @@ module PatientHttp
     # response is compressed, the size check here applies to the compressed
     # bytes and {#decode_body} applies the same limit to the inflated bytes.
     #
+    # The Content-Length header is checked against the size limit before the
+    # read starts. A response to a HEAD request has an empty body but reports
+    # the Content-Length of the resource, so the header check is skipped when
+    # the body reports itself as empty.
+    #
     # @param async_response [Async::HTTP::Protocol::Response] the async HTTP response
     # @param headers_hash [Hash] the response headers
     # @return [Array<String>, nil] the raw body chunks or nil if no body present
     # @raise [ResponseTooLargeError] if the body exceeds max_response_size
     # @raise [ReadAbortedError] if the processor stopped past its shutdown deadline mid-read
     def read_raw_body(async_response, headers_hash)
-      return nil unless async_response.body
+      body = async_response.body
+      return nil unless body
 
-      validate_content_length(headers_hash)
+      validate_content_length(headers_hash) unless body.empty?
       read_body_chunks(async_response)
     end
 

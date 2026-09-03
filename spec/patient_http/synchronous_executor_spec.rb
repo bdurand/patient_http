@@ -94,6 +94,54 @@ RSpec.describe PatientHttp::SynchronousExecutor do
       expect(response.request_id).to eq(task.original_id)
     end
 
+    it "delivers the redirect response when the method would change and method-changing redirects are not followed" do
+      stub_request(:post, "https://api.example.com/submit")
+        .to_return(status: 302, headers: {"Location" => "https://api.example.com/result"})
+
+      task = create_task(method: :post, url: "https://api.example.com/submit")
+      described_class.new(task, config: PatientHttp::Configuration.new(follow_method_changing_redirects: false)).call
+
+      expect(TestCallback.error_calls).to be_empty
+      expect(TestCallback.completion_calls.size).to eq(1)
+
+      response = TestCallback.completion_calls.first
+      expect(response.status).to eq(302)
+      expect(response.http_method).to eq(:post)
+      expect(response.redirects).to eq([])
+    end
+
+    it "follows a 307 for a POST when method-changing redirects are not followed" do
+      stub_request(:post, "https://api.example.com/submit")
+        .to_return(status: 307, headers: {"Location" => "https://api.example.com/new-submit"})
+      stub_request(:post, "https://api.example.com/new-submit")
+        .with(body: "payload")
+        .to_return(status: 200, body: "ok")
+
+      request = PatientHttp::Request.new(:post, "https://api.example.com/submit", body: "payload")
+      task = PatientHttp::RequestTask.new(request: request, task_handler: TestTaskHandler.new({}), callback: TestCallback)
+      described_class.new(task, config: PatientHttp::Configuration.new(follow_method_changing_redirects: false)).call
+
+      expect(TestCallback.completion_calls.size).to eq(1)
+      expect(TestCallback.completion_calls.first.status).to eq(200)
+    end
+
+    it "strips configured headers from redirected requests" do
+      stub_request(:get, "https://api.example.com/old")
+        .with(headers: {"X-Api-Key" => "secret", "Accept" => "application/json"})
+        .to_return(status: 302, headers: {"Location" => "https://api.example.com/new"})
+      stub_request(:get, "https://api.example.com/new")
+        .with { |req| req.headers.keys.none? { |name| name.casecmp?("x-api-key") } && req.headers["Accept"] == "application/json" }
+        .to_return(status: 200, body: "final")
+
+      request = PatientHttp::Request.new(:get, "https://api.example.com/old", headers: {"X-Api-Key" => "secret", "Accept" => "application/json"})
+      task = PatientHttp::RequestTask.new(request: request, task_handler: TestTaskHandler.new({}), callback: TestCallback)
+      described_class.new(task, config: PatientHttp::Configuration.new(redirect_strip_headers: ["x-api-key"])).call
+
+      expect(TestCallback.error_calls).to be_empty
+      expect(TestCallback.completion_calls.size).to eq(1)
+      expect(TestCallback.completion_calls.first.status).to eq(200)
+    end
+
     it "invokes the error callback exactly once when there are too many redirects" do
       (1..10).each do |i|
         stub_request(:get, "https://api.example.com/#{i}")

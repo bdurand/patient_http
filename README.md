@@ -163,7 +163,7 @@ get_request = template.get("/users/123")
 post_request = template.post("/users", json: {name: "John"})
 ```
 
-Templates support all HTTP methods (`get`, `post`, `put`, `patch`, `delete`) and handle URL joining, header merging, and query parameter encoding.
+Templates support all HTTP methods (`get`, `head`, `post`, `put`, `patch`, `delete`, `query`) and handle URL joining, header merging, and query parameter encoding.
 
 ## Standard Interface
 
@@ -188,7 +188,7 @@ PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_
 end
 
 # Now you can make requests directly through the PatientHttp interface with the .request,
-# .get, .post, .patch, .put, and .delete class methods:
+# .get, .head, .post, .patch, .put, .delete, and .query class methods:
 PatientHttp.get(
   "https://api.example.com/users/123",
   callback: FetchUserCallback,
@@ -229,7 +229,7 @@ Use `PatientHttp::RequestHelper` when you want a simple API for creating and dis
 1. Register a request handler with `PatientHttp.register_handler` that defines how requests are dispatched to your job queue or background processing system.
 2. Include `PatientHttp::RequestHelper` in your class.
 3. Optionally define a `request_template` for shared `base_url`, headers, and timeout.
-4. Call `async_get`, `async_post`, `async_put`, `async_patch`, `async_delete`, or `async_request`.
+4. Call `async_get`, `async_head`, `async_post`, `async_put`, `async_patch`, `async_delete`, `async_query`, or `async_request`.
 
 ```ruby
 class ApiClient
@@ -618,6 +618,49 @@ If a request references a preprocessor name that is not registered, a `PatientHt
 
 When redirects are followed, preprocessors are re-run against each redirect URL so signatures stay valid. On cross-origin redirects they are dropped entirely, consistent with the stripping of `Authorization` and `Cookie` headers, so signed credentials are never sent to an unexpected origin.
 
+## Redirects
+
+Redirect responses (300, 301, 302, 303, 307, and 308) with a `Location` header are followed automatically, up to `max_redirects` hops. A 300 response is followed only when the server names a preferred choice in `Location`. Redirect loops raise `RecursiveRedirectError` and exceeding the limit raises `TooManyRedirectsError`. Any redirect that is not followed is delivered to the callback as a normal response.
+
+The HTTP method of the redirected request follows RFC 9110:
+
+| Status | Method |
+| --- | --- |
+| 301, 302 | `POST` becomes `GET` and the body is dropped. Other methods (including `HEAD`, `PUT`, `DELETE`, and `QUERY`) are preserved with their body. |
+| 303 | `GET` and `HEAD` are preserved. Every other method becomes `GET` and the body is dropped. |
+| 300, 307, 308 | The method and body are preserved. |
+
+The QUERY specification states that the POST-to-GET exception on 301 and 302 does not apply to `QUERY`, so a redirected `QUERY` is re-sent as a `QUERY` with its body, and a 303 turns it into a `GET`.
+
+### Preventing method changes
+
+Set `follow_method_changing_redirects: false` to stop following redirects that would change the HTTP method. A `POST` that receives a 302 then completes with the 302 response instead of being retried as a `GET`. Redirects that preserve the method (a `PUT` on a 301, or any method on a 307) are still followed. The option can be set on the `Configuration` or on a single `Request`; the request value wins when both are set.
+
+```ruby
+config = PatientHttp::Configuration.new(follow_method_changing_redirects: false)
+
+# Or per request
+request = PatientHttp::Request.new(:post, "https://api.example.com/submit", body: payload, follow_method_changing_redirects: false)
+```
+
+### Stripping headers on redirects
+
+`Authorization` and `Cookie` headers are always removed on cross-origin redirects. To make sure other sensitive headers are never sent to a redirect target, list them in `redirect_strip_headers`. Header names are matched case insensitively. Listed headers are removed from every redirected request, same-origin or not.
+
+```ruby
+config = PatientHttp::Configuration.new(redirect_strip_headers: ["X-Api-Key", "X-Internal-Token"])
+
+# Or per request; these are stripped in addition to the configured headers
+request = PatientHttp::Request.new(:get, "https://api.example.com/data", headers: headers, redirect_strip_headers: "X-Signature")
+
+# The same options are accepted by PatientHttp.request, the async_* helpers, and RequestTemplate
+PatientHttp.get("https://api.example.com/data", callback: FetchCallback, redirect_strip_headers: "X-Signature")
+```
+
+Per-request header names survive serialization into the job queue, so they apply no matter which process follows the redirect.
+
+Stripping applies to the headers set on the request. Preprocessors run again on each same-origin redirect and can add headers after the strip, so a header that a preprocessor sets is sent to the redirect target. When a redirect changes the method and drops the body, the headers that describe the body (`Content-Type`, `Content-Length`, `Content-Encoding`, `Content-Language`, and `Content-Location`) are removed as well.
+
 ## Troubleshooting
 
 ### Warning: `ThreadError: Attempt to unlock a mutex which is not locked`
@@ -659,6 +702,15 @@ config = PatientHttp::Configuration.new(
 
   # Maximum redirects to follow (default: 5, 0 disables)
   max_redirects: 5,
+
+  # Follow redirects that must change the HTTP method, such as POST to GET on
+  # a 302 (default: true). When false, those requests receive the redirect response.
+  follow_method_changing_redirects: true,
+
+  # Header names (case insensitive) always stripped from redirected requests
+  # (default: []). Authorization and Cookie are always stripped on cross-origin
+  # redirects.
+  redirect_strip_headers: ["X-Api-Key", "X-Internal-Token"],
 
   # Maximum number of hosts to maintain persistent connections for (default: 100)
   connection_pool_size: 100,

@@ -46,18 +46,35 @@ module PatientHttp
 
     # Build an async HTTP request. Returns a Request object.
     #
-    # @param method [Symbol] HTTP method (:get, :post, :put, :patch, :delete)
+    # @param method [Symbol] HTTP method (:get, :head, :post, :put, :patch, :delete, :query)
     # @param uri [String, URI::HTTP] URI path to request (joined with base_url if relative)
     # @param body [String, nil] request body
     # @param json [Object, nil] JSON object to serialize (cannot use with body)
     # @param headers [Hash] additional headers to merge with client headers
     # @param params [Hash, nil] query parameters to add to URL
+    # @param timeout [Numeric, nil] request timeout in seconds (overrides the template default)
+    # @param follow_method_changing_redirects [Boolean, nil] whether to follow a redirect that changes the
+    #   HTTP method (nil uses the configuration default)
+    # @param redirect_strip_headers [String, Array<String>, nil] header names (case insensitive)
+    #   to strip from redirected requests, in addition to the configured names
     # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] preprocessors to apply
     #   to the request (overrides the template default)
     # @param processor [String, Symbol, nil] processor name for the request (overrides the
     #   template default)
     # @return [Request] request object
-    def request(method, uri, body: nil, json: nil, headers: nil, params: nil, timeout: nil, preprocessors: nil, processor: nil)
+    def request(
+      method,
+      uri,
+      body: nil,
+      json: nil,
+      headers: nil,
+      params: nil,
+      timeout: nil,
+      follow_method_changing_redirects: nil,
+      redirect_strip_headers: nil,
+      preprocessors: nil,
+      processor: nil
+    )
       full_uri = @base_url ? URI.join(@base_url, uri.to_s) : URI(uri)
 
       merged_headers = headers&.any? ? @headers.merge(headers) : @headers
@@ -72,6 +89,8 @@ module PatientHttp
         json: json,
         params: merged_params,
         timeout: timeout || @timeout,
+        follow_method_changing_redirects: follow_method_changing_redirects,
+        redirect_strip_headers: redirect_strip_headers,
         preprocessors: preprocessors || @preprocessors,
         processor: processor || @processor
       )
@@ -84,6 +103,15 @@ module PatientHttp
     # @return [Request] request object
     def get(uri, **kwargs)
       request(:get, uri, **kwargs)
+    end
+
+    # Convenience method for HEAD requests.
+    #
+    # @param uri [String, URI::HTTP] URI path to request
+    # @param kwargs [Hash] additional options (see #request)
+    # @return [Request] request object
+    def head(uri, **kwargs)
+      request(:head, uri, **kwargs)
     end
 
     # Convenience method for POST requests.
@@ -120,6 +148,15 @@ module PatientHttp
     # @return [Request] request object
     def delete(uri, **kwargs)
       request(:delete, uri, **kwargs)
+    end
+
+    # Convenience method for QUERY requests.
+    #
+    # @param uri [String, URI::HTTP] URI path to request
+    # @param kwargs [Hash] additional options (see #request)
+    # @return [Request] request object
+    def query(uri, **kwargs)
+      request(:query, uri, **kwargs)
     end
   end
 end

@@ -17,9 +17,12 @@ module PatientHttp
     private_constant :UNDEFINED
 
     # Valid HTTP methods
-    VALID_METHODS = %i[get post put patch delete].freeze
+    VALID_METHODS = %i[get head post put patch delete query].freeze
 
-    # @return [Symbol] HTTP method (:get, :post, :put, :patch, :delete)
+    # HTTP methods that must not carry a request body
+    BODYLESS_METHODS = %i[get head delete].freeze
+
+    # @return [Symbol] HTTP method (:get, :head, :post, :put, :patch, :delete, :query)
     attr_reader :http_method
 
     # @return [String] The request URL
@@ -33,6 +36,14 @@ module PatientHttp
 
     # @return [Integer, nil] Maximum number of redirects to follow (nil uses config default, 0 disables)
     attr_reader :max_redirects
+
+    # @return [Boolean, nil] Whether a redirect that requires changing the HTTP method
+    #   (for example POST to GET on a 302) may be followed (nil uses config default)
+    attr_reader :follow_method_changing_redirects
+
+    # @return [Array<String>] Lowercase header names stripped from redirected requests,
+    #   in addition to those configured on the {Configuration}
+    attr_reader :redirect_strip_headers
 
     # @return [Hash{String, Symbol => SecretReference}] Query parameters whose values are
     #   secret references, kept out of the serialized URL and resolved at send time
@@ -61,6 +72,8 @@ module PatientHttp
           params: load_secret_params(hash["secret_params"]),
           timeout: hash["timeout"],
           max_redirects: hash["max_redirects"],
+          follow_method_changing_redirects: hash["follow_method_changing_redirects"],
+          redirect_strip_headers: hash["redirect_strip_headers"],
           preprocessors: hash["preprocessors"],
           processor: hash["processor"]
         )
@@ -87,7 +100,7 @@ module PatientHttp
 
     # Initializes a new Request.
     #
-    # @param http_method [Symbol, String] HTTP method (:get, :post, :put, :patch, :delete).
+    # @param http_method [Symbol, String] HTTP method (:get, :head, :post, :put, :patch, :delete, :query).
     # @param url [String, URI::Generic] The request URL.
     # @param headers [Hash, HttpHeaders] Request headers.
     # @param body [String, nil] Request body.
@@ -95,6 +108,12 @@ module PatientHttp
     # @param params [Hash, nil] Query parameters to append to the URL.
     # @param timeout [Numeric, nil] Overall timeout in seconds.
     # @param max_redirects [Integer, nil] Maximum redirects to follow (nil uses config, 0 disables).
+    # @param follow_method_changing_redirects [Boolean, nil] Whether to follow a redirect that requires changing
+    #   the HTTP method (nil uses config). When false, such a redirect response is returned as the
+    #   result instead of being followed.
+    # @param redirect_strip_headers [String, Array<String>, nil] Header names (case insensitive)
+    #   to strip from redirected requests, in addition to those configured on the
+    #   {Configuration}.
     # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] Names of preprocessors
     #   registered on the configuration to apply to the request when it is sent.
     # @param processor [String, Symbol, nil] Name of the processor that should execute the
@@ -108,6 +127,8 @@ module PatientHttp
       params: nil,
       timeout: nil,
       max_redirects: nil,
+      follow_method_changing_redirects: nil,
+      redirect_strip_headers: nil,
       preprocessors: nil,
       processor: nil
     )
@@ -125,6 +146,8 @@ module PatientHttp
       @body = (body == "") ? nil : body
       @timeout = timeout
       @max_redirects = max_redirects
+      @follow_method_changing_redirects = normalized_follow_method_changing_redirects(follow_method_changing_redirects)
+      @redirect_strip_headers = RedirectHelper.normalize_header_names(redirect_strip_headers)
       @preprocessors = normalized_preprocessors(preprocessors)
       @processor = normalized_processor(processor)
 
@@ -167,6 +190,12 @@ module PatientHttp
         hash["secret_params"] = @secret_params.transform_values(&:as_json)
       end
 
+      unless @follow_method_changing_redirects.nil?
+        hash["follow_method_changing_redirects"] = @follow_method_changing_redirects
+      end
+
+      hash["redirect_strip_headers"] = @redirect_strip_headers if @redirect_strip_headers.any?
+
       hash["preprocessors"] = @preprocessors if @preprocessors.any?
       hash["processor"] = @processor if @processor
 
@@ -180,6 +209,14 @@ module PatientHttp
       @headers.to_h.transform_values do |value|
         value.is_a?(SecretReference) ? value.as_json : value
       end
+    end
+
+    # Normalize the method-changing redirect flag to true, false, or nil.
+    def normalized_follow_method_changing_redirects(value)
+      return nil if value.nil?
+      return value if value == true || value == false
+
+      raise ArgumentError.new("follow_method_changing_redirects must be true, false, or nil, got: #{value.inspect}")
     end
 
     # Normalize the processor name to a frozen string or nil.
@@ -238,7 +275,7 @@ module PatientHttp
         raise ArgumentError.new("url must be a String or URI, got: #{@url.class}")
       end
 
-      if %i[get delete].include?(@http_method) && !@body.nil?
+      if BODYLESS_METHODS.include?(@http_method) && !@body.nil?
         raise ArgumentError.new("body is not allowed for #{@http_method.upcase} requests")
       end
 
