@@ -399,6 +399,17 @@ RSpec.describe PatientHttp do
         expect(@captured_request.redirect_downgrade).to be false
         expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
       end
+
+      it "passes max_redirects through to the handler's request" do
+        described_class.request(
+          :get,
+          "https://api.example.com/test",
+          callback: "TestCallback",
+          max_redirects: 0
+        )
+
+        expect(@captured_request.max_redirects).to eq(0)
+      end
     end
   end
 

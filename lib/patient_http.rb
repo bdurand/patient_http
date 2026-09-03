@@ -349,6 +349,8 @@ module PatientHttp
     # @param raise_error_responses [Boolean, nil] when true, non-success responses are
     #   reported as errors
     # @param callback_args [Hash, nil] JSON-compatible callback arguments
+    # @param max_redirects [Integer, nil] maximum redirects to follow (nil uses the configuration
+    #   default, 0 disables redirects)
     # @param redirect_downgrade [Boolean, nil] whether to follow a redirect that changes the
     #   HTTP method (nil uses the configuration default)
     # @param redirect_strip_headers [String, Array<String>, nil] header names (case insensitive)
@@ -369,6 +371,7 @@ module PatientHttp
       timeout: nil,
       raise_error_responses: nil,
       callback_args: nil,
+      max_redirects: nil,
       redirect_downgrade: nil,
       redirect_strip_headers: nil,
       preprocessors: nil,
@@ -382,6 +385,7 @@ module PatientHttp
         headers: headers,
         params: params,
         timeout: timeout,
+        max_redirects: max_redirects,
         redirect_downgrade: redirect_downgrade,
         redirect_strip_headers: redirect_strip_headers,
         preprocessors: preprocessors,
