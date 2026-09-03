@@ -634,13 +634,13 @@ The QUERY specification states that the POST-to-GET exception on 301 and 302 doe
 
 ### Preventing method changes
 
-Set `redirect_downgrade: false` to stop following redirects that would change the HTTP method. A `POST` that receives a 302 then completes with the 302 response instead of being retried as a `GET`. Redirects that preserve the method (a `PUT` on a 301, or any method on a 307) are still followed. The option can be set on the `Configuration` or on a single `Request`; the request value wins when both are set.
+Set `follow_method_changing_redirects: false` to stop following redirects that would change the HTTP method. A `POST` that receives a 302 then completes with the 302 response instead of being retried as a `GET`. Redirects that preserve the method (a `PUT` on a 301, or any method on a 307) are still followed. The option can be set on the `Configuration` or on a single `Request`; the request value wins when both are set.
 
 ```ruby
-config = PatientHttp::Configuration.new(redirect_downgrade: false)
+config = PatientHttp::Configuration.new(follow_method_changing_redirects: false)
 
 # Or per request
-request = PatientHttp::Request.new(:post, "https://api.example.com/submit", body: payload, redirect_downgrade: false)
+request = PatientHttp::Request.new(:post, "https://api.example.com/submit", body: payload, follow_method_changing_redirects: false)
 ```
 
 ### Stripping headers on redirects
@@ -705,7 +705,7 @@ config = PatientHttp::Configuration.new(
 
   # Follow redirects that must change the HTTP method, such as POST to GET on
   # a 302 (default: true). When false, those requests receive the redirect response.
-  redirect_downgrade: true,
+  follow_method_changing_redirects: true,
 
   # Header names (case insensitive) always stripped from redirected requests
   # (default: []). Authorization and Cookie are always stripped on cross-origin

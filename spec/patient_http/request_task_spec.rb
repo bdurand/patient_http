@@ -583,18 +583,18 @@ RSpec.describe PatientHttp::RequestTask do
     end
 
     context "with redirect options on the request" do
-      it "preserves redirect_downgrade and redirect_strip_headers" do
+      it "preserves follow_method_changing_redirects and redirect_strip_headers" do
         request = PatientHttp::Request.new(
           :get,
           "https://api.example.com/users",
-          redirect_downgrade: false,
+          follow_method_changing_redirects: false,
           redirect_strip_headers: ["X-Api-Key", "X-Internal-Token"]
         )
         task = described_class.new(request: request, task_handler: task_handler, callback: callback)
 
         redirect_task = task.redirect_task(location: "https://api.example.com/new", status: 302)
 
-        expect(redirect_task.request.redirect_downgrade).to be false
+        expect(redirect_task.request.follow_method_changing_redirects).to be false
         expect(redirect_task.request.redirect_strip_headers).to eq(request.redirect_strip_headers)
       end
     end

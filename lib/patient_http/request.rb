@@ -39,7 +39,7 @@ module PatientHttp
 
     # @return [Boolean, nil] Whether a redirect that requires changing the HTTP method
     #   (for example POST to GET on a 302) may be followed (nil uses config default)
-    attr_reader :redirect_downgrade
+    attr_reader :follow_method_changing_redirects
 
     # @return [Array<String>] Lowercase header names stripped from redirected requests,
     #   in addition to those configured on the {Configuration}
@@ -72,7 +72,7 @@ module PatientHttp
           params: load_secret_params(hash["secret_params"]),
           timeout: hash["timeout"],
           max_redirects: hash["max_redirects"],
-          redirect_downgrade: hash["redirect_downgrade"],
+          follow_method_changing_redirects: hash["follow_method_changing_redirects"],
           redirect_strip_headers: hash["redirect_strip_headers"],
           preprocessors: hash["preprocessors"],
           processor: hash["processor"]
@@ -108,7 +108,7 @@ module PatientHttp
     # @param params [Hash, nil] Query parameters to append to the URL.
     # @param timeout [Numeric, nil] Overall timeout in seconds.
     # @param max_redirects [Integer, nil] Maximum redirects to follow (nil uses config, 0 disables).
-    # @param redirect_downgrade [Boolean, nil] Whether to follow a redirect that requires changing
+    # @param follow_method_changing_redirects [Boolean, nil] Whether to follow a redirect that requires changing
     #   the HTTP method (nil uses config). When false, such a redirect response is returned as the
     #   result instead of being followed.
     # @param redirect_strip_headers [String, Array<String>, nil] Header names (case insensitive)
@@ -127,7 +127,7 @@ module PatientHttp
       params: nil,
       timeout: nil,
       max_redirects: nil,
-      redirect_downgrade: nil,
+      follow_method_changing_redirects: nil,
       redirect_strip_headers: nil,
       preprocessors: nil,
       processor: nil
@@ -146,7 +146,7 @@ module PatientHttp
       @body = (body == "") ? nil : body
       @timeout = timeout
       @max_redirects = max_redirects
-      @redirect_downgrade = normalized_redirect_downgrade(redirect_downgrade)
+      @follow_method_changing_redirects = normalized_follow_method_changing_redirects(follow_method_changing_redirects)
       @redirect_strip_headers = RedirectHelper.normalize_header_names(redirect_strip_headers)
       @preprocessors = normalized_preprocessors(preprocessors)
       @processor = normalized_processor(processor)
@@ -190,8 +190,8 @@ module PatientHttp
         hash["secret_params"] = @secret_params.transform_values(&:as_json)
       end
 
-      unless @redirect_downgrade.nil?
-        hash["redirect_downgrade"] = @redirect_downgrade
+      unless @follow_method_changing_redirects.nil?
+        hash["follow_method_changing_redirects"] = @follow_method_changing_redirects
       end
 
       hash["redirect_strip_headers"] = @redirect_strip_headers if @redirect_strip_headers.any?
@@ -211,12 +211,12 @@ module PatientHttp
       end
     end
 
-    # Normalize the redirect downgrade flag to true, false, or nil.
-    def normalized_redirect_downgrade(value)
+    # Normalize the method-changing redirect flag to true, false, or nil.
+    def normalized_follow_method_changing_redirects(value)
       return nil if value.nil?
       return value if value == true || value == false
 
-      raise ArgumentError.new("redirect_downgrade must be true, false, or nil, got: #{value.inspect}")
+      raise ArgumentError.new("follow_method_changing_redirects must be true, false, or nil, got: #{value.inspect}")
     end
 
     # Normalize the processor name to a frozen string or nil.

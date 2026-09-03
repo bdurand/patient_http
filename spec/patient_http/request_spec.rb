@@ -152,20 +152,20 @@ RSpec.describe PatientHttp::Request do
   end
 
   describe "redirect options" do
-    it "defaults redirect_downgrade to nil" do
+    it "defaults follow_method_changing_redirects to nil" do
       request = described_class.new(:get, "https://api.example.com")
-      expect(request.redirect_downgrade).to be_nil
+      expect(request.follow_method_changing_redirects).to be_nil
     end
 
-    it "accepts redirect_downgrade true or false" do
-      expect(described_class.new(:get, "https://api.example.com", redirect_downgrade: false).redirect_downgrade).to be false
-      expect(described_class.new(:get, "https://api.example.com", redirect_downgrade: true).redirect_downgrade).to be true
+    it "accepts follow_method_changing_redirects true or false" do
+      expect(described_class.new(:get, "https://api.example.com", follow_method_changing_redirects: false).follow_method_changing_redirects).to be false
+      expect(described_class.new(:get, "https://api.example.com", follow_method_changing_redirects: true).follow_method_changing_redirects).to be true
     end
 
-    it "rejects a redirect_downgrade value that is not a boolean" do
+    it "rejects a follow_method_changing_redirects value that is not a boolean" do
       expect {
-        described_class.new(:get, "https://api.example.com", redirect_downgrade: "no")
-      }.to raise_error(ArgumentError, /redirect_downgrade must be true, false, or nil/)
+        described_class.new(:get, "https://api.example.com", follow_method_changing_redirects: "no")
+      }.to raise_error(ArgumentError, /follow_method_changing_redirects must be true, false, or nil/)
     end
 
     it "defaults redirect_strip_headers to an empty array" do
@@ -188,22 +188,22 @@ RSpec.describe PatientHttp::Request do
       request = described_class.new(
         :get,
         "https://api.example.com",
-        redirect_downgrade: false,
+        follow_method_changing_redirects: false,
         redirect_strip_headers: ["X-Api-Key", "X-Internal-Token"]
       )
       json = JSON.parse(JSON.generate(request.as_json))
 
-      expect(json["redirect_downgrade"]).to be false
+      expect(json["follow_method_changing_redirects"]).to be false
       expect(json["redirect_strip_headers"]).to eq(["x-api-key", "x-internal-token"])
 
       reloaded = described_class.load(json)
-      expect(reloaded.redirect_downgrade).to be false
+      expect(reloaded.follow_method_changing_redirects).to be false
       expect(reloaded.redirect_strip_headers).to eq(["x-api-key", "x-internal-token"])
     end
 
     it "omits redirect options from as_json when they are not set" do
       json = described_class.new(:get, "https://api.example.com").as_json
-      expect(json).not_to have_key("redirect_downgrade")
+      expect(json).not_to have_key("follow_method_changing_redirects")
       expect(json).not_to have_key("redirect_strip_headers")
     end
   end

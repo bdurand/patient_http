@@ -94,12 +94,12 @@ RSpec.describe PatientHttp::SynchronousExecutor do
       expect(response.request_id).to eq(task.original_id)
     end
 
-    it "delivers the redirect response when the method would change and downgrades are disabled" do
+    it "delivers the redirect response when the method would change and method-changing redirects are not followed" do
       stub_request(:post, "https://api.example.com/submit")
         .to_return(status: 302, headers: {"Location" => "https://api.example.com/result"})
 
       task = create_task(method: :post, url: "https://api.example.com/submit")
-      described_class.new(task, config: PatientHttp::Configuration.new(redirect_downgrade: false)).call
+      described_class.new(task, config: PatientHttp::Configuration.new(follow_method_changing_redirects: false)).call
 
       expect(TestCallback.error_calls).to be_empty
       expect(TestCallback.completion_calls.size).to eq(1)
@@ -110,7 +110,7 @@ RSpec.describe PatientHttp::SynchronousExecutor do
       expect(response.redirects).to eq([])
     end
 
-    it "follows a 307 for a POST when downgrades are disabled" do
+    it "follows a 307 for a POST when method-changing redirects are not followed" do
       stub_request(:post, "https://api.example.com/submit")
         .to_return(status: 307, headers: {"Location" => "https://api.example.com/new-submit"})
       stub_request(:post, "https://api.example.com/new-submit")
@@ -119,7 +119,7 @@ RSpec.describe PatientHttp::SynchronousExecutor do
 
       request = PatientHttp::Request.new(:post, "https://api.example.com/submit", body: "payload")
       task = PatientHttp::RequestTask.new(request: request, task_handler: TestTaskHandler.new({}), callback: TestCallback)
-      described_class.new(task, config: PatientHttp::Configuration.new(redirect_downgrade: false)).call
+      described_class.new(task, config: PatientHttp::Configuration.new(follow_method_changing_redirects: false)).call
 
       expect(TestCallback.completion_calls.size).to eq(1)
       expect(TestCallback.completion_calls.first.status).to eq(200)

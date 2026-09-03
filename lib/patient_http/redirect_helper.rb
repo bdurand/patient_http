@@ -76,7 +76,7 @@ module PatientHttp
       return false if location.nil? || location.empty?
 
       if RedirectHelper.method_change_required?(task.request.http_method, status)
-        return false unless redirect_downgrade_allowed?(task)
+        return false unless follow_method_changing_redirect?(task)
       end
 
       true
@@ -87,9 +87,9 @@ module PatientHttp
     #
     # @param task [RequestTask] the request task
     # @return [Boolean]
-    def redirect_downgrade_allowed?(task)
-      value = task.request.redirect_downgrade
-      value = @config.redirect_downgrade if value.nil?
+    def follow_method_changing_redirect?(task)
+      value = task.request.follow_method_changing_redirects
+      value = @config.follow_method_changing_redirects if value.nil?
       value
     end
 

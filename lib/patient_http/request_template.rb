@@ -53,7 +53,7 @@ module PatientHttp
     # @param headers [Hash] additional headers to merge with client headers
     # @param params [Hash, nil] query parameters to add to URL
     # @param timeout [Numeric, nil] request timeout in seconds (overrides the template default)
-    # @param redirect_downgrade [Boolean, nil] whether to follow a redirect that changes the
+    # @param follow_method_changing_redirects [Boolean, nil] whether to follow a redirect that changes the
     #   HTTP method (nil uses the configuration default)
     # @param redirect_strip_headers [String, Array<String>, nil] header names (case insensitive)
     #   to strip from redirected requests, in addition to the configured names
@@ -70,7 +70,7 @@ module PatientHttp
       headers: nil,
       params: nil,
       timeout: nil,
-      redirect_downgrade: nil,
+      follow_method_changing_redirects: nil,
       redirect_strip_headers: nil,
       preprocessors: nil,
       processor: nil
@@ -89,7 +89,7 @@ module PatientHttp
         json: json,
         params: merged_params,
         timeout: timeout || @timeout,
-        redirect_downgrade: redirect_downgrade,
+        follow_method_changing_redirects: follow_method_changing_redirects,
         redirect_strip_headers: redirect_strip_headers,
         preprocessors: preprocessors || @preprocessors,
         processor: processor || @processor

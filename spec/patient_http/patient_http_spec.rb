@@ -392,11 +392,11 @@ RSpec.describe PatientHttp do
           :post,
           "https://api.example.com/test",
           callback: "TestCallback",
-          redirect_downgrade: false,
+          follow_method_changing_redirects: false,
           redirect_strip_headers: "X-Api-Key"
         )
 
-        expect(@captured_request.redirect_downgrade).to be false
+        expect(@captured_request.follow_method_changing_redirects).to be false
         expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
       end
 

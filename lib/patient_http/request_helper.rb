@@ -165,7 +165,7 @@ module PatientHttp
       # @param raise_error_responses [Boolean, nil] when true, non-success responses are
       #   reported as errors
       # @param callback_args [Hash, nil] JSON-compatible callback arguments
-      # @param redirect_downgrade [Boolean, nil] whether to follow a redirect that changes the
+      # @param follow_method_changing_redirects [Boolean, nil] whether to follow a redirect that changes the
       #   HTTP method (nil uses the configuration default)
       # @param redirect_strip_headers [String, Array<String>, nil] header names (case insensitive)
       #   to strip from redirected requests, in addition to the configured names
@@ -185,7 +185,7 @@ module PatientHttp
         timeout: nil,
         raise_error_responses: nil,
         callback_args: nil,
-        redirect_downgrade: nil,
+        follow_method_changing_redirects: nil,
         redirect_strip_headers: nil,
         preprocessors: nil,
         processor: nil
@@ -197,7 +197,7 @@ module PatientHttp
           headers: headers,
           params: params,
           timeout: timeout,
-          redirect_downgrade: redirect_downgrade,
+          follow_method_changing_redirects: follow_method_changing_redirects,
           redirect_strip_headers: redirect_strip_headers,
           preprocessors: preprocessors,
           processor: processor
@@ -245,7 +245,7 @@ module PatientHttp
     # @param raise_error_responses [Boolean, nil] when true, non-success responses are
     #   reported as errors
     # @param callback_args [Hash, nil] JSON-compatible callback arguments
-    # @param redirect_downgrade [Boolean, nil] whether to follow a redirect that changes the
+    # @param follow_method_changing_redirects [Boolean, nil] whether to follow a redirect that changes the
     #   HTTP method (nil uses the configuration default)
     # @param redirect_strip_headers [String, Array<String>, nil] header names (case insensitive)
     #   to strip from redirected requests, in addition to the configured names
@@ -265,7 +265,7 @@ module PatientHttp
       timeout: nil,
       raise_error_responses: nil,
       callback_args: nil,
-      redirect_downgrade: nil,
+      follow_method_changing_redirects: nil,
       redirect_strip_headers: nil,
       preprocessors: nil,
       processor: nil
@@ -281,7 +281,7 @@ module PatientHttp
         timeout: timeout,
         raise_error_responses: raise_error_responses,
         callback_args: callback_args,
-        redirect_downgrade: redirect_downgrade,
+        follow_method_changing_redirects: follow_method_changing_redirects,
         redirect_strip_headers: redirect_strip_headers,
         preprocessors: preprocessors,
         processor: processor

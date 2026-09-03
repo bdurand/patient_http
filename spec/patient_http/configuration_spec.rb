@@ -319,22 +319,22 @@ RSpec.describe PatientHttp::Configuration do
     end
   end
 
-  describe "#redirect_downgrade=" do
+  describe "#follow_method_changing_redirects=" do
     it "defaults to true" do
-      expect(config.redirect_downgrade).to be true
+      expect(config.follow_method_changing_redirects).to be true
     end
 
     it "accepts false" do
-      config.redirect_downgrade = false
-      expect(config.redirect_downgrade).to be false
+      config.follow_method_changing_redirects = false
+      expect(config.follow_method_changing_redirects).to be false
     end
 
     it "rejects values that are not booleans" do
-      expect { config.redirect_downgrade = nil }.to raise_error(ArgumentError, /true or false/)
+      expect { config.follow_method_changing_redirects = nil }.to raise_error(ArgumentError, /true or false/)
     end
 
     it "is included in to_h" do
-      expect(config.to_h["redirect_downgrade"]).to be true
+      expect(config.to_h["follow_method_changing_redirects"]).to be true
     end
   end
 

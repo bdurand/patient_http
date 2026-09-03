@@ -247,7 +247,7 @@ module PatientHttp
         body: redirect_body,
         timeout: request.timeout,
         max_redirects: request.max_redirects,
-        redirect_downgrade: request.redirect_downgrade,
+        follow_method_changing_redirects: request.follow_method_changing_redirects,
         redirect_strip_headers: request.redirect_strip_headers,
         preprocessors: redirect_preprocessors,
         processor: request.processor

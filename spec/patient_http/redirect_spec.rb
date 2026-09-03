@@ -112,7 +112,7 @@ RSpec.describe "Redirect handling" do
     end
   end
 
-  describe "redirect_downgrade" do
+  describe "follow_method_changing_redirects" do
     def redirect_response(status)
       {status: status, headers: {"location" => "https://example.com/new"}, body: nil}
     end
@@ -121,8 +121,8 @@ RSpec.describe "Redirect handling" do
       PatientHttp::RequestTask.new(request: request, task_handler: task_handler, callback: TestCallback)
     end
 
-    context "when the configuration disables downgrades" do
-      let(:processor) { PatientHttp::Processor.new(PatientHttp::Configuration.new(redirect_downgrade: false)) }
+    context "when the configuration disables method-changing redirects" do
+      let(:processor) { PatientHttp::Processor.new(PatientHttp::Configuration.new(follow_method_changing_redirects: false)) }
 
       it "does not follow a 302 for a POST since the method would change" do
         task = task_for(PatientHttp::Request.new(:post, "https://example.com/start", body: "data"))
@@ -149,20 +149,20 @@ RSpec.describe "Redirect handling" do
         expect(processor.send(:should_follow_redirect?, task, redirect_response(303))).to be true
       end
 
-      it "lets the request enable downgrades" do
-        task = task_for(PatientHttp::Request.new(:post, "https://example.com/start", body: "data", redirect_downgrade: true))
+      it "lets the request enable method-changing redirects" do
+        task = task_for(PatientHttp::Request.new(:post, "https://example.com/start", body: "data", follow_method_changing_redirects: true))
         expect(processor.send(:should_follow_redirect?, task, redirect_response(302))).to be true
       end
     end
 
-    context "when the configuration allows downgrades" do
+    context "when the configuration allows method-changing redirects" do
       it "follows a 302 for a POST" do
         task = task_for(PatientHttp::Request.new(:post, "https://example.com/start", body: "data"))
         expect(processor.send(:should_follow_redirect?, task, redirect_response(302))).to be true
       end
 
-      it "lets the request disable downgrades" do
-        task = task_for(PatientHttp::Request.new(:post, "https://example.com/start", body: "data", redirect_downgrade: false))
+      it "lets the request disable method-changing redirects" do
+        task = task_for(PatientHttp::Request.new(:post, "https://example.com/start", body: "data", follow_method_changing_redirects: false))
         expect(processor.send(:should_follow_redirect?, task, redirect_response(302))).to be false
       end
     end

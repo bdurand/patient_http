@@ -8,9 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `Configuration#redirect_downgrade` and `Request#redirect_downgrade` (default true): when false, a redirect that would change the HTTP method (such as POST to GET on a 301, 302, or 303) is not followed and the redirect response is delivered to the callback instead. Redirects that preserve the method are still followed. The request setting overrides the configuration.
+- `Configuration#follow_method_changing_redirects` and `Request#follow_method_changing_redirects` (default true): when false, a redirect that would change the HTTP method (such as POST to GET on a 301, 302, or 303) is not followed and the redirect response is delivered to the callback instead. Redirects that preserve the method are still followed. The request setting overrides the configuration.
 - `Configuration#redirect_strip_headers` and `Request#redirect_strip_headers`: header names (matched case insensitively) that are always removed from redirected requests, so sensitive headers are never sent to a redirect target. Request-level names are applied in addition to the configured ones and survive serialization.
-- `PatientHttp.request`, `RequestHelper#async_request`, and `RequestTemplate#request` (and their `get`, `post`, and other method helpers) accept `redirect_downgrade:` and `redirect_strip_headers:` and pass them to the `Request`.
+- `PatientHttp.request`, `RequestHelper#async_request`, and `RequestTemplate#request` (and their `get`, `post`, and other method helpers) accept `follow_method_changing_redirects:` and `redirect_strip_headers:` and pass them to the `Request`.
 - `HEAD` and `QUERY` HTTP methods are supported by `Request`, `RequestTemplate`, `RequestHelper` (`async_head`, `async_query`), and `PatientHttp.head` / `PatientHttp.query`. `HEAD` requests cannot carry a body. The response size limit is not applied to the `Content-Length` of a `HEAD` response because no body is transferred.
 
 ### Changed

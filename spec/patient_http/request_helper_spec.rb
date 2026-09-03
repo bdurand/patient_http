@@ -258,16 +258,16 @@ RSpec.describe PatientHttp::RequestHelper do
     end
 
     it "passes redirect options through async_request" do
-      TestService.async_post("/path", callback: TestCallback, redirect_downgrade: false, redirect_strip_headers: "X-Api-Key")
+      TestService.async_post("/path", callback: TestCallback, follow_method_changing_redirects: false, redirect_strip_headers: "X-Api-Key")
 
-      expect(@captured_request.redirect_downgrade).to be false
+      expect(@captured_request.follow_method_changing_redirects).to be false
       expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
     end
 
     it "passes redirect options through instance-level async_request" do
-      TestService.new.async_post("/path", callback: TestCallback, redirect_downgrade: false, redirect_strip_headers: ["X-Api-Key"])
+      TestService.new.async_post("/path", callback: TestCallback, follow_method_changing_redirects: false, redirect_strip_headers: ["X-Api-Key"])
 
-      expect(@captured_request.redirect_downgrade).to be false
+      expect(@captured_request.follow_method_changing_redirects).to be false
       expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
     end
 
@@ -276,9 +276,9 @@ RSpec.describe PatientHttp::RequestHelper do
         include PatientHttp::RequestHelper
       end
 
-      service_class.async_post("https://api.example.com/path", callback: TestCallback, redirect_downgrade: false)
+      service_class.async_post("https://api.example.com/path", callback: TestCallback, follow_method_changing_redirects: false)
 
-      expect(@captured_request.redirect_downgrade).to be false
+      expect(@captured_request.follow_method_changing_redirects).to be false
     end
   end
 end

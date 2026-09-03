@@ -46,7 +46,7 @@ module PatientHttp
     # @return [Boolean] Whether a redirect that requires changing the HTTP method
     #   (for example POST to GET on a 302) may be followed. When false, such a
     #   redirect response is returned as the result instead of being followed.
-    attr_reader :redirect_downgrade
+    attr_reader :follow_method_changing_redirects
 
     # @return [Array<String>] Lowercase header names that are always stripped from
     #   redirected requests
@@ -82,7 +82,7 @@ module PatientHttp
     # @param user_agent [String, nil] Default User-Agent header value
     # @param raise_error_responses [Boolean] Whether to raise HttpError for non-2xx responses by default
     # @param max_redirects [Integer] Maximum number of redirects to follow (0 disables redirects)
-    # @param redirect_downgrade [Boolean] Whether to follow a redirect that requires changing the
+    # @param follow_method_changing_redirects [Boolean] Whether to follow a redirect that requires changing the
     #   HTTP method, such as POST to GET on a 301, 302, or 303 response. When false, requests
     #   whose method would change do not follow the redirect and receive the redirect response.
     # @param redirect_strip_headers [String, Array<String>] Header names (case insensitive)
@@ -108,7 +108,7 @@ module PatientHttp
       user_agent: "PatientHttp",
       raise_error_responses: false,
       max_redirects: 5,
-      redirect_downgrade: true,
+      follow_method_changing_redirects: true,
       redirect_strip_headers: [],
       connection_pool_size: 100,
       connection_timeout: nil,
@@ -143,7 +143,7 @@ module PatientHttp
       self.user_agent = user_agent
       self.raise_error_responses = raise_error_responses
       self.max_redirects = max_redirects
-      self.redirect_downgrade = redirect_downgrade
+      self.follow_method_changing_redirects = follow_method_changing_redirects
       self.redirect_strip_headers = redirect_strip_headers
       self.connection_pool_size = connection_pool_size
       self.connection_timeout = connection_timeout
@@ -205,12 +205,12 @@ module PatientHttp
       @max_redirects = value
     end
 
-    def redirect_downgrade=(value)
+    def follow_method_changing_redirects=(value)
       unless value == true || value == false
-        raise ArgumentError.new("redirect_downgrade must be true or false, got: #{value.inspect}")
+        raise ArgumentError.new("follow_method_changing_redirects must be true or false, got: #{value.inspect}")
       end
 
-      @redirect_downgrade = value
+      @follow_method_changing_redirects = value
     end
 
     def redirect_strip_headers=(value)
@@ -456,7 +456,7 @@ module PatientHttp
         "user_agent" => user_agent,
         "raise_error_responses" => raise_error_responses,
         "max_redirects" => max_redirects,
-        "redirect_downgrade" => redirect_downgrade,
+        "follow_method_changing_redirects" => follow_method_changing_redirects,
         "redirect_strip_headers" => redirect_strip_headers,
         "connection_pool_size" => connection_pool_size,
         "connection_timeout" => connection_timeout,

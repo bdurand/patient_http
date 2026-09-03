@@ -1795,13 +1795,13 @@ RSpec.describe PatientHttp::Processor do
       expect(response.http_method).to eq(:get)
     end
 
-    it "delivers the redirect response when the request disables downgrades and the method would change" do
+    it "delivers the redirect response when the request disables method-changing redirects and the method would change" do
       stub_request(:post, "https://api.example.com/submit")
         .to_return(status: 302, headers: {"Location" => "https://api.example.com/result"})
 
       processor.start
 
-      request = PatientHttp::Request.new(:post, "https://api.example.com/submit", body: "payload", redirect_downgrade: false)
+      request = PatientHttp::Request.new(:post, "https://api.example.com/submit", body: "payload", follow_method_changing_redirects: false)
       task = PatientHttp::RequestTask.new(request: request, task_handler: TestTaskHandler.new({"class" => "TestWorker", "jid" => SecureRandom.uuid, "args" => []}), callback: "TestCallback")
       processor.enqueue(task)
       processor.wait_for_idle(timeout: 2)

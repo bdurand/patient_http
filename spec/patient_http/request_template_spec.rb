@@ -52,8 +52,8 @@ RSpec.describe PatientHttp::RequestTemplate do
     end
 
     it "passes redirect options to the Request" do
-      result = template.request(:post, "/users", redirect_downgrade: false, redirect_strip_headers: "X-Api-Key")
-      expect(result.redirect_downgrade).to be false
+      result = template.request(:post, "/users", follow_method_changing_redirects: false, redirect_strip_headers: "X-Api-Key")
+      expect(result.follow_method_changing_redirects).to be false
       expect(result.redirect_strip_headers).to eq(["x-api-key"])
     end
 
