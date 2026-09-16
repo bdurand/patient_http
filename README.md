@@ -309,7 +309,7 @@ error = PatientHttp::HttpError.load(json_data)
 
 The `Response` object includes the HTTP status code, headers, body, and callback arguments. Error objects (`HttpError`, `RedirectError`, `RequestError`) include the error message, context about the request, and callback arguments.
 
-Response headers are case insensitive. Headers that appear multiple times in the response (such as `set-cookie`) are flattened into a single joined string value.
+Request and response headers are case insensitive. A request header with a `nil` or empty string value is never sent: setting a header to `nil` or `""` removes it, and a header hash such as `{"X-Header" => nil}` does not set the header at all. Headers that appear multiple times in the response (such as `set-cookie`) are flattened into a single joined string value.
 
 Response bodies are automatically encoded for JSON serialization. Binary content is Base64 encoded, and large text content is gzipped and then Base64 encoded to reduce payload size. Decoding is handled transparently when you access the `body` or `json` methods on the `Response` object.
 
@@ -867,6 +867,8 @@ Open a pull request on [GitHub](https://github.com/bdurand/patient_http).
 Please use the [standardrb](https://github.com/testdouble/standard) syntax and lint your code with `standardrb --fix` before submitting.
 
 The [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) and [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gems each provide a test application for integration testing.
+
+Running the full test suite requires running the included docker-compose.yml file to start up a valkey and s3mock server.
 
 ## Further Reading
 

@@ -3,6 +3,23 @@
 require "spec_helper"
 
 RSpec.describe PatientHttp::HttpHeaders do
+  describe "#initialize" do
+    it "skips headers with nil or empty values" do
+      headers = described_class.new("Accept" => "application/json", "X-Nil" => nil, "X-Empty" => "")
+
+      expect(headers.to_h).to eq({"accept" => "application/json"})
+      expect(headers.include?("x-nil")).to be false
+      expect(headers.include?("x-empty")).to be false
+    end
+
+    it "copies headers from another instance" do
+      original = described_class.new("Accept" => "application/json")
+      headers = described_class.new(original)
+
+      expect(headers.to_h).to eq({"accept" => "application/json"})
+    end
+  end
+
   describe "#[]" do
     it "retrieves values case insensitively" do
       headers = described_class.new("Content-Type" => "application/json")
@@ -19,6 +36,39 @@ RSpec.describe PatientHttp::HttpHeaders do
       headers["X-Custom"] = "value"
 
       expect(headers.to_h).to eq({"x-custom" => "value"})
+    end
+
+    it "removes the header when the value is nil" do
+      headers = described_class.new("X-Custom" => "value")
+      headers["x-custom"] = nil
+
+      expect(headers.include?("X-Custom")).to be false
+      expect(headers.to_h).to eq({})
+    end
+
+    it "removes the header when the value is an empty string" do
+      headers = described_class.new("X-Custom" => "value")
+      headers["X-CUSTOM"] = ""
+
+      expect(headers.include?("x-custom")).to be false
+      expect(headers.to_h).to eq({})
+    end
+
+    it "does nothing when an empty value is set for a missing header" do
+      headers = described_class.new("Accept" => "application/json")
+      headers["X-Custom"] = nil
+
+      expect(headers.to_h).to eq({"accept" => "application/json"})
+    end
+  end
+
+  describe "#delete" do
+    it "removes a header case insensitively and returns its value" do
+      headers = described_class.new("X-Custom" => "value", "Accept" => "application/json")
+
+      expect(headers.delete("X-CUSTOM")).to eq("value")
+      expect(headers.delete("missing")).to be_nil
+      expect(headers.to_h).to eq({"accept" => "application/json"})
     end
   end
 
@@ -44,6 +94,14 @@ RSpec.describe PatientHttp::HttpHeaders do
       headers.merge("X-Custom" => "1")
 
       expect(headers.to_h).to eq({"accept" => "application/json"})
+    end
+
+    it "removes headers merged with nil or empty values" do
+      headers = described_class.new("Accept" => "application/json", "X-Custom" => "1", "X-Other" => "2")
+      merged = headers.merge("X-Custom" => nil, "x-other" => "", "X-New" => "")
+
+      expect(merged.to_h).to eq({"accept" => "application/json"})
+      expect(headers.to_h).to eq({"accept" => "application/json", "x-custom" => "1", "x-other" => "2"})
     end
   end
 

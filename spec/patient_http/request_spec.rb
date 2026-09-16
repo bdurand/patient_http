@@ -27,6 +27,25 @@ RSpec.describe PatientHttp::Request do
       expect(request.url).to eq(uri.to_s)
     end
 
+    it "drops headers with nil or empty values" do
+      request = described_class.new(
+        :get,
+        "https://api.example.com/users",
+        headers: {"Accept" => "application/json", "X-Nil" => nil, "X-Empty" => ""}
+      )
+
+      expect(request.headers.to_h).to eq("accept" => "application/json")
+      expect(request.as_json["headers"]).to eq("accept" => "application/json")
+    end
+
+    it "removes a header set to nil or an empty value after creation" do
+      request = described_class.new(:get, "https://api.example.com/users", headers: {"X-One" => "1", "X-Two" => "2"})
+      request.headers["X-One"] = nil
+      request.headers["X-Two"] = ""
+
+      expect(request.headers.to_h).to eq({})
+    end
+
     it "accepts max_redirects parameter" do
       request = described_class.new(:get, "https://api.example.com", max_redirects: 10)
       expect(request.max_redirects).to eq(10)

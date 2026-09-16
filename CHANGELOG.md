@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.6.1
+
+### Fixed
+
+- Request headers with a `nil` or empty string value are no longer sent. `HttpHeaders` drops such entries when it is built from a hash (so `{"X-Header" => nil}` does not set the header) and removes the header when a value is set to `nil` or `""`, including through `merge`. Some servers reject requests that carry a header with no value.
+
+### Added
+
+- `HttpHeaders#delete` removes a header by name (case insensitive) and returns its value.
+
 ## 1.6.0
 
 ### Added

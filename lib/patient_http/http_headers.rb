@@ -5,16 +5,20 @@ module PatientHttp
   #
   # This class provides a hash-like interface for HTTP headers with case-insensitive
   # key access. Header names are normalized to lowercase for storage and lookup.
+  #
+  # Headers with an empty value are never stored. Setting a header to nil or an
+  # empty string removes it, so a request never sends a header with no value.
   class HttpHeaders
     include Enumerable
 
-    # Initializes a new HttpHeaders instance.
+    # Initializes a new HttpHeaders instance. Entries with a nil or empty value
+    # are skipped.
     #
-    # @param headers [Hash] initial headers to set
+    # @param headers [Hash, HttpHeaders] initial headers to set
     def initialize(headers = {})
       @headers = {}
       headers&.each do |key, value|
-        @headers[key.to_s.downcase] = value
+        self[key] = value
       end
     end
 
@@ -26,12 +30,26 @@ module PatientHttp
       @headers[key.to_s.downcase]
     end
 
-    # Sets the value for a header (case insensitive).
+    # Sets the value for a header (case insensitive). Setting a header to nil
+    # or an empty string removes it.
     #
     # @param key [String, Symbol] header name
-    # @param value [String] header value
+    # @param value [String, nil] header value
     def []=(key, value)
-      @headers[key.to_s.downcase] = value
+      name = key.to_s.downcase
+      if empty_value?(value)
+        @headers.delete(name)
+      else
+        @headers[name] = value
+      end
+    end
+
+    # Removes a header (case insensitive).
+    #
+    # @param key [String, Symbol] header name
+    # @return [String, nil] the removed value or nil if not found
+    def delete(key)
+      @headers.delete(key.to_s.downcase)
     end
 
     # Fetches the value for a header with an optional default.
@@ -101,6 +119,13 @@ module PatientHttp
 
     def hash
       @headers.hash
+    end
+
+    private
+
+    # A header value is empty when it is nil or a string with no characters.
+    def empty_value?(value)
+      value.nil? || (value.is_a?(String) && value.empty?)
     end
   end
 end
