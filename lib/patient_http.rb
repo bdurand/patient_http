@@ -460,7 +460,9 @@ module PatientHttp
     #
     # The configuration itself is stored here, not by the provider, so there is
     # exactly one configuration object in a process no matter which module it is
-    # reached through.
+    # reached through. A configuration that was already built when the provider
+    # registers was not built by it, so it is discarded and the next read builds
+    # one through the provider.
     #
     # @param provider [#new_configuration, #configure] the integration module
     # @raise [ArgumentError] if the provider does not implement the required methods
@@ -472,15 +474,28 @@ module PatientHttp
       end
 
       @config_mutex.synchronize do
-        if @configuration_provider && !@configuration_provider.equal?(provider)
+        previous = @configuration_provider
+
+        if previous && !previous.equal?(provider)
           warn(
-            "PatientHttp: #{provider} is replacing #{@configuration_provider} as the configuration " \
+            "PatientHttp: #{provider} is replacing #{previous} as the configuration " \
             "provider. Loading more than one patient_http job-system integration in a process is not " \
             "supported; keep only one of them in your Gemfile."
           )
         end
 
         @configuration_provider = provider
+
+        # A configuration built before this provider was registered was not built
+        # by it, so it does not carry the provider's options. Discard it so the
+        # next read builds one through the provider.
+        if @default_configuration && !previous.equal?(provider)
+          warn(
+            "PatientHttp: discarding the configuration that was built before #{provider} was loaded; " \
+            "options set on it are lost. Configure PatientHttp after requiring the job-system integration."
+          )
+          @default_configuration = nil
+        end
       end
     end
 

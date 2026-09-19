@@ -22,6 +22,8 @@ Do not change existing code to break existing line length unless absolutely nece
 
 Use `raise SomeError.new("message")` instead of `raise SomeError, "message"` for raising exceptions.
 
+Code comments and documentation should be general, to the point, and age well. They should not reference ticket numbers, or conversations, or specific conditions you encountered and then fixed when building the code. Comments and documentation should be written using ASD-STE100 Simplified Technical English. The content should be evergreen and make sense when viewed later outside the context of our conversation or the environment where the code is currently running.
+
 ## Testing
 
 Run the test suite with `bundle exec rspec`.

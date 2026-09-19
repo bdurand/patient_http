@@ -290,6 +290,8 @@ end
 
 ### Workload isolation
 
+Named processors are provided by the job system integration gems, so `config.processor` is only available when one of them is loaded.
+
 By default all requests share one processor and one `max_connections` cap, so a burst of slow requests can consume the capacity that quick requests need. Named processors run independently, each with its own capacity, timeouts, and threads:
 
 ```ruby
@@ -305,7 +307,7 @@ Route a request with the `processor:` option, on the call or on the request itse
 PatientHttp.post(url, callback: MyCallback, processor: :llm)
 ```
 
-Profile options override the top-level configuration. Everything not overridden (secrets, preprocessors, payload stores, encryption, logger) is shared. The `:default` processor always exists. Named processors are provided by the job system integrations; see their documentation for how routing survives retries and crash recovery.
+Profile options override the top-level configuration. Everything not overridden (secrets, preprocessors, payload stores, encryption, logger) is shared. The `:default` processor always exists. See the integration gem's documentation for how routing survives retries and crash recovery.
 
 ### Tuning tips
 
