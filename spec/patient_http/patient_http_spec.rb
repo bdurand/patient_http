@@ -421,7 +421,7 @@ RSpec.describe PatientHttp do
     after do
       described_class.instance_variable_set(:@module_secrets, {})
       described_class.instance_variable_set(:@default_configuration, nil)
-      described_class.instance_variable_set(:@inline_configuration, nil)
+      described_class.instance_variable_set(:@configuration_provider, nil)
     end
 
     describe ".inline!" do
@@ -582,7 +582,7 @@ RSpec.describe PatientHttp do
     after do
       described_class.instance_variable_set(:@module_secrets, {})
       described_class.instance_variable_set(:@default_configuration, nil)
-      described_class.instance_variable_set(:@inline_configuration, nil)
+      described_class.instance_variable_set(:@configuration_provider, nil)
     end
 
     describe ".register_secret" do
@@ -671,6 +671,138 @@ RSpec.describe PatientHttp do
         described_class.default_configuration = config
 
         expect(described_class.default_configuration).to be(config)
+      end
+
+      it "does not build a configuration just to answer" do
+        provider = double("provider", new_configuration: PatientHttp::Configuration.new, configure: nil)
+        described_class.register_configuration_provider(provider)
+
+        expect(provider).not_to receive(:new_configuration)
+        expect(described_class.default_configuration).to be_nil
+      end
+    end
+  end
+
+  describe "configuration" do
+    after do
+      described_class.instance_variable_set(:@module_secrets, {})
+      described_class.instance_variable_set(:@default_configuration, nil)
+      described_class.instance_variable_set(:@configuration_provider, nil)
+    end
+
+    describe ".configuration" do
+      it "creates a configuration on first use and memoizes it" do
+        config = described_class.configuration
+
+        expect(config).to be_a(PatientHttp::Configuration)
+        expect(described_class.configuration).to be(config)
+      end
+
+      it "applies module level secrets to the configuration it creates" do
+        described_class.register_secret("api-key", "s3cret")
+
+        expect(described_class.configuration.secret_manager.resolve("api-key")).to eq("s3cret")
+      end
+
+      it "builds the configuration through the registered provider" do
+        config = PatientHttp::Configuration.new
+        provider = double("provider", new_configuration: config, configure: nil)
+        described_class.register_configuration_provider(provider)
+
+        expect(described_class.configuration).to be(config)
+        expect(described_class.default_configuration).to be(config)
+      end
+
+      it "builds the provider's configuration only once" do
+        provider = double("provider", configure: nil)
+        expect(provider).to receive(:new_configuration).once.and_return(PatientHttp::Configuration.new)
+        described_class.register_configuration_provider(provider)
+
+        described_class.configuration
+        described_class.configuration
+      end
+
+      it "applies module level secrets to a provider built configuration" do
+        config = PatientHttp::Configuration.new
+        provider = double("provider", new_configuration: config, configure: nil)
+        described_class.register_configuration_provider(provider)
+        described_class.register_secret("api-key", "s3cret")
+
+        expect(described_class.configuration.secret_manager.resolve("api-key")).to eq("s3cret")
+      end
+
+      it "rebuilds the configuration after it is discarded" do
+        first = described_class.configuration
+        described_class.default_configuration = nil
+
+        expect(described_class.configuration).not_to be(first)
+      end
+    end
+
+    describe ".configure" do
+      it "yields the configuration and returns it" do
+        yielded = nil
+        result = described_class.configure { |config| yielded = config }
+
+        expect(yielded).to be_a(PatientHttp::Configuration)
+        expect(result).to be(yielded)
+      end
+
+      it "yields the same configuration on every call so options accumulate" do
+        described_class.configure { |config| config.max_connections = 512 }
+        described_class.configure { |config| config.request_timeout = 120 }
+
+        expect(described_class.configuration.max_connections).to eq(512)
+        expect(described_class.configuration.request_timeout).to eq(120)
+      end
+
+      it "works without a block" do
+        expect(described_class.configure).to be_a(PatientHttp::Configuration)
+      end
+
+      it "delegates to the registered configuration provider" do
+        config = PatientHttp::Configuration.new
+        provider = double("provider", new_configuration: config)
+        expect(provider).to receive(:configure) do |&block|
+          block.call(config)
+          config
+        end
+        described_class.register_configuration_provider(provider)
+
+        yielded = nil
+        result = described_class.configure { |c| yielded = c }
+
+        expect(yielded).to be(config)
+        expect(result).to be(config)
+      end
+    end
+
+    describe ".register_configuration_provider" do
+      it "raises when the provider does not implement the required methods" do
+        expect do
+          described_class.register_configuration_provider(Object.new)
+        end.to raise_error(ArgumentError, /must respond to #new_configuration and #configure/)
+      end
+
+      it "warns when a different provider replaces an existing one" do
+        config = PatientHttp::Configuration.new
+        first = double("first", new_configuration: config, configure: nil)
+        second = double("second", new_configuration: config, configure: nil)
+
+        described_class.register_configuration_provider(first)
+
+        expect(described_class).to receive(:warn).with(/replacing/)
+        described_class.register_configuration_provider(second)
+      end
+
+      it "does not warn when the same provider registers again" do
+        config = PatientHttp::Configuration.new
+        provider = double("provider", new_configuration: config, configure: nil)
+
+        described_class.register_configuration_provider(provider)
+
+        expect(described_class).not_to receive(:warn)
+        described_class.register_configuration_provider(provider)
       end
     end
   end

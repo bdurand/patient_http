@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.7.0
+
+### Added
+
+- `PatientHttp.configure` is a single entry point for configuration regardless of which job system is in use. When an integration gem (patient_http-sidekiq, patient_http-solid_queue) is loaded it yields that integration's configuration; otherwise it yields a plain `Configuration` used for inline execution. The same object is yielded on every call, so options accumulate and several initializers can each contribute without overwriting one another. Application code no longer has to name the integration to configure it.
+- `PatientHttp.configuration` returns that configuration, creating it on first use and applying any secrets registered with `PatientHttp.register_secret`. There is no longer a boot order to get right.
+- `PatientHttp.register_configuration_provider` lets an integration gem supply the configuration class that `configure` and `configuration` build. The configuration object itself is stored here, so there is exactly one in a process no matter which module it is reached through. `PatientHttp.configuration_provider` returns the registered provider. Loading two integrations in one process warns instead of silently taking the last one.
+- `Configuration#payload_store_threshold` (default 64KB): the size above which a serialized payload is written to the registered payload store. This moves the option next to `register_payload_store`, where the store it applies to is registered. The integration gems inherit it, and their own `payload_store_threshold` accessors continue to work.
+
+### Changed
+
+- `PatientHttp.default_configuration` is now the configuration created by `PatientHttp.configuration` rather than a separate slot an integration had to remember to assign. It still returns nil until a configuration exists, and assigning nil discards the configuration so the next read builds a fresh one. Assigning a configuration still applies module level secrets to it.
+- The separate configuration that was lazily created for inline execution is gone. Inline requests run against `PatientHttp.configuration`, so they see the same secrets, payload stores, and preprocessors as queued requests instead of a parallel set.
+
 ## 1.6.1
 
 ### Fixed

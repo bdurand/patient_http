@@ -89,7 +89,7 @@ module PatientHttp
   @handler_mutex = Monitor.new
   @inline_handler = nil
   @default_configuration = nil
-  @inline_configuration = nil
+  @configuration_provider = nil
   @module_secrets = {}
   @config_mutex = Monitor.new
 
@@ -176,8 +176,7 @@ module PatientHttp
     # before the handler returns.
     #
     # @param config [Configuration, nil] configuration to execute requests against.
-    #   Defaults to {.default_configuration}, or a lazily created configuration that
-    #   includes any secrets registered with {.register_secret}.
+    #   Defaults to {.configuration}.
     # @return [void]
     def inline!(config: nil)
       handler = lambda do |request:, callback:, callback_args: nil, raise_error_responses: nil|
@@ -221,11 +220,10 @@ module PatientHttp
     # @param raise_error_responses [Boolean, nil] when true, non-success responses are
     #   reported as errors; defaults to the configuration's setting
     # @param config [Configuration, nil] configuration to execute the request against.
-    #   Defaults to {.default_configuration}, or a lazily created configuration that
-    #   includes any secrets registered with {.register_secret}.
+    #   Defaults to {.configuration}.
     # @return [String] the request id
     def execute_inline(request:, callback:, callback_args: nil, raise_error_responses: nil, config: nil)
-      config ||= default_configuration || inline_configuration
+      config ||= configuration
       raise_error_responses = config.raise_error_responses if raise_error_responses.nil?
 
       task = RequestTask.new(
@@ -414,11 +412,10 @@ module PatientHttp
 
     # Register a named secret at the module level, independent of any configuration.
     #
-    # Secrets registered here are applied to the {.default_configuration} (immediately
-    # if one is already set, or when one is set later) and to the configuration used
-    # for inline execution. This makes boot order irrelevant: application code can
-    # register secrets before or after the job-system integration gem configures the
-    # processor.
+    # Secrets registered here are applied to the {.configuration} -- immediately if
+    # one already exists, or as soon as one is created. This makes boot order
+    # irrelevant: application code can register secrets before or after the
+    # job-system integration gem is configured.
     #
     # @param name [String, Symbol] the secret name
     # @param value [Object, nil] the secret value (omit when providing a block)
@@ -439,38 +436,128 @@ module PatientHttp
         secret_value = block || value
         @module_secrets[name.to_s] = secret_value
         @default_configuration&.register_secret(name, secret_value)
-        @inline_configuration&.register_secret(name, secret_value)
       end
     end
 
     # Check if a secret name is registered, either at the module level via
-    # {.register_secret} or on the {.default_configuration}.
+    # {.register_secret} or on the {.configuration}.
     #
     # @param name [String, Symbol] the secret name
     # @return [Boolean]
     def secret_registered?(name)
-      @config_mutex.synchronize do
-        return true if @module_secrets.include?(name.to_s)
+      return true if @config_mutex.synchronize { @module_secrets.include?(name.to_s) }
 
-        !@default_configuration.nil? && @default_configuration.secret_manager.include?(name)
+      config = default_configuration
+      !config.nil? && config.secret_manager.include?(name)
+    end
+
+    # Registers the object that owns the configuration for this process.
+    #
+    # Job-system integration gems (patient_http-sidekiq, patient_http-solid_queue)
+    # call this when they are loaded so that {.configure} and {.configuration}
+    # resolve to the integration's own configuration class, which carries the
+    # options specific to that job system. Applications never need to call this.
+    #
+    # The configuration itself is stored here, not by the provider, so there is
+    # exactly one configuration object in a process no matter which module it is
+    # reached through.
+    #
+    # @param provider [#new_configuration, #configure] the integration module
+    # @raise [ArgumentError] if the provider does not implement the required methods
+    # @return [Object] the registered provider
+    # @api private
+    def register_configuration_provider(provider)
+      unless provider.respond_to?(:new_configuration) && provider.respond_to?(:configure)
+        raise ArgumentError.new("A configuration provider must respond to #new_configuration and #configure")
+      end
+
+      @config_mutex.synchronize do
+        if @configuration_provider && !@configuration_provider.equal?(provider)
+          warn(
+            "PatientHttp: #{provider} is replacing #{@configuration_provider} as the configuration " \
+            "provider. Loading more than one patient_http job-system integration in a process is not " \
+            "supported; keep only one of them in your Gemfile."
+          )
+        end
+
+        @configuration_provider = provider
       end
     end
 
-    # The default configuration used for inline execution when none is provided.
-    # Job-system integration gems should set this at the end of their configure
-    # step so that module-level secrets registered with {.register_secret} are
-    # applied to the configuration the processor runs with.
+    # The registered configuration provider, if a job-system integration gem is loaded.
     #
-    # @return [Configuration, nil] the default configuration
+    # @return [Object, nil]
+    # @api private
+    def configuration_provider
+      @config_mutex.synchronize { @configuration_provider }
+    end
+
+    # The configuration for this process.
+    #
+    # When a job-system integration gem is loaded, this is an instance of that
+    # integration's configuration class, which carries its own options alongside
+    # the HTTP options defined here. Otherwise it is a plain {Configuration} used
+    # for inline execution. It is created on first use and any secrets registered
+    # with {.register_secret} are applied to it, so there is no boot order to get
+    # right.
+    #
+    # @return [Configuration]
+    def configuration
+      @config_mutex.synchronize do
+        @default_configuration ||= begin
+          provider = @configuration_provider
+          config = provider ? provider.new_configuration : Configuration.new
+          apply_module_secrets(config)
+          config
+        end
+      end
+    end
+
+    # Configure PatientHttp.
+    #
+    # This is the single entry point for configuration regardless of which job
+    # system is in use: it yields the configuration of the loaded integration gem
+    # (patient_http-sidekiq, patient_http-solid_queue) when there is one, and a
+    # plain {Configuration} otherwise. The same configuration object is yielded
+    # every time, so options accumulate and several initializers can each
+    # contribute without overwriting one another.
+    #
+    # @example
+    #   PatientHttp.configure do |config|
+    #     config.max_connections = 512
+    #     config.register_secret(:api_token) { ENV["API_TOKEN"] }
+    #   end
+    #
+    # @yield [Configuration] the configuration object
+    # @return [Configuration] the configuration object
+    def configure(&block)
+      provider = configuration_provider
+      return provider.configure(&block) if provider
+
+      config = configuration
+      yield(config) if block
+      config
+    end
+
+    # The configuration, if one has been created.
+    #
+    # Unlike {.configuration} this does not create a configuration when none
+    # exists yet, so it can be used to inspect configuration without forcing it
+    # into existence.
+    #
+    # @return [Configuration, nil] the configuration
     def default_configuration
       @config_mutex.synchronize { @default_configuration }
     end
 
-    # Set the default configuration. Any secrets registered with {.register_secret}
+    # Replace the configuration. Any secrets registered with {.register_secret}
     # are applied to it; the module-level registry is retained, so re-assigning a
-    # new configuration re-applies the same secrets.
+    # new configuration re-applies the same secrets. Assigning nil discards the
+    # configuration, and the next call to {.configuration} builds a fresh one.
     #
-    # @param config [Configuration, nil] the configuration to use as the default
+    # Applications should use {.configure} instead.
+    #
+    # @param config [Configuration, nil] the configuration to use
     # @return [void]
     def default_configuration=(config)
       @config_mutex.synchronize do
@@ -480,16 +567,6 @@ module PatientHttp
     end
 
     private
-
-    # The lazily created configuration used for inline execution when no explicit
-    # or default configuration is available. Module-level secrets are applied to it.
-    #
-    # @return [Configuration]
-    def inline_configuration
-      @config_mutex.synchronize do
-        @inline_configuration ||= Configuration.new.tap { |config| apply_module_secrets(config) }
-      end
-    end
 
     # Apply all module-level secrets to the given configuration.
     #
