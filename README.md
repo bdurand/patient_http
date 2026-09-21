@@ -6,21 +6,21 @@
 
 *Built for APIs that like to think.*
 
-Generic async HTTP connection pool for Ruby applications using Fiber-based concurrency.
+Generic async HTTP connection pool for Ruby applications that uses Fiber-based concurrency.
 
 ## Motivation
 
-Applications that make HTTP requests from within threaded environments often find that threads block waiting for I/O. A single slow API response holds an entire thread hostage, preventing it from doing other work. When many threads are blocked on HTTP I/O simultaneously, throughput collapses.
+An application that makes HTTP requests from a threaded environment often finds that its threads block while they wait for I/O. A single slow API response blocks a whole thread and prevents it from doing other work. When many threads block on HTTP I/O at the same time, throughput collapses.
 
-PatientHttp solves this by running HTTP requests in a dedicated processor thread that uses Ruby's Fiber scheduler for non-blocking I/O. Application threads hand off HTTP requests to the processor and return immediately. The processor handles hundreds of concurrent HTTP connections using fibers, then notifies the application when responses arrive via a pluggable callback mechanism.
+PatientHttp runs the HTTP requests in a dedicated processor thread that uses the Ruby Fiber scheduler for non-blocking I/O. Your application threads hand each HTTP request to the processor and return immediately. The processor runs hundreds of concurrent HTTP connections on fibers, and it notifies your application through a pluggable callback when a response arrives.
 
-This design keeps application threads free to do other work while HTTP requests are in flight.
+This design keeps your application threads free to do other work while the HTTP requests are in flight.
 
-In general you will want to use this gem through an integration like [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) or [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue). These gems provide a request handler that integrates with their respective job processing systems, allowing you to enqueue HTTP requests directly from your application code without coupling it to the underlying processor implementation. See the [integration](#integration) section for details.
+Usually you use this gem through an integration such as [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) or [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue). These gems provide a request handler for their job processing system, so you can enqueue HTTP requests directly from your application code without coupling that code to the processor. For more information, see [Integration](#integration).
 
-The [patient_llm](https://github.com/bdurand/patient_llm) gem provides an integration for making large language model requests asynchronously. This was the original motivation for building PatientHttp because LLM requests can take much longer than typical HTTP requests.
+The [patient_llm](https://github.com/bdurand/patient_llm) gem provides an integration that makes large language model requests asynchronously. That was the original reason to build PatientHttp, because an LLM request can take much longer than a typical HTTP request.
 
-## Quick Start
+## Quick start
 
 ### 1. Implement a TaskHandler
 
@@ -34,8 +34,8 @@ class MyTaskHandler < PatientHttp::TaskHandler
 
   def on_complete(response, callback)
     # Enqueue a message for your application to process the response.
-    # Keep this lightweight and thread-safe -- it runs on a completion
-    # worker thread, concurrently with other completions.
+    # Keep this lightweight and thread-safe. It runs on a completion
+    # worker thread, at the same time as other completions.
     MyJobSystem.enqueue(callback, :on_complete, response.as_json)
   end
 
@@ -51,13 +51,13 @@ class MyTaskHandler < PatientHttp::TaskHandler
 end
 ```
 
-> **Important:** TaskHandler callbacks run on the processor's completion worker threads (see `completion_threads`), not the reactor thread, so they no longer block the event loop. Keep them lightweight anyway -- typically just enqueuing a message for another system to pick up. Heavy callbacks compete with the reactor for the GVL, and because a task stays in the capacity count until its result is delivered, callbacks that back up consume request capacity.
+> **Important:** TaskHandler callbacks run on the completion worker threads of the processor (see `completion_threads`) and not on the reactor thread, so they do not block the event loop. Keep them lightweight anyway: usually a callback only enqueues a message for another system to pick up. A heavy callback competes with the reactor for the GVL, and, because a task stays in the capacity count until its result is delivered, callbacks that back up use up request capacity.
 >
-> Callbacks must be thread-safe. Results are delivered concurrently on `completion_threads` workers (default 2), so two callbacks can run at the same time and in an order unrelated to the order the requests completed. Set `completion_threads: 1` to serialize delivery.
+> Callbacks must be thread-safe. Results are delivered concurrently on the `completion_threads` workers (default 2), so two callbacks can run at the same time and in an order that does not match the order in which the requests completed. Set `completion_threads: 1` to deliver the results one at a time.
 >
-> Callbacks must also be idempotent. A callback that raises is retried `completion_retries` times (default 2), so one that raises after enqueuing its message enqueues it again. Set `completion_retries: 0` if that is not acceptable.
+> Callbacks must also be idempotent. A callback that raises an error is retried `completion_retries` times (default 2), so a callback that raises an error after it enqueues its message enqueues that message again. Set `completion_retries: 0` if you cannot accept that.
 
-### 2. Create and Enqueue Requests
+### 2. Create and enqueue requests
 
 ```ruby
 # Configure the processor
@@ -89,9 +89,9 @@ task = PatientHttp::RequestTask.new(
 processor.enqueue(task)
 ```
 
-### 3. Process Callbacks
+### 3. Process callbacks
 
-When the HTTP request completes, your `TaskHandler#on_complete` is called with the `Response` and callback class name. Your handler is responsible for invoking the callback in whatever way makes sense for your application (e.g., enqueuing a background job).
+When the HTTP request completes, your `TaskHandler#on_complete` method runs with the `Response` and the callback class name. Your handler then calls the callback in the way that suits your application, for example by enqueuing a background job.
 
 ```ruby
 class FetchDataCallback
@@ -108,9 +108,9 @@ class FetchDataCallback
 end
 ```
 
-## Handling HTTP Error Responses
+## Handling HTTP error responses
 
-By default, HTTP error status codes (4xx, 5xx) are treated as completed requests. You can check the status using helper methods on the response:
+By default, an HTTP error status code (4xx or 5xx) counts as a completed request. Check the status with the helper methods on the response:
 
 ```ruby
 def on_complete(response)
@@ -135,7 +135,7 @@ task = PatientHttp::RequestTask.new(
 )
 ```
 
-When enabled, non-2xx responses call `TaskHandler#on_error` with an `HttpError` that provides access to the response:
+A non-2xx response then calls `TaskHandler#on_error` with an `HttpError` that gives you access to the response:
 
 ```ruby
 def on_error(error)
@@ -147,7 +147,7 @@ def on_error(error)
 end
 ```
 
-## Request Templates
+## Request templates
 
 For repeated requests to the same API, use `RequestTemplate` to share configuration:
 
@@ -163,13 +163,13 @@ get_request = template.get("/users/123")
 post_request = template.post("/users", json: {name: "John"})
 ```
 
-Templates support all HTTP methods (`get`, `head`, `post`, `put`, `patch`, `delete`, `query`) and handle URL joining, header merging, and query parameter encoding.
+A template supports every HTTP method—`get`, `head`, `post`, `put`, `patch`, `delete`, and `query`—and it joins the URLs, merges the headers, and encodes the query parameters for you.
 
-## Standard Interface
+## Standard interface
 
-The `PatientHttp` module provides a standard interface for building and dispatching requests without needing to directly interact with the processor or task handlers. This allows you to write application code that makes HTTP requests without coupling it to the underlying async processing infrastructure.
+The `PatientHttp` module provides a standard interface that builds and dispatches requests, so you do not work with the processor or the task handlers directly. You can therefore write application code that makes HTTP requests without coupling that code to the async processing infrastructure.
 
-You will need to register a request handler with `PatientHttp.register_handler` that defines how requests are dispatched to your job queue or background processing system. Once registered, you can use the `PatientHttp` class methods or the `RequestHelper` mixin to make async HTTP requests with callbacks.
+Register a request handler with `PatientHttp.register_handler` to define how requests are dispatched to your job queue or background processing system. After you register it, use the `PatientHttp` class methods or the `RequestHelper` mixin to make async HTTP requests with callbacks.
 
 ```ruby
 # The handler receives keyword arguments for the request, callback, and any additional callback arguments.
@@ -196,39 +196,39 @@ PatientHttp.get(
 )
 ```
 
-If you are using the [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) gem or the [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gem, the appropriate handler will automatically be registered for you.
+If you use the [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) gem or the [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gem, the gem registers the correct handler for you.
 
-### Inline Execution
+### Inline execution
 
-For consoles, tests, and development environments where no job system is configured, you can register a handler that executes requests inline — synchronously, in-process — instead of dispatching them to a queue:
+In consoles, tests, and development environments where no job system is configured, register a handler that runs the requests inline—synchronously and in process—instead of dispatching them to a queue:
 
 ```ruby
 PatientHttp.inline!
 ```
 
-Now every request made through the `PatientHttp` interface (or the `RequestHelper` mixin) runs immediately through the full request lifecycle (timeouts, redirects, error wrapping) and invokes its callback on the calling thread before returning. Callbacks can make further requests; those execute inline as well.
+Every request that you make through the `PatientHttp` interface, or through the `RequestHelper` mixin, then runs immediately through the full request lifecycle, which includes the timeouts, the redirects, and the error wrapping. The callback runs on the calling thread before the request returns. A callback can make more requests, and those also run inline.
 
 ```ruby
 PatientHttp.inline!
 PatientHttp.get("https://api.example.com/users/123", callback: FetchUserCallback)
-# FetchUserCallback#on_complete has already been invoked by this point
+# FetchUserCallback#on_complete has already run at this point
 ```
 
-Inline requests run against `PatientHttp.default_configuration` by default (or a lazily created default configuration that includes any secrets registered with `PatientHttp.register_secret` — see [Secrets](#secrets)). You can also pass an explicit configuration:
+By default, inline requests run against `PatientHttp.default_configuration`, or against a lazily created configuration that includes the secrets registered with `PatientHttp.register_secret` (see [Secrets](#secrets)). You can also pass an explicit configuration:
 
 ```ruby
 PatientHttp.inline!(config: PatientHttp::Configuration.new(raise_error_responses: true))
 ```
 
-Use `PatientHttp.inline?` to check whether the inline handler is the currently registered handler. To execute a single request inline without registering a handler, use `PatientHttp.execute_inline(request:, callback:)`.
+Use `PatientHttp.inline?` to check whether the inline handler is the registered handler. To run a single request inline without registering a handler, use `PatientHttp.execute_inline(request:, callback:)`.
 
-### RequestHelper Mixin
+### RequestHelper mixin
 
-Use `PatientHttp::RequestHelper` when you want a simple API for creating and dispatching async HTTP requests directly from your class.
+Use `PatientHttp::RequestHelper` when you want a compact API that creates and dispatches async HTTP requests directly from your class.
 
-1. Register a request handler with `PatientHttp.register_handler` that defines how requests are dispatched to your job queue or background processing system.
+1. Register a request handler with `PatientHttp.register_handler` to define how requests are dispatched to your job queue or background processing system.
 2. Include `PatientHttp::RequestHelper` in your class.
-3. Optionally define a `request_template` for shared `base_url`, headers, and timeout.
+3. Define a `request_template` for a shared `base_url`, shared headers, and a shared timeout. This step is optional.
 4. Call `async_get`, `async_head`, `async_post`, `async_put`, `async_patch`, `async_delete`, `async_query`, or `async_request`.
 
 ```ruby
@@ -260,9 +260,9 @@ class ApiClient
 end
 ```
 
-## Callback Arguments
+## Callback arguments
 
-Pass custom data through the request/response cycle using `callback_args`:
+Use `callback_args` to pass your own data through the request and response cycle:
 
 ```ruby
 task = PatientHttp::RequestTask.new(
@@ -273,20 +273,20 @@ task = PatientHttp::RequestTask.new(
 )
 ```
 
-Callback arguments are available on both `Response` and `Error` objects:
+The callback arguments are available on both the `Response` and the `Error` objects:
 
 ```ruby
 response.callback_args[:user_id]    # Symbol access
 response.callback_args["user_id"]   # String access
 ```
 
-Callback args must contain only JSON-native types (`nil`, `true`, `false`, `String`, `Integer`, `Float`, `Array`, `Hash`). Hash keys are converted to strings for serialization.
+Callback arguments must hold only JSON-native types: `nil`, `true`, `false`, `String`, `Integer`, `Float`, `Array`, and `Hash`. Hash keys are converted to strings for serialization.
 
-## Response and Error Objects
+## Response and error objects
 
-The `PatientHttp::Response` and error objects are designed to be serializable and deserializable as JSON, making them safe to pass through job queues and across process boundaries. This allows you to enqueue the response or error data in your `TaskHandler` callbacks and process them asynchronously in another context.
+The `PatientHttp::Response` object and the error objects serialize to JSON and deserialize from it, so you can safely pass them through a job queue and across a process boundary. You can therefore enqueue the response data or the error data in your `TaskHandler` callbacks and process it asynchronously somewhere else.
 
-Both response and error objects provide `as_json` and `to_json` methods for serialization:
+Both the response and the error objects provide the `as_json` and `to_json` methods for serialization:
 
 ```ruby
 def on_complete(response, callback)
@@ -300,27 +300,27 @@ def on_error(error, callback)
 end
 ```
 
-When deserializing, use the `load` class methods to reconstruct the objects:
+To reconstruct the objects, use the `load` class methods:
 
 ```ruby
 response = PatientHttp::Response.load(json_data)
 error = PatientHttp::HttpError.load(json_data)
 ```
 
-The `Response` object includes the HTTP status code, headers, body, and callback arguments. Error objects (`HttpError`, `RedirectError`, `RequestError`) include the error message, context about the request, and callback arguments.
+The `Response` object holds the HTTP status code, the headers, the body, and the callback arguments. An error object (`HttpError`, `RedirectError`, or `RequestError`) holds the error message, information about the request, and the callback arguments.
 
-Request and response headers are case insensitive. A request header with a `nil` or empty string value is never sent: setting a header to `nil` or `""` removes it, and a header hash such as `{"X-Header" => nil}` does not set the header at all. Headers that appear multiple times in the response (such as `set-cookie`) are flattened into a single joined string value.
+Request and response headers are case insensitive. A request header with a `nil` or empty string value is never sent: setting a header to `nil` or `""` removes it, and a header hash such as `{"X-Header" => nil}` does not set the header at all. A header that appears more than once in the response, such as `set-cookie`, is joined into a single string value.
 
-Response bodies are automatically encoded for JSON serialization. Binary content is Base64 encoded, and large text content is gzipped and then Base64 encoded to reduce payload size. Decoding is handled transparently when you access the `body` or `json` methods on the `Response` object.
+Response bodies are encoded for JSON serialization. Binary content is Base64 encoded, and large text content is gzipped and then Base64 encoded to make the payload smaller. The decoding happens for you when you call the `body` or `json` methods on the `Response` object.
 
-### Payload Stores
+### Payload stores
 
-For large request/response payloads, you can configure external storage to keep serialized JSON payloads small. Payloads exceeding the configured threshold are automatically stored externally and fetched on demand.
+For a large request or response payload, configure external storage to keep the serialized JSON payload small. A payload that is larger than the configured threshold is stored externally and fetched when it is needed.
 
-If you are using a job queue or background processing system, this allows you to handle large requests or responses without hitting size limits or memory constraints on queue message payloads. The use of external storage is transparent to your application code.
+With a job queue or a background processing system, external storage lets you handle large requests and responses without reaching the size limits or the memory limits of the queue messages. Your application code does not need to know that the storage is there.
 
 ```ruby
-# Register a payload store (see below for options; the file adapter should only be used for development/testing)
+# Register a payload store. Use the file adapter only for development and testing.
 config.register_payload_store(:my_store, adapter: :file, directory: "/tmp/payloads")
 
 # Use the ExternalStorage class to set and fetch stored payloads in your callbacks.
@@ -330,39 +330,43 @@ large_response_data = storage.store(large_response.as_json)
 # Returns a reference like: {"$ref" => {"store" => "my_store", "key" => "abc123"}}
 
 small_response_data = storage.store(small_response.as_json, max_size: 1024)
-# Will not store the payload and returns the original data hash if the JSON payload is under 1KB.
+# Returns the original data hash without storing it when the JSON payload is smaller than 1 KB.
 
 storage.storage_ref?(large_response_data) # => true
 storage.storage_ref?(small_response_data) # => false
 
 storage.fetch(large_response_data) # Fetches the original data from the store
-storage.fetch(small_response_data) # Raises an error since this is not a reference
+storage.fetch(small_response_data) # Raises an error, because this is not a reference
 
 storage.delete(large_response_data) # Deletes the stored payload
 ```
 
-#### File Store
+#### File store
 
-For development and testing:
+For local development and testing.
 
 ```ruby
 config.register_payload_store(:files, adapter: :file, directory: "/tmp/payloads")
 ```
 
-#### Redis Store
+#### Redis store
 
-For production with shared state across processes (requires the `redis` gem; the client must respond to `set`, `get`, `del`, and `exists`):
+For production deployments where several processes share the state. This store requires the `redis` gem, and the client must respond to `set`, `get`, `del`, and `exists`.
 
 ```ruby
 redis = Redis.new(url: ENV["REDIS_URL"])
 config.register_payload_store(:redis, adapter: :redis, redis: redis, ttl: 86400)
 ```
 
-Options: `redis:` (required), `ttl:` (seconds, optional), `key_prefix:` (default: `"patient_http:payloads:"`)
+Options:
 
-#### S3 Store
+- `redis:` (required)
+- `ttl:` in seconds (optional)
+- `key_prefix:` (default: `"patient_http:payloads:"`)
 
-For durable storage across instances (requires `aws-sdk-s3` gem):
+#### S3 store
+
+For durable storage that several instances share. This store requires the `aws-sdk-s3` gem.
 
 ```ruby
 s3 = Aws::S3::Resource.new
@@ -370,17 +374,20 @@ bucket = s3.bucket("my-payloads-bucket")
 config.register_payload_store(:s3, adapter: :s3, bucket: bucket)
 ```
 
-Options: `bucket:` (required), `key_prefix:` (default: `"patient_http/payloads/"`)
+Options:
 
-#### ActiveRecord Store
+- `bucket:` (required)
+- `key_prefix:` (default: `"patient_http/payloads/"`)
 
-For database-backed storage with transactional guarantees:
+#### ActiveRecord store
+
+For database-backed storage with transactional guarantees.
 
 ```ruby
 config.register_payload_store(:database, adapter: :active_record)
 ```
 
-This requires a database migration. Copy the migration from the gem:
+This store requires a database migration. Copy the migration from the gem:
 
 ```ruby
 # db/migrate/XXXXXX_create_patient_http_payloads.rb
@@ -398,11 +405,13 @@ class CreatePatientHttpPayloads < ActiveRecord::Migration[7.0]
 end
 ```
 
-Options: `model:` (optional, defaults to built-in `PatientHttp::PayloadStore::ActiveRecordStore::Payload`)
+Options:
 
-#### Custom Stores
+- `model:` (optional, defaults to `PatientHttp::PayloadStore::ActiveRecordStore::Payload`)
 
-Implement your own by subclassing `PatientHttp::PayloadStore::Base`:
+#### Custom stores
+
+To implement your own store, subclass `PatientHttp::PayloadStore::Base`:
 
 ```ruby
 class MyStore < PatientHttp::PayloadStore::Base
@@ -424,26 +433,26 @@ end
 config.register_payload_store(:custom, adapter: :my_store, **options)
 ```
 
-Multiple stores can be registered for migration purposes. The last registered store is used for new writes; all registered stores remain available for reads.
+You can register more than one store to migrate between stores. New writes go to the store that you registered last, and every registered store stays available for reads.
 
 ## Encryption
 
-When using PatientHttp with a job queue system, request and response data is serialized into the queue (Redis, database, etc.). If this data contains sensitive information, you should encrypt it.
+When you use PatientHttp with a job queue system, the request and response data is serialized into the queue, for example into Redis or into a database. If this data holds sensitive information, encrypt it.
 
-PatientHttp provides encryption helpers through the `Configuration` object, but it is up to the `TaskHandler` implementation to ensure that serialized data is actually encrypted. If you are using an integration gem like [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) or [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue), the `TaskHandler` provided by the gem handles encryption automatically — you just need to configure the encryption key or callables on the `Configuration` object.
+PatientHttp provides encryption helpers on the `Configuration` object, but the `TaskHandler` implementation must make sure that the serialized data is encrypted. If you use an integration gem such as [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) or [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue), the `TaskHandler` of that gem encrypts the data for you, and you only configure the encryption key or the callables on the `Configuration` object.
 
-If you are writing a custom `TaskHandler`, use `Configuration#encryptor` as the helper and call `encrypt` / `decrypt` explicitly wherever your handler serializes or deserializes data.
+If you write your own `TaskHandler`, use `Configuration#encryptor` and call `encrypt` and `decrypt` explicitly wherever your handler serializes or deserializes data.
 
 ### Using an encryption key
 
-The simplest option is `encryption_key=`, which sets up [ActiveSupport::MessageEncryptor](https://api.rubyonrails.org/classes/ActiveSupport/MessageEncryptor.html) automatically using AES-256-GCM:
+The simplest option is `encryption_key=`, which configures [ActiveSupport::MessageEncryptor](https://api.rubyonrails.org/classes/ActiveSupport/MessageEncryptor.html) with AES-256-GCM for you:
 
 ```ruby
 config = PatientHttp::Configuration.new
 config.encryption_key = ENV["PATIENT_HTTP_ENCRYPTION_KEY"]
 ```
 
-To support key rotation, pass an array — the first key encrypts new data, and all keys attempt decryption:
+To rotate the keys, pass an array. The first key encrypts new data, and every key is tried for decryption:
 
 ```ruby
 config.encryption_key = [ENV["PATIENT_HTTP_ENCRYPTION_KEY"], ENV["PATIENT_HTTP_OLD_KEY"]]
@@ -451,14 +460,14 @@ config.encryption_key = [ENV["PATIENT_HTTP_ENCRYPTION_KEY"], ENV["PATIENT_HTTP_O
 
 ### Using custom callables
 
-For custom encryption libraries, provide callables that accept and return raw bytes (String):
+For another encryption library, provide callables that take and return raw bytes as a `String`:
 
 ```ruby
 config.encryption { |bytes| MyEncryption.encrypt(bytes) }
 config.decryption { |bytes| MyEncryption.decrypt(bytes) }
 ```
 
-Or pass any object that responds to `#call`:
+You can also pass any object that responds to `call`:
 
 ```ruby
 config.encryption(->(bytes) { MyEncryption.encrypt(bytes) })
@@ -467,7 +476,7 @@ config.decryption(->(bytes) { MyEncryption.decrypt(bytes) })
 
 ### Wiring encryption into a custom TaskHandler
 
-If you are writing your own `TaskHandler` (rather than using one from an integration gem), you must wire in encryption yourself. `Configuration#encryptor` returns an `Encryptor` built from the configured callables. Call it directly at every serialization boundary:
+If you write your own `TaskHandler` instead of using one from an integration gem, you must add the encryption yourself. `Configuration#encryptor` returns an `Encryptor` that is built from the configured callables. Call it at every serialization boundary:
 
 ```ruby
 class MyTaskHandler < PatientHttp::TaskHandler
@@ -496,7 +505,7 @@ end
 handler = MyTaskHandler.new("job-123", configuration: config)
 ```
 
-In your callback, decrypt before processing:
+In your callback, decrypt the data before you process it:
 
 ```ruby
 class FetchDataCallback
@@ -513,17 +522,17 @@ end
 
 ### How it works
 
-Encrypted data is stored as `{"__encrypted__" => true, "value" => "<base64>"}`. The `Encryptor` JSON-serializes the original hash, passes the bytes to your callable, and Base64-encodes the result. Decryption reverses the process. Hashes without the `"__encrypted__"` key are passed through unchanged, so un-encrypted historical data continues to work while you roll out encryption.
+Encrypted data is stored as `{"__encrypted__" => true, "value" => "<base64>"}`. The `Encryptor` serializes the original hash to JSON, passes the bytes to your callable, and Base64 encodes the result. Decryption reverses the process. A hash without the `"__encrypted__"` key passes through unchanged, so data that was stored before you enabled encryption continues to work.
 
 ## Secrets
 
-Requests are serialized into your job queue before they run. If you put a sensitive value — an API token in an `Authorization` header, or an API key in a query parameter — directly on the request, that value is written into the queue. Requests can be encrypted in the queue, but a better practice is to avoid putting sensitive values on the request at all.
+Requests are serialized into your job queue before they run. If you put a sensitive value directly on a request—an API token in an `Authorization` header, or an API key in a query parameter—that value is written into the queue. You can encrypt the requests in the queue, but it is better to keep the sensitive values off the request.
 
-The secret manager lets you reference a sensitive values in headers or query parameters by name instead. The serialized request stores only a reference marker (`{"$secret" => "name"}`), never the value. The actual value lives on the `Configuration` (which exists on the processor side) and is resolved at the moment the request is sent.
+The secret manager lets you reference a sensitive header value or query parameter value by name instead. The serialized request holds only a reference marker, `{"$secret" => "name"}`, and never the value. The value lives on the `Configuration`, which is on the processor side, and it is resolved at the moment the request is sent.
 
 ### Defining secrets
 
-Register named secrets on the `Configuration`. A value can be given directly, or as a block that is evaluated lazily each time the secret is resolved (useful for reading from the environment on demand):
+Register the named secrets on the `Configuration`. Give the value directly, or give a block that runs each time the secret is resolved, which is useful when you read the value from the environment on demand:
 
 ```ruby
 config = PatientHttp::Configuration.new
@@ -531,18 +540,18 @@ config.register_secret(:authorization, "Bearer #{ENV['API_TOKEN']}") # static va
 config.register_secret(:api_key) { ENV["MY_API_KEY"] } # lazy block
 ```
 
-If a secret is not found when resolving a request, a `PatientHttp::SecretManager::SecretNotFoundError` is raised, which surfaces through the normal request error path.
+If a secret is not found when the request is resolved, PatientHttp raises a `PatientHttp::SecretManager::SecretNotFoundError`, which arrives through the normal request error path.
 
 #### Module-level registration
 
-If the `Configuration` is owned by an integration gem (patient_http-sidekiq, patient_http-solid_queue), your application code may not have a convenient reference to it — or may load before it exists. In that case, register secrets at the module level instead:
+If an integration gem such as patient_http-sidekiq or patient_http-solid_queue owns the `Configuration`, your application code can have no convenient reference to it, or it can load before the configuration exists. Register the secrets at the module level instead:
 
 ```ruby
 PatientHttp.register_secret(:authorization, "Bearer #{ENV['API_TOKEN']}")
 PatientHttp.register_secret(:api_key) { ENV["MY_API_KEY"] }
 ```
 
-Module-level secrets are applied to `PatientHttp.default_configuration` — immediately if one is already set, or as soon as one is set later — so registration order between your application code and the integration gem's configuration does not matter. Integration gems set the default configuration at the end of their configure step; you can also set it yourself:
+Module-level secrets apply to `PatientHttp.default_configuration`—immediately if one is already set, or as soon as one is set later—so the order in which your application code and the integration gem register does not matter. An integration gem sets the default configuration at the end of its configure step, and you can also set it yourself:
 
 ```ruby
 PatientHttp.default_configuration = config
@@ -552,7 +561,7 @@ Use `PatientHttp.secret_registered?(name)` to check whether a secret is availabl
 
 ### Referencing secrets when building a request
 
-Use `PatientHttp.secret(name)` anywhere you would put a sensitive header or query parameter value. No value is needed (or available) at build time:
+Use `PatientHttp.secret(name)` wherever you would put a sensitive header value or query parameter value. No value is needed, or available, at build time:
 
 ```ruby
 PatientHttp.get(
@@ -563,17 +572,17 @@ PatientHttp.get(
 )
 ```
 
-The request serializes the secret header as `{"$secret" => "api_token"}` and keeps the secret query parameter out of the URL (non-secret params like `page` are still folded into the URL as usual). The processor dereferences both just before sending: the header is set to its resolved value and the resolved query parameter is appended to the URL.
+The request serializes the secret header as `{"$secret" => "api_token"}` and keeps the secret query parameter out of the URL. A parameter that is not a secret, such as `page`, is still folded into the URL. The processor resolves both just before it sends the request: it sets the header to the resolved value, and it appends the resolved query parameter to the URL.
 
-## Request Preprocessors
+## Request preprocessors
 
-Preprocessors let you modify a request just before it is sent — most usefully, to sign it. Signing schemes like AWS SigV4 need to compute values over the final outgoing request (method, URL, headers, body) and set multiple headers, which cannot be expressed as a static header value at build time.
+A preprocessor changes a request just before it is sent, most often to sign it. A signing scheme such as AWS SigV4 computes values over the final outgoing request—the method, the URL, the headers, and the body—and sets several headers, which you cannot express as a static header value at build time.
 
-Like secrets, preprocessors are registered on the `Configuration` and referenced from requests by name only. The serialized request carries just the name, so the signing logic and its credentials live on the processor side and are never written to the job queue.
+Like a secret, a preprocessor is registered on the `Configuration` and referenced from a request by name only. The serialized request carries only the name, so the signing logic and its credentials stay on the processor side and are never written to the job queue.
 
 ### Defining preprocessors
 
-Register a named preprocessor as a block or callable taking a single argument:
+Register a named preprocessor as a block, or as a callable that takes a single argument:
 
 ```ruby
 config = PatientHttp::Configuration.new
@@ -593,15 +602,15 @@ config.register_preprocessor(:aws_sigv4) do |request|
 end
 ```
 
-The argument is a `PatientHttp::OutgoingRequest` — a view of the request as it is about to be sent, after all secret references have been resolved and the `x-request-id` and default `User-Agent` headers have been set. It exposes:
+The argument is a `PatientHttp::OutgoingRequest`, which is a view of the request as it is about to be sent, after the secret references are resolved and after the `x-request-id` and default `User-Agent` headers are set. It provides:
 
-- `http_method`, `url`, and `body` (read-only; the URL includes any resolved secret query params)
-- `headers` — mutable, case-insensitive headers
-- `add_param(name, value)` — appends a query parameter to the URL, for signed-query-param schemes
+- `http_method`, `url`, and `body`: read-only values. The URL includes the resolved secret query parameters.
+- `headers`: case insensitive headers that you can change.
+- `add_param(name, value)`: appends a query parameter to the URL, for a scheme that signs the query parameters.
 
 ### Attaching preprocessors to a request
 
-Reference registered preprocessors by name when building a request:
+Reference the registered preprocessors by name when you build a request:
 
 ```ruby
 PatientHttp.post(
@@ -612,29 +621,29 @@ PatientHttp.post(
 )
 ```
 
-Multiple preprocessors can be given as an array; they run in order, each seeing the changes made by the ones before it. `RequestTemplate` and the `RequestHelper` mixin's `request_template` also accept `preprocessors:` as a template-wide default, and the mixin's `async_*` helpers accept `preprocessors:` per request.
+You can give several preprocessors as an array. They run in order, and each one sees the changes that the earlier ones made. `RequestTemplate` and the `request_template` method of the `RequestHelper` mixin accept `preprocessors:` as a default for the whole template, and the `async_*` helpers of the mixin accept `preprocessors:` for a single request.
 
-If a request references a preprocessor name that is not registered, a `PatientHttp::RequestPreparer::PreprocessorNotFoundError` is raised, which surfaces through the normal request error path.
+If a request references a preprocessor name that is not registered, PatientHttp raises a `PatientHttp::RequestPreparer::PreprocessorNotFoundError`, which arrives through the normal request error path.
 
-When redirects are followed, preprocessors are re-run against each redirect URL so signatures stay valid. On cross-origin redirects they are dropped entirely, consistent with the stripping of `Authorization` and `Cookie` headers, so signed credentials are never sent to an unexpected origin.
+When the processor follows a redirect, it runs the preprocessors again against each redirect URL, so the signatures stay valid. On a cross-origin redirect, it drops the preprocessors completely, in the same way that it strips the `Authorization` and `Cookie` headers, so the signed credentials never go to an unexpected origin.
 
 ## Redirects
 
-Redirect responses (300, 301, 302, 303, 307, and 308) with a `Location` header are followed automatically, up to `max_redirects` hops. A 300 response is followed only when the server names a preferred choice in `Location`. Redirect loops raise `RecursiveRedirectError` and exceeding the limit raises `TooManyRedirectsError`. Any redirect that is not followed is delivered to the callback as a normal response.
+The processor follows a redirect response (300, 301, 302, 303, 307, or 308) that carries a `Location` header, up to `max_redirects` hops. It follows a 300 response only when the server names a preferred choice in `Location`. A redirect loop raises `RecursiveRedirectError`, and more hops than the limit raises `TooManyRedirectsError`. A redirect that the processor does not follow reaches the callback as a normal response.
 
 The HTTP method of the redirected request follows RFC 9110:
 
 | Status | Method |
 | --- | --- |
-| 301, 302 | `POST` becomes `GET` and the body is dropped. Other methods (including `HEAD`, `PUT`, `DELETE`, and `QUERY`) are preserved with their body. |
-| 303 | `GET` and `HEAD` are preserved. Every other method becomes `GET` and the body is dropped. |
-| 300, 307, 308 | The method and body are preserved. |
+| 301, 302 | `POST` becomes `GET`, and the body is dropped. Every other method, which includes `HEAD`, `PUT`, `DELETE`, and `QUERY`, keeps its body. |
+| 303 | `GET` and `HEAD` stay the same. Every other method becomes `GET`, and the body is dropped. |
+| 300, 307, 308 | The method and the body stay the same. |
 
-The QUERY specification states that the POST-to-GET exception on 301 and 302 does not apply to `QUERY`, so a redirected `QUERY` is re-sent as a `QUERY` with its body, and a 303 turns it into a `GET`.
+The QUERY specification states that the POST-to-GET exception on 301 and 302 does not apply to `QUERY`. A redirected `QUERY` is therefore sent again as a `QUERY` with its body, and a 303 changes it to a `GET`.
 
 ### Preventing method changes
 
-Set `follow_method_changing_redirects: false` to stop following redirects that would change the HTTP method. A `POST` that receives a 302 then completes with the 302 response instead of being retried as a `GET`. Redirects that preserve the method (a `PUT` on a 301, or any method on a 307) are still followed. The option can be set on the `Configuration` or on a single `Request`; the request value wins when both are set.
+Set `follow_method_changing_redirects: false` to stop the processor from following a redirect that would change the HTTP method. A `POST` that receives a 302 then completes with the 302 response instead of being sent again as a `GET`. The processor still follows a redirect that keeps the method, such as a `PUT` on a 301, or any method on a 307. You can set the option on the `Configuration` or on a single `Request`. The request value takes precedence.
 
 ```ruby
 config = PatientHttp::Configuration.new(follow_method_changing_redirects: false)
@@ -645,7 +654,7 @@ request = PatientHttp::Request.new(:post, "https://api.example.com/submit", body
 
 ### Stripping headers on redirects
 
-`Authorization` and `Cookie` headers are always removed on cross-origin redirects. To make sure other sensitive headers are never sent to a redirect target, list them in `redirect_strip_headers`. Header names are matched case insensitively. Listed headers are removed from every redirected request, same-origin or not.
+The `Authorization` and `Cookie` headers are always removed on a cross-origin redirect. To make sure that another sensitive header never goes to a redirect target, list it in `redirect_strip_headers`. The header names are matched case insensitively. A listed header is removed from every redirected request, whether the redirect is same-origin or not.
 
 ```ruby
 config = PatientHttp::Configuration.new(redirect_strip_headers: ["X-Api-Key", "X-Internal-Token"])
@@ -657,15 +666,15 @@ request = PatientHttp::Request.new(:get, "https://api.example.com/data", headers
 PatientHttp.get("https://api.example.com/data", callback: FetchCallback, redirect_strip_headers: "X-Signature")
 ```
 
-Per-request header names survive serialization into the job queue, so they apply no matter which process follows the redirect.
+The per-request header names survive the serialization into the job queue, so they apply whichever process follows the redirect.
 
-Stripping applies to the headers set on the request. Preprocessors run again on each same-origin redirect and can add headers after the strip, so a header that a preprocessor sets is sent to the redirect target. When a redirect changes the method and drops the body, the headers that describe the body (`Content-Type`, `Content-Length`, `Content-Encoding`, `Content-Language`, and `Content-Location`) are removed as well.
+Stripping applies to the headers that are set on the request. The preprocessors run again on each same-origin redirect and can add headers after the strip, so a header that a preprocessor sets does go to the redirect target. When a redirect changes the method and drops the body, the headers that describe the body are removed as well: `Content-Type`, `Content-Length`, `Content-Encoding`, `Content-Language`, and `Content-Location`.
 
 ## Troubleshooting
 
 ### Warning: `ThreadError: Attempt to unlock a mutex which is not locked`
 
-On some Ruby versions you may see a warning like this in your logs:
+In some Ruby versions, a warning like this can appear in your logs:
 
 ```
 warn: Async::Task: Async::Pool::Controller Gardener [...]
@@ -674,9 +683,9 @@ warn: Async::Task: Async::Pool::Controller Gardener [...]
     |   → .../async-pool-x.y.z/lib/async/pool/controller.rb:132 in `synchronize'
 ```
 
-This is caused by [Ruby bug #20907](https://bugs.ruby-lang.org/issues/20907) (see also [socketry/async#424](https://github.com/socketry/async/issues/424)): under the fiber scheduler, a fiber interrupted while waiting on a `ConditionVariable` fails to re-acquire its mutex before unwinding, raising a spurious `ThreadError`. It appears whenever a pooled HTTP client is closed while its connection pool's background "gardener" task is idle — for example when a connection is evicted after a connection error, when the least recently used client is evicted because the pool is full, or when the processor shuts down.
+The cause is [Ruby bug #20907](https://bugs.ruby-lang.org/issues/20907), which is also described in [socketry/async#424](https://github.com/socketry/async/issues/424). Under the fiber scheduler, a fiber that is interrupted while it waits on a `ConditionVariable` does not acquire its mutex again before it unwinds, which raises a `ThreadError` that does not describe a real problem. The warning appears whenever a pooled HTTP client closes while the background "gardener" task of its connection pool is idle, for example when a connection is evicted after a connection error, when the least recently used client is evicted because the pool is full, or when the processor shuts down.
 
-The warning is harmless — connections are still closed correctly; only the log noise is wrong. The fix is to upgrade Ruby: the bug is fixed in Ruby 3.2.7+, 3.3.7+, and 3.4+.
+The warning is harmless: the connections still close correctly, and only the log message is wrong. To remove it, upgrade Ruby. The bug is fixed in Ruby 3.2.7, 3.3.7, and 3.4 and later.
 
 ## Configuration
 
@@ -691,7 +700,7 @@ config = PatientHttp::Configuration.new(
   # Timeout for graceful shutdown in seconds (default: 30)
   shutdown_timeout: 30,
 
-  # Maximum response body size in bytes (default: 1MB)
+  # Maximum response body size in bytes (default: 1 MB)
   max_response_size: 1024 * 1024,
 
   # Default User-Agent header (default: "PatientHttp")
@@ -712,7 +721,10 @@ config = PatientHttp::Configuration.new(
   # redirects.
   redirect_strip_headers: ["X-Api-Key", "X-Internal-Token"],
 
-  # Maximum number of hosts to maintain persistent connections for (default: 100)
+  # Maximum number of connections to one host (default: nil, unlimited)
+  max_connections_per_host: 32,
+
+  # Maximum number of hosts to keep persistent connections for (default: 100)
   connection_pool_size: 100,
 
   # Connection timeout in seconds (default: nil, uses request_timeout)
@@ -725,44 +737,52 @@ config = PatientHttp::Configuration.new(
   retries: 3,
 
   # Force the HTTP protocol to :http1 or :http2 (default: nil, negotiates with
-  # the server, preferring HTTP/2 for HTTPS). Forcing :http1 also limits the TLS
-  # ALPN advertisement to http/1.1, which can work around SSL-intercepting
-  # proxies that mishandle HTTP/2.
+  # the server and prefers HTTP/2 for HTTPS). Forcing :http1 also limits the TLS
+  # ALPN advertisement to http/1.1, which works around SSL-intercepting proxies
+  # that do not handle HTTP/2 correctly.
   protocol: nil,
+
+  # Number of threads that deliver completed results (default: 2)
+  completion_threads: 2,
+
+  # Retries before a failed delivery is reported through completion_failed
+  # (default: 2)
+  completion_retries: 2,
 
   # Logger instance (default: Logger to STDERR at ERROR level)
   logger: Logger.new($stdout)
 )
 
-# Register named secrets to reference sensitive headers/params indirectly (see Secrets)
+# Register a named secret to reference a sensitive header or query parameter
+# indirectly (see Secrets)
 config.register_secret(:api_token, ENV["MY_API_TOKEN"])
 ```
 
-### Tuning Tips
+### Tuning tips
 
 - **max_connections**: Each connection uses memory and file descriptors. A tuned system can handle thousands.
-- **max_connections_per_host**: Bounds sockets per host (default unlimited). Set a value such as 32 for high-concurrency deployments so one host cannot consume every file descriptor. Verify the process file descriptor limit covers `max_connections` plus pooled idle host connections plus the application's own connections.
-- **request_timeout**: Set based on expected API response times. AI/LLM APIs may need minutes.
-- **connection_pool_size**: Increase for applications calling many different API hosts.
-- **max_response_size**: Keeps memory usage bounded. Large responses may need external payload storage. The limit applies to the inflated bytes of compressed responses.
-- **Response compression**: Requests ask for `gzip` by default and the body is inflated on a completion worker thread. Set `accept-encoding` on a request to change this: `identity` skips compression, and any other encoding is delivered still encoded with its `content-encoding` header kept so you can decode it yourself.
-- **completion_threads**: Number of threads that decode responses and deliver results (default 2). Increase when callbacks do heavier work (serialization, encryption) and completions back up behind them. Any value above 1 delivers results concurrently, so `TaskHandler` callbacks and completion-time observers must be thread-safe. Use 1 to serialize delivery.
-- **completion_retries**: Delivery retries before a result is reported through `completion_failed` (default 2). A retry calls `on_complete`/`on_error` again, so a handler that raises *after* enqueuing its message delivers that message twice. Make handlers idempotent, or set `completion_retries: 0` to report the first failure without retrying.
-- **shutdown_timeout**: Set below the process supervisor's termination window so the drain (including handed-off completions) finishes before a hard kill.
+- **max_connections_per_host**: Limits the number of sockets per host. The default is unlimited. Set a value such as 32 for a deployment with high concurrency, so that one host cannot use every file descriptor. Make sure that the file descriptor limit of the process covers `max_connections`, plus the pooled idle host connections, plus the connections of your application.
+- **request_timeout**: Set this value from the response times that you expect. An AI or LLM API can need minutes.
+- **connection_pool_size**: Increase this value for an application that calls many different API hosts.
+- **max_response_size**: Keeps the memory usage bounded. A large response can need external payload storage. For a compressed response, the limit applies to the inflated bytes.
+- **Response compression**: A request asks for `gzip` by default, and the body is inflated on a completion worker thread. Set `accept-encoding` on a request to change this: `identity` skips the compression, and any other encoding arrives still encoded, with its `content-encoding` header kept, so that you can decode it yourself.
+- **completion_threads**: The number of threads that decode the responses and deliver the results. The default is 2. Increase this value when your callbacks do heavier work, such as serialization or encryption, and the completions back up behind them. Any value above 1 delivers the results concurrently, so the `TaskHandler` callbacks and the completion-time observers must be thread-safe. Use 1 to deliver the results one at a time.
+- **completion_retries**: The number of delivery retries before a result is reported through `completion_failed`. The default is 2. A retry calls `on_complete` or `on_error` again, so a handler that raises an error *after* it enqueues its message delivers that message twice. Make your handlers idempotent, or set `completion_retries: 0` to report the first failure without a retry.
+- **shutdown_timeout**: Set this value below the termination window of your process supervisor, so that the drain, which includes the completions that were handed off, finishes before the supervisor stops the process.
 
-## Processor Lifecycle
+## Processor lifecycle
 
-The processor transitions through these states:
+The processor moves through these states:
 
 ```
 stopped -> starting -> running -> draining -> stopping -> stopped
 ```
 
-- **stopped**: Not processing requests
-- **starting**: Initializing the reactor thread
-- **running**: Accepting and processing requests
-- **draining**: Rejecting new requests, completing in-flight ones
-- **stopping**: Shutting down, re-enqueuing incomplete requests
+- **stopped**: Processes no requests.
+- **starting**: Initializes the reactor thread.
+- **running**: Accepts and processes requests.
+- **draining**: Rejects new requests and completes the in-flight ones.
+- **stopping**: Shuts down and re-enqueues the incomplete requests.
 
 ```ruby
 processor = PatientHttp::Processor.new(config)
@@ -777,11 +797,11 @@ processor.stop(timeout: 25)  # Graceful shutdown
 processor.stopped?           # => true
 ```
 
-When the processor stops with in-flight requests, it calls `TaskHandler#retry` on each incomplete task so they can be re-enqueued.
+When the processor stops while requests are in flight, it calls `TaskHandler#retry` on each incomplete task, so that the task can be enqueued again.
 
-### Observing the Processor
+### Observing the processor
 
-Register observers to monitor processor events:
+Register an observer to monitor the processor events:
 
 ```ruby
 class MetricsObserver < PatientHttp::ProcessorObserver
@@ -805,19 +825,19 @@ end
 processor.observe(MetricsObserver.new)
 ```
 
-Observers can also track the full task pipeline:
+An observer can also track the full task pipeline:
 
- - `request_enqueued(request_task)` is called when a task is announced to the processor (before the task is visible to the reactor). It is guaranteed to arrive before `request_start`, so observers can set up durable tracking (e.g. a crash-recovery registry entry) before `Processor#enqueue` returns or raises.
- - `request_rejected(request_task)` is called when an announced task is not accepted (not running or at capacity), so observers can tear down anything they set up in `request_enqueued`.
-- `request_requeued(request_task)` is called when an incomplete task is re-enqueued through its task handler (processor shutdown or reactor failure). The job system owns the request again once this is sent.
+- `request_enqueued(request_task)` runs when a task is announced to the processor, before the task is visible to the reactor. It always arrives before `request_start`, so you can set up durable tracking, for example a crash-recovery registry entry, before `Processor#enqueue` returns or raises an error.
+- `request_rejected(request_task)` runs when the processor does not accept an announced task, because it is not running or is at maximum capacity. Tear down anything that you set up in `request_enqueued`.
+- `request_requeued(request_task)` runs when an incomplete task is re-enqueued through its task handler, after a processor shutdown or a reactor failure. The job system owns the request again once this event is sent.
 
-Use `Processor#tracked_request_ids` to get the IDs of all tasks in the pipeline (queued, pending, and in-flight), for example to keep heartbeats alive for tasks that have not started yet.
+Use `Processor#tracked_request_ids` to get the IDs of all the tasks in the pipeline, which are the queued, pending, and in-flight tasks. You can use these IDs, for example, to keep the heartbeats alive for the tasks that have not started yet.
 
 ## Testing
 
-Use `SynchronousExecutor` to execute requests synchronously in tests. This class can be used in place of the async processor for testing your request handling logic without needing to start the full async infrastructure.
+Use `SynchronousExecutor` to run requests synchronously in your tests. It replaces the async processor, so that you can test your request handling logic without starting the full async infrastructure.
 
-It is integrated automatically in the [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) and [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gems.
+The [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) and [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gems integrate it for you.
 
 ```ruby
 task = PatientHttp::RequestTask.new(
@@ -838,13 +858,13 @@ executor.call
 
 ## Integration
 
-For Sidekiq integration, see the [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) gem which provides workers, lifecycle hooks, crash recovery, and a Web UI built on this library.
+For the Sidekiq integration, see the [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) gem, which provides workers, lifecycle hooks, crash recovery, and a web UI that are built on this library.
 
-For Solid Queue integration, see the [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gem which provides similar functionality for Solid Queue.
+For the Solid Queue integration, see the [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gem, which provides the same features for Solid Queue.
 
-When using an integration gem, you can use the [standard interface](#standard-interface) to make requests without coupling your code to the underlying processor or task handler implementations.
+With an integration gem, use the [standard interface](#standard-interface) to make requests without coupling your code to the processor or to the task handler.
 
-For large language model (LLM) requests, see the [patient_llm](https://github.com/bdurand/patient_llm) gem which provides an integration for making LLM requests asynchronously via a variety of protocols.
+For large language model (LLM) requests, see the [patient_llm](https://github.com/bdurand/patient_llm) gem, which makes LLM requests asynchronously through several protocols.
 
 ## Installation
 
@@ -854,7 +874,7 @@ Add this line to your application's Gemfile:
 gem "patient_http"
 ```
 
-Then execute:
+Then run:
 
 ```bash
 bundle install
@@ -864,13 +884,13 @@ bundle install
 
 Open a pull request on [GitHub](https://github.com/bdurand/patient_http).
 
-Please use the [standardrb](https://github.com/testdouble/standard) syntax and lint your code with `standardrb --fix` before submitting.
+Use the [standardrb](https://github.com/testdouble/standard) syntax, and lint your code with `standardrb --fix` before you submit the pull request.
 
 The [patient_http-sidekiq](https://github.com/bdurand/patient_http-sidekiq) and [patient_http-solid_queue](https://github.com/bdurand/patient_http-solid_queue) gems each provide a test application for integration testing.
 
-Running the full test suite requires running the included docker-compose.yml file to start up a valkey and s3mock server.
+To run the full test suite, start a valkey server and an s3mock server with the included docker-compose.yml file.
 
-## Further Reading
+## Further reading
 
 - [Architecture](ARCHITECTURE.md)
 

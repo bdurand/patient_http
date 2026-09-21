@@ -1,20 +1,34 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Pool of HTTP clients with LRU eviction.
+  # Pool of HTTP clients with least recently used (LRU) eviction.
   #
-  # Maintains a pool of clients lazily instantiated for each host. The pool
-  # is capped with an LRU algorithm - when a new client is needed and the
-  # pool is at capacity, the least recently used client is closed and removed.
+  # The pool holds one client per host and creates each client on first use. When a
+  # new client is needed and the pool is at capacity, the pool closes and removes the
+  # least recently used client.
+  #
+  # @api private
   class ClientPool
     # Supported protocol names mapped to their async-http implementations. Forcing
-    # :http1 also limits the TLS ALPN advertisement to http/1.1, which avoids
-    # HTTP/2 negotiation with servers and middleboxes that mishandle it.
+    # `:http1` also limits the TLS ALPN advertisement to http/1.1, which avoids HTTP/2
+    # negotiation with servers and middleboxes that handle it incorrectly.
     PROTOCOLS = {
       http1: Async::HTTP::Protocol::HTTP11,
       http2: Async::HTTP::Protocol::HTTP2
     }.freeze
 
+    # Initializes a new ClientPool.
+    #
+    # @param max_size [Integer] The maximum number of host clients to keep in the
+    #   pool.
+    # @param connection_timeout [Numeric, nil] The connection timeout in seconds.
+    # @param proxy_url [String, nil] The HTTP or HTTPS proxy URL.
+    # @param retries [Integer] The number of retries for a failed request.
+    # @param protocol [Symbol, nil] The HTTP protocol to force, either `:http1` or
+    #   `:http2`. Use nil to negotiate the protocol with the server.
+    # @param connection_limit [Integer, nil] The maximum number of connections per
+    #   host. Use nil for an unlimited number.
+    # @raise [ArgumentError] If the protocol is not supported.
     def initialize(max_size:, connection_timeout: nil, proxy_url: nil, retries: 3, protocol: nil, connection_limit: nil)
       if protocol && !PROTOCOLS.include?(protocol)
         raise ArgumentError.new("protocol must be one of #{PROTOCOLS.keys.inspect}, got: #{protocol.inspect}")
@@ -31,12 +45,26 @@ module PatientHttp
       @proxy_client = nil
     end
 
+    # @!attribute [r] max_size
+    #   @return [Integer] The maximum number of host clients in the pool.
+    # @!attribute [r] connection_timeout
+    #   @return [Numeric, nil] The connection timeout, in seconds.
+    # @!attribute [r] proxy_url
+    #   @return [String, nil] The HTTP or HTTPS proxy URL.
+    # @!attribute [r] retries
+    #   @return [Integer] The number of retries for a failed request.
+    # @!attribute [r] protocol
+    #   @return [Symbol, nil] The HTTP protocol that the pool forces, either `:http1`
+    #     or `:http2`, or nil to negotiate it with the server.
+    # @return [Integer, nil] The maximum number of connections per host, or nil for an
+    #   unlimited number.
     attr_reader :max_size, :connection_timeout, :proxy_url, :retries, :protocol, :connection_limit
 
-    # Get or create a client for the given endpoint.
+    # Returns the client for the given endpoint, and creates one if the pool does not
+    # hold a client for that host yet.
     #
-    # @param endpoint [Async::HTTP::Endpoint] the target endpoint
-    # @return [Async::HTTP::Client] the client for the endpoint's host
+    # @param endpoint [Async::HTTP::Endpoint] The target endpoint.
+    # @return [Async::HTTP::Client] The client for the host of the endpoint.
     def client_for(endpoint)
       key = host_key(endpoint)
 
@@ -53,14 +81,15 @@ module PatientHttp
       end
     end
 
-    # Make a request.
+    # Makes an HTTP request.
     #
-    # @param http_method [String, Symbol] HTTP method
-    # @param url [String] request URL
-    # @param headers [Hash] request headers
-    # @param body [String, nil] request body
-    # @param block [Proc] optional block to process the response
-    # @return [Protocol::HTTP::Response] the response
+    # @param http_method [String, Symbol] The HTTP method.
+    # @param url [String] The request URL.
+    # @param headers [Hash] The request headers.
+    # @param body [String, nil] The request body.
+    # @yield [response] An optional block that processes the response. The response is
+    #   closed after the block returns.
+    # @return [Protocol::HTTP::Response] The response.
     def request(http_method, url, headers, body, &block)
       endpoint = Async::HTTP::Endpoint.parse(url)
       client = client_for(endpoint)
@@ -86,7 +115,7 @@ module PatientHttp
       end
     end
 
-    # Close all clients and release resources.
+    # Closes all clients and releases their resources.
     #
     # @return [void]
     def close
@@ -107,11 +136,11 @@ module PatientHttp
       end
     end
 
-    # Evict and close the client for the given URL.
+    # Evicts and closes the client for the given URL.
     #
-    # This forces a new connection to be established on the next request to this host.
+    # The next request to this host establishes a new connection.
     #
-    # @param url [String] the request URL whose host client should be evicted
+    # @param url [String] The request URL whose host client is evicted.
     # @return [void]
     def evict(url)
       endpoint = Async::HTTP::Endpoint.parse(url)
@@ -127,7 +156,9 @@ module PatientHttp
       end
     end
 
-    # @return [Integer] number of clients in the pool
+    # Returns the number of clients in the pool.
+    #
+    # @return [Integer] The number of clients in the pool.
     def size
       @mutex.synchronize { @clients.size }
     end

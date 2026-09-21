@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Represents an async HTTP request that will be processed by the async processor.
+  # Represents an HTTP request that the async processor runs.
   #
   # @example Creating a request
   #   request = PatientHttp::Request.new(:get, "https://api.example.com/users/123")
@@ -16,53 +16,57 @@ module PatientHttp
     UNDEFINED = Object.new.freeze
     private_constant :UNDEFINED
 
-    # Valid HTTP methods
+    # The valid HTTP methods.
     VALID_METHODS = %i[get head post put patch delete query].freeze
 
-    # HTTP methods that must not carry a request body
+    # The HTTP methods that must not carry a request body.
     BODYLESS_METHODS = %i[get head delete].freeze
 
-    # @return [Symbol] HTTP method (:get, :head, :post, :put, :patch, :delete, :query)
+    # @return [Symbol] The HTTP method: `:get`, `:head`, `:post`, `:put`, `:patch`,
+    #   `:delete`, or `:query`.
     attr_reader :http_method
 
-    # @return [String] The request URL
+    # @return [String] The request URL.
     attr_reader :url
 
-    # @return [HttpHeaders] Request headers
+    # @return [HttpHeaders] The request headers.
     attr_reader :headers
 
-    # @return [Numeric, nil] Overall timeout in seconds
+    # @return [Numeric, nil] The overall timeout, in seconds.
     attr_reader :timeout
 
-    # @return [Integer, nil] Maximum number of redirects to follow (nil uses config default, 0 disables)
+    # @return [Integer, nil] The maximum number of redirects to follow. A value of nil
+    #   uses the configured default, and 0 disables redirects.
     attr_reader :max_redirects
 
-    # @return [Boolean, nil] Whether a redirect that requires changing the HTTP method
-    #   (for example POST to GET on a 302) may be followed (nil uses config default)
+    # @return [Boolean, nil] Whether to follow a redirect that requires a change of
+    #   the HTTP method, such as POST to GET on a 302. A value of nil uses the
+    #   configured default.
     attr_reader :follow_method_changing_redirects
 
-    # @return [Array<String>] Lowercase header names stripped from redirected requests,
-    #   in addition to those configured on the {Configuration}
+    # @return [Array<String>] The lowercase header names that are stripped from
+    #   redirected requests, in addition to the names on the {Configuration}.
     attr_reader :redirect_strip_headers
 
-    # @return [Hash{String, Symbol => SecretReference}] Query parameters whose values are
-    #   secret references, kept out of the serialized URL and resolved at send time
+    # @return [Hash{String, Symbol => SecretReference}] The query parameters whose
+    #   values are secret references. These are kept out of the serialized URL and
+    #   resolved at send time.
     attr_reader :secret_params
 
-    # @return [Array<String>] Names of preprocessors registered on the configuration
-    #   to apply to the request when it is sent
+    # @return [Array<String>] The names of the preprocessors that are registered on
+    #   the configuration and that apply to the request when it is sent.
     attr_reader :preprocessors
 
-    # @return [String, nil] Name of the processor that should execute the request.
-    #   Integrations use this to route the request to a named processor; nil
-    #   uses the default processor.
+    # @return [String, nil] The name of the processor that runs the request.
+    #   Integrations use this name to route the request to a named processor. A value
+    #   of nil uses the default processor.
     attr_reader :processor
 
     class << self
-      # Reconstruct a Request from a hash
+      # Reconstructs a Request from a hash.
       #
-      # @param hash [Hash] hash representation
-      # @return [Request] reconstructed request
+      # @param hash [Hash] The hash representation.
+      # @return [Request] The reconstructed request.
       def load(hash)
         new(
           hash["http_method"].to_sym,
@@ -81,16 +85,17 @@ module PatientHttp
 
       private
 
-      # Convert serialized secret-reference header markers back into SecretReference
-      # objects, leaving plain header values unchanged.
+      # Converts the serialized secret reference markers in the headers back into
+      # {SecretReference} objects, and leaves the plain header values unchanged.
       def load_headers(headers)
         return headers if headers.nil?
 
         headers.transform_values { |value| SecretReference.load(value) }
       end
 
-      # Reconstruct secret params from their serialized markers. Returned as a params
-      # hash so the constructor folds them back into the request's secret params.
+      # Reconstructs the secret parameters from their serialized markers. The result
+      # is a parameter hash, so that the constructor folds the parameters back into
+      # the secret parameters of the request.
       def load_secret_params(secret_params)
         return nil if secret_params.nil? || secret_params.empty?
 
@@ -100,24 +105,28 @@ module PatientHttp
 
     # Initializes a new Request.
     #
-    # @param http_method [Symbol, String] HTTP method (:get, :head, :post, :put, :patch, :delete, :query).
+    # @param http_method [Symbol, String] The HTTP method: `:get`, `:head`, `:post`,
+    #   `:put`, `:patch`, `:delete`, or `:query`.
     # @param url [String, URI::Generic] The request URL.
-    # @param headers [Hash, HttpHeaders] Request headers.
-    # @param body [String, nil] Request body.
-    # @param json [Object, nil] JSON body to be serialized (alternative to body).
-    # @param params [Hash, nil] Query parameters to append to the URL.
-    # @param timeout [Numeric, nil] Overall timeout in seconds.
-    # @param max_redirects [Integer, nil] Maximum redirects to follow (nil uses config, 0 disables).
-    # @param follow_method_changing_redirects [Boolean, nil] Whether to follow a redirect that requires changing
-    #   the HTTP method (nil uses config). When false, such a redirect response is returned as the
-    #   result instead of being followed.
-    # @param redirect_strip_headers [String, Array<String>, nil] Header names (case insensitive)
-    #   to strip from redirected requests, in addition to those configured on the
-    #   {Configuration}.
-    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] Names of preprocessors
-    #   registered on the configuration to apply to the request when it is sent.
-    # @param processor [String, Symbol, nil] Name of the processor that should execute the
-    #   request. Integrations use this to route the request to a named processor.
+    # @param headers [Hash, HttpHeaders] The request headers.
+    # @param body [String, nil] The request body.
+    # @param json [Object, nil] A JSON body to serialize. Use this instead of the
+    #   body parameter.
+    # @param params [Hash, nil] The query parameters to append to the URL.
+    # @param timeout [Numeric, nil] The overall timeout, in seconds.
+    # @param max_redirects [Integer, nil] The maximum number of redirects to follow.
+    #   Use nil for the configured default, or 0 to disable redirects.
+    # @param follow_method_changing_redirects [Boolean, nil] Whether to follow a
+    #   redirect that requires a change of the HTTP method. Use nil for the configured
+    #   default. When false, the redirect response is returned as the result instead.
+    # @param redirect_strip_headers [String, Array<String>, nil] Header names (case
+    #   insensitive) to strip from redirected requests, in addition to the names on
+    #   the {Configuration}.
+    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] The names of
+    #   the preprocessors that are registered on the configuration and that apply to
+    #   the request when it is sent.
+    # @param processor [String, Symbol, nil] The name of the processor that runs the
+    #   request. Integrations use this name to route the request to a named processor.
     def initialize(
       http_method,
       url,
@@ -165,17 +174,17 @@ module PatientHttp
       @body = UNDEFINED
     end
 
-    # Returns the request body, decoding it from the payload if necessary.
+    # Returns the request body, and decodes it from the payload if necessary.
     #
-    # @return [String, nil] The decoded request body or nil if there was no body.
+    # @return [String, nil] The decoded request body, or nil if there is no body.
     def body
       @body = @payload&.value if @body.equal?(UNDEFINED)
       @body
     end
 
-    # Serialize to JSON hash.
+    # Converts the request to a hash for JSON serialization.
     #
-    # @return [Hash]
+    # @return [Hash] The hash representation.
     def as_json
       hash = {
         "http_method" => @http_method.to_s,
@@ -204,14 +213,15 @@ module PatientHttp
 
     private
 
-    # Header values may be SecretReference objects; serialize those as markers.
+    # A header value can be a {SecretReference} object, which is serialized as a
+    # marker.
     def serialized_headers
       @headers.to_h.transform_values do |value|
         value.is_a?(SecretReference) ? value.as_json : value
       end
     end
 
-    # Normalize the method-changing redirect flag to true, false, or nil.
+    # Normalizes the method-changing redirect flag to true, false, or nil.
     def normalized_follow_method_changing_redirects(value)
       return nil if value.nil?
       return value if value == true || value == false
@@ -219,7 +229,7 @@ module PatientHttp
       raise ArgumentError.new("follow_method_changing_redirects must be true, false, or nil, got: #{value.inspect}")
     end
 
-    # Normalize the processor name to a frozen string or nil.
+    # Normalizes the processor name to a frozen string or to nil.
     def normalized_processor(processor)
       return nil if processor.nil?
 
@@ -229,7 +239,7 @@ module PatientHttp
       name.freeze
     end
 
-    # Normalize preprocessor names to a frozen array of strings.
+    # Normalizes the preprocessor names to a frozen array of strings.
     def normalized_preprocessors(preprocessors)
       names = Array(preprocessors).map(&:to_s)
       if names.any?(&:empty?)
@@ -243,8 +253,9 @@ module PatientHttp
       uri = url.is_a?(URI::Generic) ? url.dup : URI(url.to_s)
       return uri.to_s unless params&.any?
 
-      # Partition out secret params: they are kept off the serialized URL and resolved
-      # at send time by the processor. Only non-secret params are folded into the URL.
+      # Separate the secret parameters. They are kept off the serialized URL, and the
+      # processor resolves them at send time. Only the parameters that are not secret
+      # are folded into the URL.
       regular_params = {}
       params.each do |key, value|
         if SecretReference.reference?(value)
@@ -261,9 +272,10 @@ module PatientHttp
       uri.to_s
     end
 
-    # Validate the request has required HTTP parameters.
-    # @raise [ArgumentError] if method or url is invalid
-    # @return [self] for chaining
+    # Validates that the request has the required HTTP parameters.
+    #
+    # @return [self] The request, so that you can chain calls.
+    # @raise [ArgumentError] If the method or the URL is not valid.
     def validate!
       unless VALID_METHODS.include?(@http_method)
         raise ArgumentError.new("method must be one of #{VALID_METHODS.inspect}, got: #{@http_method.inspect}")

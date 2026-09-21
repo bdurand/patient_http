@@ -15,31 +15,36 @@ require "logger"
 # Generic async HTTP connection pool for Ruby applications.
 #
 # This module provides:
-# - Async HTTP request processing using Ruby's Fiber scheduler
+#
+# - Async HTTP request processing that uses Ruby's Fiber scheduler
 # - Connection pooling with HTTP/2 support
 # - Configurable timeouts, retries, and proxy support
 # - Error handling with typed errors
 #
-# This module can be used standalone or integrated with job systems
-# like Sidekiq via adapters.
+# Use this module on its own, or integrate it with a job system such as
+# Sidekiq through an adapter.
 module PatientHttp
-  # Raised when trying to enqueue a request when the processor is not running
+  # Raised when a request is enqueued while the processor is not running.
   class NotRunningError < StandardError; end
 
+  # Raised when a request is enqueued while the processor is at maximum capacity.
   class MaxCapacityError < StandardError; end
 
+  # Raised when a response body is larger than the configured maximum size.
   class ResponseTooLargeError < StandardError; end
 
-  # Raised when a request names a processor that is not configured. Handlers
-  # that support named processors raise this at enqueue time; the executing
-  # side raises it for a job that names an unconfigured processor so the job
-  # lands in the job system's retry mechanism instead of being dropped.
+  # Raised when a request names a processor that is not configured. Handlers that
+  # support named processors raise this error at enqueue time. The executing side
+  # raises it for a job that names an unconfigured processor, so that the job lands
+  # in the job system's retry mechanism instead of being dropped.
   class UnknownProcessorError < StandardError; end
 
   # HTTP redirect status codes that are followed when a Location header is present.
   # A 300 response is followed only when the server names a preferred choice in Location.
   FOLLOWABLE_REDIRECT_STATUSES = [300, 301, 302, 303, 307, 308].freeze
 
+  # The version of the gem.
+  # The version of the gem.
   VERSION = File.read(File.join(__dir__, "../VERSION")).strip
 
   # Autoload utility modules
@@ -94,33 +99,39 @@ module PatientHttp
   @config_mutex = Monitor.new
 
   class << self
-    # Check if running in testing mode.
+    # Checks whether the library is running in testing mode.
     #
+    # @return [Boolean] Whether testing mode is enabled.
     # @api private
     def testing?
       @testing
     end
 
-    # Set testing mode.
+    # Sets testing mode.
     #
+    # @param value [Boolean] Whether to enable testing mode.
+    # @return [Boolean] The value that was set.
     # @api private
     def testing=(value)
       @testing = !!value
     end
 
-    # Registers a request handler that will be called to process each request.
-    # The handler must be a callable object (responds to `call`) or a block.
+    # Registers a request handler that processes each request. The handler must be a
+    # callable object (one that responds to `call`) or a block.
     #
-    # The handler will receive keyword arguments: request, callback, callback_args,
-    # and raise_error_responses. It should return the request id for the enqueued request.
+    # The handler receives the keyword arguments `request`, `callback`,
+    # `callback_args`, and `raise_error_responses`, and must return the request ID of
+    # the enqueued request.
     #
-    # @param callable [#call, nil] A callable object that will handle requests.
-    # @yield [request, callback, callback_args, raise_error_responses] If a block is given,
-    #   it will be used as the request handler
-    # @raise [ArgumentError] if neither a callable nor a block is provided, or if both are provided
-    # @raise [ArgumentError] if the provided callable does not respond to `call`
-    # @raise [ArgumentError] if the handler does not support the required keyword arguments
-    # @return [#call] the registered handler
+    # @param callable [#call, nil] A callable object that handles requests.
+    # @yield [request, callback, callback_args, raise_error_responses] A block to use
+    #   as the request handler.
+    # @return [#call] The registered handler.
+    # @raise [ArgumentError] If neither a callable nor a block is provided, or if both
+    #   are provided.
+    # @raise [ArgumentError] If the callable does not respond to `call`.
+    # @raise [ArgumentError] If the handler does not accept the required keyword
+    #   arguments.
     def register_handler(callable = nil, &block)
       raise ArgumentError.new("Must provide a callable object or a block") unless callable || block_given?
       raise ArgumentError.new("Cannot provide both a callable object and a block") if callable && block_given?
@@ -133,19 +144,21 @@ module PatientHttp
       @handler_mutex.synchronize { @handler = handler }
     end
 
-    # Registers a request handler, raising an error if one is already registered.
+    # Registers a request handler and raises an error if one is already registered.
     #
-    # This is a safer alternative to {.register_handler} that prevents accidental
-    # double-registration.
+    # This is a safer alternative to {.register_handler} because it prevents
+    # accidental double registration.
     #
-    # @param callable [#call, nil] A callable object that will handle requests.
-    # @yield [request, callback, callback_args, raise_error_responses] If a block is given,
-    #   it will be used as the request handler
-    # @raise [RuntimeError] if a handler is already registered
-    # @raise [ArgumentError] if neither a callable nor a block is provided, or if both are provided
-    # @raise [ArgumentError] if the provided callable does not respond to `call`
-    # @raise [ArgumentError] if the handler does not support the required keyword arguments
-    # @return [#call] the registered handler
+    # @param callable [#call, nil] A callable object that handles requests.
+    # @yield [request, callback, callback_args, raise_error_responses] A block to use
+    #   as the request handler.
+    # @return [#call] The registered handler.
+    # @raise [RuntimeError] If a handler is already registered.
+    # @raise [ArgumentError] If neither a callable nor a block is provided, or if both
+    #   are provided.
+    # @raise [ArgumentError] If the callable does not respond to `call`.
+    # @raise [ArgumentError] If the handler does not accept the required keyword
+    #   arguments.
     def register_handler!(callable = nil, &block)
       @handler_mutex.synchronize do
         if @handler
@@ -158,8 +171,8 @@ module PatientHttp
 
     # Unregisters the current request handler.
     #
-    # @param handler [#call, nil] If provided, only unregisters if the given handler matches
-    #   the current handler
+    # @param handler [#call, nil] A handler to unregister only if it is the current
+    #   handler. When nil, the current handler is always unregistered.
     # @return [void]
     def unregister_handler(handler = nil)
       @handler_mutex.synchronize do
@@ -167,17 +180,16 @@ module PatientHttp
       end
     end
 
-    # Registers a request handler that executes requests inline (synchronously,
-    # in-process) instead of dispatching them to a job system.
+    # Registers a request handler that runs requests inline (synchronously and in
+    # process) instead of dispatching them to a job system.
     #
-    # This is intended for consoles, tests, and development environments where no
-    # job-system integration gem is configured. Each request runs through
-    # {SynchronousExecutor} and the callback is invoked on the calling thread
-    # before the handler returns.
+    # Use this in consoles, tests, and development environments where no job system
+    # integration gem is configured. Each request runs through {SynchronousExecutor},
+    # and the callback runs on the calling thread before the handler returns.
     #
-    # @param config [Configuration, nil] configuration to execute requests against.
-    #   Defaults to {.default_configuration}, or a lazily created configuration that
-    #   includes any secrets registered with {.register_secret}.
+    # @param config [Configuration, nil] The configuration to run requests against.
+    #   Defaults to {.default_configuration}, or to a lazily created configuration
+    #   that includes any secrets registered with {.register_secret}.
     # @return [void]
     def inline!(config: nil)
       handler = lambda do |request:, callback:, callback_args: nil, raise_error_responses: nil|
@@ -196,34 +208,34 @@ module PatientHttp
       end
     end
 
-    # Check if the currently registered handler is the inline handler registered
-    # by {.inline!}.
+    # Checks whether the currently registered handler is the inline handler that
+    # {.inline!} registers.
     #
-    # @return [Boolean]
+    # @return [Boolean] Whether the inline handler is registered.
     def inline?
       @handler_mutex.synchronize { !@handler.nil? && @handler.equal?(@inline_handler) }
     end
 
-    # Check if a request handler is registered.
+    # Checks whether a request handler is registered.
     #
-    # @return [Boolean]
+    # @return [Boolean] Whether a handler is registered.
     def handler_registered?
       @handler_mutex.synchronize { !@handler.nil? }
     end
 
-    # Executes a request inline (synchronously, in-process) through
-    # {SynchronousExecutor}, invoking the callback with the response or error
-    # before returning.
+    # Runs a request inline (synchronously and in process) through
+    # {SynchronousExecutor}. The callback runs with the response or the error before
+    # this method returns.
     #
-    # @param request [Request] the HTTP request to execute
-    # @param callback [Class, String] the callback class or name
-    # @param callback_args [Hash, nil] JSON-compatible callback arguments
-    # @param raise_error_responses [Boolean, nil] when true, non-success responses are
-    #   reported as errors; defaults to the configuration's setting
-    # @param config [Configuration, nil] configuration to execute the request against.
-    #   Defaults to {.default_configuration}, or a lazily created configuration that
-    #   includes any secrets registered with {.register_secret}.
-    # @return [String] the request id
+    # @param request [Request] The HTTP request to run.
+    # @param callback [Class, String] The callback class or its name.
+    # @param callback_args [Hash, nil] JSON-compatible callback arguments.
+    # @param raise_error_responses [Boolean, nil] Whether to report non-success
+    #   responses as errors. Defaults to the configuration setting.
+    # @param config [Configuration, nil] The configuration to run the request against.
+    #   Defaults to {.default_configuration}, or to a lazily created configuration
+    #   that includes any secrets registered with {.register_secret}.
+    # @return [String] The request ID.
     def execute_inline(request:, callback:, callback_args: nil, raise_error_responses: nil, config: nil)
       config ||= default_configuration || inline_configuration
       raise_error_responses = config.raise_error_responses if raise_error_responses.nil?
@@ -242,15 +254,15 @@ module PatientHttp
       task.id
     end
 
-    # Executes the registered request handler with the given request parameters.
+    # Runs the registered request handler with the given request parameters.
     #
-    # @param request [Request] the HTTP request to handle
-    # @param callback [Class, String] the callback class or name
-    # @param callback_args [Hash, nil] JSON-compatible callback arguments
-    # @param raise_error_responses [Boolean, nil] when true, non-success responses are
-    #   reported as errors
-    # @raise [RuntimeError] if no handler is registered
-    # @return [Object] return value from the registered request handler
+    # @param request [Request] The HTTP request to handle.
+    # @param callback [Class, String] The callback class or its name.
+    # @param callback_args [Hash, nil] JSON-compatible callback arguments.
+    # @param raise_error_responses [Boolean, nil] Whether to report non-success
+    #   responses as errors.
+    # @return [Object] The return value from the registered request handler.
+    # @raise [RuntimeError] If no handler is registered.
     def execute(request:, callback:, callback_args: nil, raise_error_responses: nil)
       handler = @handler_mutex.synchronize { @handler }
 
@@ -268,98 +280,101 @@ module PatientHttp
 
     # Enqueues an HTTP GET request.
     #
-    # @param uri [String] absolute URL
-    # @param callback [Class, String] callback class to handle the response
-    # @param kwargs [Hash] forwarded to `request`
-    # @return [Object] return value from the registered request handler
+    # @param uri [String] The absolute URL.
+    # @param callback [Class, String] The callback class that handles the response.
+    # @param kwargs [Hash] Additional options forwarded to {.request}.
+    # @return [Object] The return value from the registered request handler.
     def get(uri, callback:, **kwargs)
       request(:get, uri, callback: callback, **kwargs)
     end
 
     # Enqueues an HTTP HEAD request.
     #
-    # @param uri [String] absolute URL
-    # @param callback [Class, String] callback class to handle the response
-    # @param kwargs [Hash] forwarded to `request`
-    # @return [Object] return value from the registered request handler
+    # @param uri [String] The absolute URL.
+    # @param callback [Class, String] The callback class that handles the response.
+    # @param kwargs [Hash] Additional options forwarded to {.request}.
+    # @return [Object] The return value from the registered request handler.
     def head(uri, callback:, **kwargs)
       request(:head, uri, callback: callback, **kwargs)
     end
 
     # Enqueues an HTTP POST request.
     #
-    # @param uri [String] absolute URL
-    # @param callback [Class, String] callback class to handle the response
-    # @param kwargs [Hash] forwarded to `request`
-    # @return [Object] return value from the registered request handler
+    # @param uri [String] The absolute URL.
+    # @param callback [Class, String] The callback class that handles the response.
+    # @param kwargs [Hash] Additional options forwarded to {.request}.
+    # @return [Object] The return value from the registered request handler.
     def post(uri, callback:, **kwargs)
       request(:post, uri, callback: callback, **kwargs)
     end
 
     # Enqueues an HTTP PUT request.
     #
-    # @param uri [String] absolute URL
-    # @param callback [Class, String] callback class to handle the response
-    # @param kwargs [Hash] forwarded to `request`
-    # @return [Object] return value from the registered request handler
+    # @param uri [String] The absolute URL.
+    # @param callback [Class, String] The callback class that handles the response.
+    # @param kwargs [Hash] Additional options forwarded to {.request}.
+    # @return [Object] The return value from the registered request handler.
     def put(uri, callback:, **kwargs)
       request(:put, uri, callback: callback, **kwargs)
     end
 
     # Enqueues an HTTP PATCH request.
     #
-    # @param uri [String] absolute URL
-    # @param callback [Class, String] callback class to handle the response
-    # @param kwargs [Hash] forwarded to `request`
-    # @return [Object] return value from the registered request handler
+    # @param uri [String] The absolute URL.
+    # @param callback [Class, String] The callback class that handles the response.
+    # @param kwargs [Hash] Additional options forwarded to {.request}.
+    # @return [Object] The return value from the registered request handler.
     def patch(uri, callback:, **kwargs)
       request(:patch, uri, callback: callback, **kwargs)
     end
 
     # Enqueues an HTTP DELETE request.
     #
-    # @param uri [String] absolute URL
-    # @param callback [Class, String] callback class to handle the response
-    # @param kwargs [Hash] forwarded to `request`
-    # @return [Object] return value from the registered request handler
+    # @param uri [String] The absolute URL.
+    # @param callback [Class, String] The callback class that handles the response.
+    # @param kwargs [Hash] Additional options forwarded to {.request}.
+    # @return [Object] The return value from the registered request handler.
     def delete(uri, callback:, **kwargs)
       request(:delete, uri, callback: callback, **kwargs)
     end
 
     # Enqueues an HTTP QUERY request.
     #
-    # @param uri [String] absolute URL
-    # @param callback [Class, String] callback class to handle the response
-    # @param kwargs [Hash] forwarded to `request`
-    # @return [Object] return value from the registered request handler
+    # @param uri [String] The absolute URL.
+    # @param callback [Class, String] The callback class that handles the response.
+    # @param kwargs [Hash] Additional options forwarded to {.request}.
+    # @return [Object] The return value from the registered request handler.
     def query(uri, callback:, **kwargs)
       request(:query, uri, callback: callback, **kwargs)
     end
 
     # Builds and dispatches an HTTP request.
     #
-    # @param method [Symbol] HTTP method (`:get`, `:head`, `:post`, `:put`, `:patch`, `:delete`, `:query`)
-    # @param url [String] absolute URL
-    # @param callback [Class, String] callback class to handle the response
-    # @param headers [Hash, nil] request headers
-    # @param body [String, nil] raw request body
-    # @param json [Hash, Array, nil] JSON payload encoded by the request layer
-    # @param params [Hash, nil] query parameters
-    # @param timeout [Numeric, nil] timeout in seconds for this request
-    # @param raise_error_responses [Boolean, nil] when true, non-success responses are
-    #   reported as errors
-    # @param callback_args [Hash, nil] JSON-compatible callback arguments
-    # @param max_redirects [Integer, nil] maximum redirects to follow (nil uses the configuration
-    #   default, 0 disables redirects)
-    # @param follow_method_changing_redirects [Boolean, nil] whether to follow a redirect that changes the
-    #   HTTP method (nil uses the configuration default)
-    # @param redirect_strip_headers [String, Array<String>, nil] header names (case insensitive)
-    #   to strip from redirected requests, in addition to the configured names
-    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] names of preprocessors
-    #   registered on the configuration to apply to the request when it is sent
-    # @param processor [String, Symbol, nil] name of the processor that should execute
-    #   the request; handlers that support named processors route on this value
-    # @return [Object] return value from the registered request handler
+    # @param method [Symbol] The HTTP method: `:get`, `:head`, `:post`, `:put`,
+    #   `:patch`, `:delete`, or `:query`.
+    # @param url [String] The absolute URL.
+    # @param callback [Class, String] The callback class that handles the response.
+    # @param headers [Hash, nil] The request headers.
+    # @param body [String, nil] The raw request body.
+    # @param json [Hash, Array, nil] A JSON payload that the request layer encodes.
+    # @param params [Hash, nil] The query parameters.
+    # @param timeout [Numeric, nil] The timeout in seconds for this request.
+    # @param raise_error_responses [Boolean, nil] Whether to report non-success
+    #   responses as errors.
+    # @param callback_args [Hash, nil] JSON-compatible callback arguments.
+    # @param max_redirects [Integer, nil] The maximum number of redirects to follow.
+    #   Use nil for the configured default, or 0 to disable redirects.
+    # @param follow_method_changing_redirects [Boolean, nil] Whether to follow a
+    #   redirect that changes the HTTP method. Use nil for the configured default.
+    # @param redirect_strip_headers [String, Array<String>, nil] Header names (case
+    #   insensitive) to strip from redirected requests, in addition to the configured
+    #   names.
+    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] The names of
+    #   preprocessors registered on the configuration to apply to the request when it
+    #   is sent.
+    # @param processor [String, Symbol, nil] The name of the processor that runs the
+    #   request. Handlers that support named processors route on this value.
+    # @return [Object] The return value from the registered request handler.
     def request(
       method,
       url,
@@ -399,32 +414,34 @@ module PatientHttp
       )
     end
 
-    # Build a reference to a named secret for use as a sensitive header or query
-    # parameter value when building a request.
+    # Builds a reference to a named secret to use as a sensitive header value or query
+    # parameter value when you build a request.
     #
-    # The reference holds only the secret's name; the value is resolved on the
-    # processor side at send time using the secrets registered on the configuration.
+    # The reference holds only the name of the secret. The processor resolves the
+    # value at send time from the secrets registered on the configuration.
     #
-    # @param name [String, Symbol] the name of the secret to reference
-    # @return [SecretReference] a reference to the named secret
+    # @param name [String, Symbol] The name of the secret to reference.
+    # @return [SecretReference] A reference to the named secret.
     # @see Configuration#register_secret
     def secret(name)
       SecretReference.new(name)
     end
 
-    # Register a named secret at the module level, independent of any configuration.
+    # Registers a named secret at the module level, independent of any configuration.
     #
-    # Secrets registered here are applied to the {.default_configuration} (immediately
-    # if one is already set, or when one is set later) and to the configuration used
-    # for inline execution. This makes boot order irrelevant: application code can
-    # register secrets before or after the job-system integration gem configures the
-    # processor.
+    # Secrets registered here apply to the {.default_configuration}—immediately if one
+    # is already set, or as soon as one is set later—and to the configuration used for
+    # inline execution. Boot order therefore does not matter: your application code
+    # can register secrets before or after the job system integration gem configures
+    # the processor.
     #
-    # @param name [String, Symbol] the secret name
-    # @param value [Object, nil] the secret value (omit when providing a block)
-    # @yield [name] a block that returns the secret value (omit when providing a value)
-    # @raise [ArgumentError] if neither or both of value and block are provided
+    # @param name [String, Symbol] The secret name.
+    # @param value [Object, nil] The secret value. Omit this when you provide a block.
+    # @yield [name] A block that returns the secret value. Omit this when you provide
+    #   a value.
     # @return [void]
+    # @raise [ArgumentError] If neither or both of the value and the block are
+    #   provided.
     # @see Configuration#register_secret
     def register_secret(name, value = nil, &block)
       if value.nil? && block.nil?
@@ -443,11 +460,11 @@ module PatientHttp
       end
     end
 
-    # Check if a secret name is registered, either at the module level via
+    # Checks whether a secret name is registered, either at the module level with
     # {.register_secret} or on the {.default_configuration}.
     #
-    # @param name [String, Symbol] the secret name
-    # @return [Boolean]
+    # @param name [String, Symbol] The secret name.
+    # @return [Boolean] Whether the secret is registered.
     def secret_registered?(name)
       @config_mutex.synchronize do
         return true if @module_secrets.include?(name.to_s)
@@ -456,21 +473,23 @@ module PatientHttp
       end
     end
 
-    # The default configuration used for inline execution when none is provided.
-    # Job-system integration gems should set this at the end of their configure
-    # step so that module-level secrets registered with {.register_secret} are
-    # applied to the configuration the processor runs with.
+    # Returns the default configuration, which inline execution uses when no other
+    # configuration is provided.
     #
-    # @return [Configuration, nil] the default configuration
+    # Job system integration gems must set this at the end of their configure step, so
+    # that module-level secrets registered with {.register_secret} apply to the
+    # configuration that the processor runs with.
+    #
+    # @return [Configuration, nil] The default configuration.
     def default_configuration
       @config_mutex.synchronize { @default_configuration }
     end
 
-    # Set the default configuration. Any secrets registered with {.register_secret}
-    # are applied to it; the module-level registry is retained, so re-assigning a
-    # new configuration re-applies the same secrets.
+    # Sets the default configuration. Any secrets registered with {.register_secret}
+    # apply to it. The module-level registry is retained, so assigning a new
+    # configuration applies the same secrets again.
     #
-    # @param config [Configuration, nil] the configuration to use as the default
+    # @param config [Configuration, nil] The configuration to use as the default.
     # @return [void]
     def default_configuration=(config)
       @config_mutex.synchronize do
@@ -481,19 +500,20 @@ module PatientHttp
 
     private
 
-    # The lazily created configuration used for inline execution when no explicit
-    # or default configuration is available. Module-level secrets are applied to it.
+    # Returns the lazily created configuration that inline execution uses when no
+    # explicit or default configuration is available. Module-level secrets apply to
+    # it.
     #
-    # @return [Configuration]
+    # @return [Configuration] The inline configuration.
     def inline_configuration
       @config_mutex.synchronize do
         @inline_configuration ||= Configuration.new.tap { |config| apply_module_secrets(config) }
       end
     end
 
-    # Apply all module-level secrets to the given configuration.
+    # Applies all module-level secrets to the given configuration.
     #
-    # @param config [Configuration] the configuration to apply secrets to
+    # @param config [Configuration] The configuration to apply the secrets to.
     # @return [void]
     def apply_module_secrets(config)
       @module_secrets.each { |name, value| config.register_secret(name, value) }
@@ -501,9 +521,10 @@ module PatientHttp
 
     # Validates that the handler accepts the required keyword arguments.
     #
-    # @param handler [#call] the handler to validate
-    # @raise [ArgumentError] if the handler does not support the required keyword arguments
+    # @param handler [#call] The handler to validate.
     # @return [void]
+    # @raise [ArgumentError] If the handler does not accept the required keyword
+    #   arguments.
     def validate_handler_parameters!(handler)
       required_keywords = %i[request callback callback_args raise_error_responses]
 

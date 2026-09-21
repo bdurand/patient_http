@@ -4,37 +4,37 @@ require "fileutils"
 
 module PatientHttp
   module PayloadStore
-    # File-based payload store for testing and development.
+    # Payload store for testing and development that uses local files.
     #
-    # Stores payloads as JSON files in a directory. This store is intended
-    # for local development and testing only - use Redis or S3 stores for
-    # production deployments.
+    # This store holds payloads as JSON files in a directory. Use it only for local
+    # development and testing. For production deployments, use the Redis store or the
+    # S3 store.
     #
-    # Thread-safe through mutex synchronization.
+    # This store is thread-safe through mutex synchronization.
     #
     # @example Configuration
     #   config.register_payload_store(:files, adapter: :file, directory: "/tmp/payloads")
     class FileStore < Base
       Base.register :file, self
 
-      # @return [String] The directory where payload files are stored
+      # @return [String] The directory that holds the payload files.
       attr_reader :directory
 
-      # Initialize a new file store.
+      # Initializes a new file store.
       #
-      # @param directory [String] Directory for storing payload files.
-      #   Defaults to Dir.tmpdir. Will be created if it doesn't exist.
+      # @param directory [String] The directory that holds the payload files. Defaults
+      #   to `Dir.tmpdir`. The directory is created if it does not exist.
       def initialize(directory: nil)
         @directory = directory || Dir.tmpdir
         @mutex = Mutex.new
         FileUtils.mkdir_p(@directory)
       end
 
-      # Store pre-serialized JSON string directly to a file.
+      # Stores a serialized JSON string directly in a file.
       #
-      # @param key [String] Unique key (used as filename)
-      # @param json [String] Pre-serialized JSON string
-      # @return [String] The key
+      # @param key [String] A unique key, which is used as the file name.
+      # @param json [String] The serialized JSON string.
+      # @return [String] The key.
       def store_json(key, json)
         path = file_path(key)
         @mutex.synchronize do
@@ -43,10 +43,10 @@ module PatientHttp
         key
       end
 
-      # Fetch data from a JSON file.
+      # Fetches data from a JSON file.
       #
-      # @param key [String] The key to fetch
-      # @return [Hash, nil] The stored data or nil if not found
+      # @param key [String] The key to fetch.
+      # @return [Hash, nil] The stored data, or nil if the key is not found.
       def fetch(key)
         path = file_path(key)
         @mutex.synchronize do
@@ -56,12 +56,13 @@ module PatientHttp
         end
       end
 
-      # Delete a payload file.
+      # Deletes a payload file.
       #
-      # Idempotent - does not raise if file doesn't exist.
+      # This method is idempotent. It does not raise an error if the file does not
+      # exist.
       #
-      # @param key [String] The key to delete
-      # @return [Boolean] true
+      # @param key [String] The key to delete.
+      # @return [Boolean] Always true.
       def delete(key)
         path = file_path(key)
         @mutex.synchronize do
@@ -72,10 +73,10 @@ module PatientHttp
         true
       end
 
-      # Check if a payload exists.
+      # Checks whether a payload exists.
       #
-      # @param key [String] The key to check
-      # @return [Boolean] true if the payload exists
+      # @param key [String] The key to check.
+      # @return [Boolean] Whether the payload exists.
       def exists?(key)
         @mutex.synchronize do
           File.exist?(file_path(key))

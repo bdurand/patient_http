@@ -1,18 +1,19 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Handles synchronous/inline execution of HTTP requests.
+  # Runs HTTP requests synchronously, in process.
   #
-  # Used for testing or when synchronous execution is needed.
-  # Accepts configuration and optional callback hooks so it has
-  # no dependency on any module-level singleton state.
+  # Use this class in tests, and wherever you need synchronous execution. It takes a
+  # configuration and optional callback hooks, so it depends on no module-level state.
   class SynchronousExecutor
     include RedirectHelper
 
-    # @param task [RequestTask] the request task to execute
-    # @param config [Configuration] the pool configuration
-    # @param on_complete [Proc, nil] hook called with response on success
-    # @param on_error [Proc, nil] hook called with error on failure
+    # Initializes a new SynchronousExecutor.
+    #
+    # @param task [RequestTask] The request task to run.
+    # @param config [Configuration] The pool configuration.
+    # @param on_complete [Proc, nil] A hook that runs with the response on success.
+    # @param on_error [Proc, nil] A hook that runs with the error on failure.
     def initialize(task, config:, on_complete: nil, on_error: nil)
       @task = task
       @config = config
@@ -23,7 +24,8 @@ module PatientHttp
       @response_reader = ResponseReader.new(nil, config: config)
     end
 
-    # Execute the request synchronously.
+    # Runs the request synchronously.
+    #
     # @return [void]
     def call
       Async do
@@ -59,8 +61,8 @@ module PatientHttp
 
               request = Protocol::HTTP::Request[verb, endpoint.path, **options]
               async_response = http_client.call(request)
-              # Note: headers that appear multiple times (e.g. set-cookie) are
-              # flattened to a single joined string value.
+              # A header that appears more than once, such as set-cookie, is
+              # joined into a single string value.
               headers_hash = async_response.headers.to_h.transform_values(&:to_s)
 
               chunks = @response_reader.read_raw_body(async_response, headers_hash)
@@ -132,15 +134,16 @@ module PatientHttp
 
     private
 
-    # Create HTTP client with config settings (retries, proxy, connection timeout).
+    # Creates an HTTP client with the configured retries, proxy, and connection
+    # timeout.
     #
-    # The client is not wrapped in a Protocol::HTTP::AcceptEncoding middleware.
-    # That wrapper overwrites the request's accept-encoding header, which would
-    # ignore a caller opting out of compression, so response bodies are decoded
-    # by ResponseReader here exactly as they are on the async path.
+    # The client is not wrapped in a `Protocol::HTTP::AcceptEncoding` middleware. That
+    # wrapper overwrites the accept-encoding header of the request, which would ignore
+    # a caller that opts out of compression. The {ResponseReader} therefore decodes
+    # the response bodies here, exactly as it does on the async path.
     #
-    # @param url [String] the resolved request URL
-    # @return [Async::HTTP::Client] the HTTP client
+    # @param url [String] The resolved request URL.
+    # @return [Async::HTTP::Client] The HTTP client.
     def create_http_client(url)
       endpoint = Async::HTTP::Endpoint.parse(url)
       endpoint = configure_endpoint(endpoint) if @config.connection_timeout
@@ -152,10 +155,10 @@ module PatientHttp
       end
     end
 
-    # Create a proxied HTTP client.
+    # Creates a proxied HTTP client.
     #
-    # @param endpoint [Async::HTTP::Endpoint] the target endpoint
-    # @return [Async::HTTP::Client] the proxied client
+    # @param endpoint [Async::HTTP::Endpoint] The target endpoint.
+    # @return [Async::HTTP::Client] The proxied client.
     def create_proxied_client(endpoint)
       require "async/http/proxy"
 
@@ -167,10 +170,10 @@ module PatientHttp
       Async::HTTP::Client.new(proxy.wrap_endpoint(endpoint), retries: @config.retries)
     end
 
-    # Configure endpoint with connection timeout if specified.
+    # Configures an endpoint with the connection timeout.
     #
-    # @param endpoint [Async::HTTP::Endpoint] the endpoint to configure
-    # @return [Async::HTTP::Endpoint] the configured endpoint
+    # @param endpoint [Async::HTTP::Endpoint] The endpoint to configure.
+    # @return [Async::HTTP::Endpoint] The configured endpoint.
     def configure_endpoint(endpoint)
       Async::HTTP::Endpoint.new(
         endpoint.url,
@@ -178,10 +181,11 @@ module PatientHttp
       )
     end
 
-    # Invoke callback synchronously.
+    # Runs the callback synchronously.
     #
-    # @param result [Response, Error] the result to pass to callback
-    # @param type [Symbol] :response or :error
+    # @param result [Response, Error] The result to pass to the callback.
+    # @param type [Symbol] The result type, either `:response` or `:error`.
+    # @return [void]
     def invoke_callback(result, type)
       callback_class = @task.callback.is_a?(Class) ? @task.callback : ClassHelper.resolve_class_name(@task.callback)
       callback = callback_class.new

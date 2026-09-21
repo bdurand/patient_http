@@ -3,102 +3,116 @@
 module PatientHttp
   # Configuration for the PatientHttp processor.
   #
-  # This class holds all configuration options for the HTTP connection pool,
-  # including connection limits, timeouts, and other HTTP client settings.
-  # It has no dependencies on any job system.
+  # This class holds all the configuration options for the HTTP connection pool,
+  # including connection limits, timeouts, and other HTTP client settings. It has no
+  # dependencies on any job system.
   class Configuration
-    # Salt used for generating encryption keys. This is a fixed value to ensure
-    # consistent key generation across instances and must never be changed.
+    # Salt used to generate encryption keys. The value is fixed so that every instance
+    # generates the same keys. Never change it.
     SALT = "patient_http_payload_encryption"
     private_constant :SALT
 
-    # @return [Integer] Maximum number of concurrent connections
+    # @return [Integer] The maximum number of concurrent connections.
     attr_reader :max_connections
 
-    # @return [Integer, nil] Maximum number of connections per host (nil for unlimited)
+    # @return [Integer, nil] The maximum number of connections per host, or nil for an
+    #   unlimited number.
     attr_reader :max_connections_per_host
 
-    # @return [Integer] Number of threads that deliver completed results
+    # @return [Integer] The number of threads that deliver completed results.
     attr_reader :completion_threads
 
-    # @return [Integer] Number of retries when delivering a completed result fails.
-    #   A retry calls the task handler again, so handlers must be idempotent.
+    # @return [Integer] The number of retries when the delivery of a completed result
+    #   fails. A retry calls the task handler again, so handlers must be idempotent.
     attr_reader :completion_retries
 
-    # @return [Numeric] Default request timeout in seconds
+    # @return [Numeric] The default request timeout, in seconds.
     attr_reader :request_timeout
 
-    # @return [Numeric] Graceful shutdown timeout in seconds
+    # @return [Numeric] The graceful shutdown timeout, in seconds.
     attr_reader :shutdown_timeout
 
-    # @return [Integer] Maximum response size in bytes
+    # @return [Integer] The maximum response size, in bytes.
     attr_reader :max_response_size
 
-    # @return [String, nil] Default User-Agent header value
+    # @return [String, nil] The default User-Agent header value.
     attr_accessor :user_agent
 
-    # @return [Boolean] Whether to raise HttpError for non-2xx responses by default
+    # @return [Boolean] Whether to raise an {HttpError} for non-2xx responses by
+    #   default.
     attr_accessor :raise_error_responses
 
-    # @return [Integer] Maximum number of redirects to follow (0 disables redirects)
+    # @return [Integer] The maximum number of redirects to follow. A value of 0
+    #   disables redirects.
     attr_reader :max_redirects
 
-    # @return [Boolean] Whether a redirect that requires changing the HTTP method
-    #   (for example POST to GET on a 302) may be followed. When false, such a
-    #   redirect response is returned as the result instead of being followed.
+    # @return [Boolean] Whether to follow a redirect that requires a change of the
+    #   HTTP method, such as POST to GET on a 302. When false, the redirect response
+    #   is returned as the result instead.
     attr_reader :follow_method_changing_redirects
 
-    # @return [Array<String>] Lowercase header names that are always stripped from
-    #   redirected requests
+    # @return [Array<String>] The lowercase header names that are always stripped from
+    #   redirected requests.
     attr_reader :redirect_strip_headers
 
-    # @return [Integer] This is the maximum number of hosts for which connections
-    #   will be kept alive for at one time.
+    # @return [Integer] The maximum number of hosts to keep connections alive for at
+    #   one time.
     attr_reader :connection_pool_size
 
-    # @return [Numeric, nil] Connection timeout in seconds
+    # @return [Numeric, nil] The connection timeout, in seconds.
     attr_reader :connection_timeout
 
-    # @return [String, nil] HTTP/HTTPS proxy URL (supports authentication)
+    # @return [String, nil] The HTTP or HTTPS proxy URL. Authentication is supported.
     attr_reader :proxy_url
 
-    # @return [Integer] Number of retries for failed requests
+    # @return [Integer] The number of retries for a failed request.
     attr_reader :retries
 
-    # @return [Symbol, nil] HTTP protocol to use (:http1 or :http2). When nil, the
-    #   protocol is negotiated with the server (HTTP/2 preferred for HTTPS).
+    # @return [Symbol, nil] The HTTP protocol to use, either `:http1` or `:http2`.
+    #   When nil, the protocol is negotiated with the server, and HTTP/2 is preferred
+    #   for HTTPS.
     attr_reader :protocol
 
-    # @return [SecretManager] the secret manager instance
+    # @return [SecretManager] The secret manager.
     attr_reader :secret_manager
 
-    # Initializes a new Configuration with the specified options.
+    # Initializes a new Configuration with the given options.
     #
-    # @param max_connections [Integer] Maximum number of concurrent connections
-    # @param request_timeout [Numeric] Default request timeout in seconds
-    # @param shutdown_timeout [Numeric] Graceful shutdown timeout in seconds
-    # @param logger [Logger, nil] Logger instance to use (defaults to stdout)
-    # @param max_response_size [Integer] Maximum response size in bytes
-    # @param user_agent [String, nil] Default User-Agent header value
-    # @param raise_error_responses [Boolean] Whether to raise HttpError for non-2xx responses by default
-    # @param max_redirects [Integer] Maximum number of redirects to follow (0 disables redirects)
-    # @param follow_method_changing_redirects [Boolean] Whether to follow a redirect that requires changing the
-    #   HTTP method, such as POST to GET on a 301, 302, or 303 response. When false, requests
-    #   whose method would change do not follow the redirect and receive the redirect response.
-    # @param redirect_strip_headers [String, Array<String>] Header names (case insensitive)
-    #   that are always stripped from redirected requests, so sensitive headers are never
-    #   sent to a redirect target
-    # @param connection_pool_size [Integer] Maximum number of host clients to pool
-    # @param connection_timeout [Numeric, nil] Connection timeout in seconds
-    # @param proxy_url [String, nil] HTTP/HTTPS proxy URL (supports authentication)
-    # @param retries [Integer] Number of retries for failed requests
-    # @param protocol [Symbol, nil] HTTP protocol to use (:http1 or :http2); nil to negotiate
-    # @param max_connections_per_host [Integer, nil] Maximum number of connections per host (nil for unlimited)
-    # @param completion_threads [Integer] Number of threads that deliver completed results
-    # @param completion_retries [Integer] Number of retries when delivering a completed result fails.
-    #   A retry calls TaskHandler#on_complete or #on_error again, so a handler that raises after
-    #   its side effect delivers the callback more than once unless it is idempotent. Set to 0 to
-    #   report the first failure without retrying.
+    # @param max_connections [Integer] The maximum number of concurrent connections.
+    # @param request_timeout [Numeric] The default request timeout, in seconds.
+    # @param shutdown_timeout [Numeric] The graceful shutdown timeout, in seconds.
+    # @param logger [Logger, nil] The logger to use. Defaults to a logger that writes
+    #   errors to STDERR.
+    # @param max_response_size [Integer] The maximum response size, in bytes.
+    # @param user_agent [String, nil] The default User-Agent header value.
+    # @param raise_error_responses [Boolean] Whether to raise an {HttpError} for
+    #   non-2xx responses by default.
+    # @param max_redirects [Integer] The maximum number of redirects to follow. A
+    #   value of 0 disables redirects.
+    # @param follow_method_changing_redirects [Boolean] Whether to follow a redirect
+    #   that requires a change of the HTTP method, such as POST to GET on a 301, 302,
+    #   or 303 response. When false, a request whose method would change does not
+    #   follow the redirect and receives the redirect response.
+    # @param redirect_strip_headers [String, Array<String>] Header names (case
+    #   insensitive) that are always stripped from redirected requests, so that
+    #   sensitive headers are never sent to a redirect target.
+    # @param connection_pool_size [Integer] The maximum number of host clients to
+    #   keep in the pool.
+    # @param connection_timeout [Numeric, nil] The connection timeout, in seconds.
+    # @param proxy_url [String, nil] The HTTP or HTTPS proxy URL. Authentication is
+    #   supported.
+    # @param retries [Integer] The number of retries for a failed request.
+    # @param protocol [Symbol, nil] The HTTP protocol to use, either `:http1` or
+    #   `:http2`. Use nil to negotiate the protocol with the server.
+    # @param max_connections_per_host [Integer, nil] The maximum number of connections
+    #   per host, or nil for an unlimited number.
+    # @param completion_threads [Integer] The number of threads that deliver completed
+    #   results.
+    # @param completion_retries [Integer] The number of retries when the delivery of a
+    #   completed result fails. A retry calls {TaskHandler#on_complete} or
+    #   {TaskHandler#on_error} again, so a handler that raises an error after its side
+    #   effect delivers the callback more than once unless the handler is idempotent.
+    #   Set this to 0 to report the first failure without retrying.
     def initialize(
       max_connections: 256,
       request_timeout: 60,
@@ -156,8 +170,10 @@ module PatientHttp
       self.completion_retries = completion_retries
     end
 
-    # Get the logger to use to report pool events. Default is to log errors to STDERR.
-    # @return [Logger] the logger instance
+    # Returns the logger that reports pool events. By default, errors are logged to
+    # STDERR.
+    #
+    # @return [Logger] The logger.
     attr_accessor :logger
 
     def max_connections=(value)
@@ -261,26 +277,41 @@ module PatientHttp
       @protocol = value
     end
 
-    # Set the encryption callable for encrypting payloads before serialization.
+    # Sets the callable that encrypts payloads before serialization.
     #
-    # @param callable [#call, nil] An object that responds to #call, taking data and returning encrypted data
-    # @yield [data] A block that takes data and returns encrypted data
-    # @raise [ArgumentError] If both callable and block are provided, or if callable doesn't respond to #call
+    # @param callable [#call, nil] An object that responds to `call`, takes data, and
+    #   returns encrypted data.
+    # @yield [data] A block that takes data and returns encrypted data.
+    # @return [void]
+    # @raise [ArgumentError] If both a callable and a block are provided, or if the
+    #   callable does not respond to `call`.
     def encryption(callable = nil, &block)
       @encryption = resolve_callable(:encryption, callable, &block)
       @encryptor = nil
     end
 
-    # Set the decryption callable for decrypting payloads after deserialization.
+    # Sets the callable that decrypts payloads after deserialization.
     #
-    # @param callable [#call, nil] An object that responds to #call, taking data and returning decrypted data
-    # @yield [data] A block that takes data and returns decrypted data
-    # @raise [ArgumentError] If both callable and block are provided, or if callable doesn't respond to #call
+    # @param callable [#call, nil] An object that responds to `call`, takes data, and
+    #   returns decrypted data.
+    # @yield [data] A block that takes data and returns decrypted data.
+    # @return [void]
+    # @raise [ArgumentError] If both a callable and a block are provided, or if the
+    #   callable does not respond to `call`.
     def decryption(callable = nil, &block)
       @decryption = resolve_callable(:decryption, callable, &block)
       @encryptor = nil
     end
 
+    # Sets the encryption key, or the keys, that encrypt and decrypt payloads with
+    # `ActiveSupport::MessageEncryptor` and AES-256-GCM.
+    #
+    # Pass an array to rotate the keys. The first key encrypts new data, and every key
+    # is tried for decryption. Pass nil or an empty array to turn the encryption off.
+    #
+    # @param keys [String, Array<String>, nil] The encryption key or keys.
+    # @return [void]
+    # @raise [ArgumentError] If ActiveSupport::MessageEncryptor is not available.
     def encryption_key=(keys)
       keys = Array(keys).map(&:to_s).reject(&:empty?)
       if keys.empty?
@@ -312,26 +343,28 @@ module PatientHttp
       @encryptor = nil
     end
 
-    # Return an Encryptor instance. If encryption and decryption are not set, then
-    # this will be an empty Encryptor that returns data unchanged.
+    # Returns an {Encryptor}. If no encryption and decryption callables are set, the
+    # encryptor returns the data unchanged.
     #
-    # @return [Encryptor] the encryptor instance
+    # @return [Encryptor] The encryptor.
     def encryptor
       @encryptor ||= Encryptor.new(encryption: @encryption, decryption: @decryption)
     end
 
-    # Register a named secret whose value can be referenced indirectly when building
-    # requests via {PatientHttp.secret}.
+    # Registers a named secret whose value you can reference indirectly with
+    # {PatientHttp.secret} when you build a request.
     #
-    # The value can be provided directly or as a block (callable). A block is invoked
-    # lazily with the secret name each time the secret is resolved, which is useful for
-    # values that should be read on demand (for example, from the environment).
+    # Provide the value directly or as a block. A block runs with the secret name each
+    # time the secret is resolved, which is useful for values that must be read on
+    # demand, for example from the environment.
     #
-    # @param name [String, Symbol] the secret name
-    # @param value [Object, nil] the secret value (omit when providing a block)
-    # @yield [name] a block that returns the secret value (omit when providing a value)
-    # @raise [ArgumentError] if neither or both of value and block are provided
+    # @param name [String, Symbol] The secret name.
+    # @param value [Object, nil] The secret value. Omit this when you provide a block.
+    # @yield [name] A block that returns the secret value. Omit this when you provide
+    #   a value.
     # @return [void]
+    # @raise [ArgumentError] If neither or both of the value and the block are
+    #   provided.
     def register_secret(name, value = nil, &block)
       if value.nil? && block.nil?
         raise ArgumentError.new("register_secret requires a value or a block")
@@ -347,24 +380,26 @@ module PatientHttp
       end
     end
 
-    # Register a named preprocessor that can be attached to requests to modify them
-    # just before they are sent -- for example, to sign requests.
+    # Registers a named preprocessor that you can attach to a request to modify the
+    # request just before it is sent, for example to sign it.
     #
-    # The preprocessor can be provided as a callable or a block taking a single
-    # argument. When a request that references the preprocessor is sent, it is
-    # invoked with an {OutgoingRequest} after secret references have been resolved
-    # and the x-request-id and default user-agent headers have been set. It can
-    # change the request headers and append query parameters.
+    # Provide the preprocessor as a callable or as a block that takes a single
+    # argument. When a request that references the preprocessor is sent, the
+    # preprocessor runs with an {OutgoingRequest} after the secret references are
+    # resolved and after the x-request-id and default user-agent headers are set. The
+    # preprocessor can change the request headers and append query parameters.
     #
-    # Requests reference preprocessors by name only, so the callable (and any
-    # credentials it uses) stays on the processor side and is never serialized.
+    # A request references a preprocessor by name only, so the callable, and any
+    # credentials that it uses, stays on the processor side and is never serialized.
     #
-    # @param name [String, Symbol] the preprocessor name
-    # @param callable [#call, nil] object invoked with the outgoing request (omit when providing a block)
-    # @yield [outgoing_request] a block invoked with the outgoing request (omit when providing a callable)
-    # @raise [ArgumentError] if neither or both of callable and block are provided, or
-    #   if the preprocessor cannot be called with a single argument
+    # @param name [String, Symbol] The preprocessor name.
+    # @param callable [#call, nil] An object that runs with the outgoing request. Omit
+    #   this when you provide a block.
+    # @yield [outgoing_request] A block that runs with the outgoing request. Omit this
+    #   when you provide a callable.
     # @return [void]
+    # @raise [ArgumentError] If neither or both of the callable and the block are
+    #   provided, or if the preprocessor cannot be called with a single argument.
     def register_preprocessor(name, callable = nil, &block)
       preprocessor = resolve_callable(:preprocessor, callable, &block)
       raise ArgumentError.new("register_preprocessor requires a callable or a block") if preprocessor.nil?
@@ -376,28 +411,29 @@ module PatientHttp
       end
     end
 
-    # Get a registered preprocessor by name.
+    # Returns a registered preprocessor.
     #
-    # @param name [String, Symbol] the preprocessor name
-    # @return [#call, nil] the preprocessor or nil if not registered
+    # @param name [String, Symbol] The preprocessor name.
+    # @return [#call, nil] The preprocessor, or nil if the name is not registered.
     def preprocessor(name)
       @preprocessors[name.to_s]
     end
 
-    # Register a payload store for external storage of large payloads.
+    # Registers a payload store for the external storage of large payloads.
     #
-    # The name is included in the serialized references to the stored data.
-    # Changing it will cause any existing reference to become invalid.
+    # The name is included in the serialized references to the stored data. If you
+    # change the name, every existing reference becomes invalid.
     #
-    # Multiple stores can be registered for migration purposes. The last
-    # store registered becomes the default used for new writes. References
-    # to other registered stores remain valid for reading.
+    # You can register more than one store to migrate between stores. The store that
+    # you register last becomes the default for new writes. References to the other
+    # registered stores stay valid for reading.
     #
-    # @param name [Symbol, String] Unique name for this store registration
-    # @param adapter [Symbol, String] The adapter type (:file, :redis, :s3, etc.)
-    # @param options [Hash] Options passed to the adapter constructor
+    # @param name [Symbol, String] A unique name for this store registration.
+    # @param adapter [Symbol, String] The adapter type, such as `:file`, `:redis`, or
+    #   `:s3`.
+    # @param options [Hash] The options to pass to the adapter constructor.
     # @return [void]
-    # @raise [ArgumentError] If the adapter is not registered
+    # @raise [ArgumentError] If the adapter is not registered.
     def register_payload_store(name, adapter:, **options)
       name = name.to_sym
       adapter = adapter.to_sym
@@ -418,10 +454,11 @@ module PatientHttp
       end
     end
 
-    # Get a registered payload store by name.
+    # Returns a registered payload store.
     #
-    # @param name [Symbol, String, nil] Store name. If nil, returns the default store.
-    # @return [PayloadStore::Base, nil] The store instance or nil if not found
+    # @param name [Symbol, String, nil] The store name. If nil, the default store is
+    #   returned.
+    # @return [PayloadStore::Base, nil] The store, or nil if the name is not found.
     def payload_store(name = nil)
       if name.nil?
         return nil unless @default_payload_store_name
@@ -432,20 +469,21 @@ module PatientHttp
       end
     end
 
-    # Get the name of the default payload store.
+    # Returns the name of the default payload store.
     #
-    # @return [Symbol, nil] The default store name or nil if none registered
+    # @return [Symbol, nil] The default store name, or nil if no store is registered.
     attr_reader :default_payload_store_name
 
-    # Get all registered payload stores.
+    # Returns all registered payload stores.
     #
-    # @return [Hash{Symbol => PayloadStore::Base}] Copy of registered stores
+    # @return [Hash{Symbol => PayloadStore::Base}] A copy of the registered stores.
     def payload_stores
       @payload_stores.dup
     end
 
-    # Convert to hash for inspection
-    # @return [Hash] hash representation with string keys
+    # Converts the configuration to a hash for inspection.
+    #
+    # @return [Hash] The hash representation, with string keys.
     def to_h
       {
         "max_connections" => max_connections,
@@ -487,7 +525,7 @@ module PatientHttp
       callable || block
     end
 
-    # Validate that a preprocessor can be invoked with a single positional argument.
+    # Validates that a preprocessor can be called with a single positional argument.
     def validate_preprocessor_parameters!(preprocessor)
       method_obj = preprocessor.is_a?(Proc) ? preprocessor : preprocessor.method(:call)
       parameters = method_obj.parameters
@@ -528,9 +566,9 @@ module PatientHttp
       raise ArgumentError.new("#{attribute} must be a valid URL, got: #{value.inspect}")
     end
 
-    # Ensure adapter class is loaded (triggers autoload).
+    # Makes sure that the adapter class is loaded, which triggers its autoload.
     #
-    # @param adapter [Symbol] The adapter name
+    # @param adapter [Symbol] The adapter name.
     # @return [void]
     def ensure_adapter_loaded(adapter)
       case adapter

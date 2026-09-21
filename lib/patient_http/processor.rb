@@ -1,39 +1,40 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Core processor that handles async HTTP requests in a dedicated thread
+  # Core processor that runs async HTTP requests in a dedicated thread.
   class Processor
     include TimeHelper
     include RedirectHelper
 
-    # Timing constants for the reactor loop
-    DEQUEUE_TIMEOUT = 1.0 # Seconds to wait when dequeueing requests
+    # Seconds to wait for a request when the reactor loop reads from the queue.
+    DEQUEUE_TIMEOUT = 1.0
 
-    # Base delay between attempts when delivering a completed result fails.
-    # The delay grows linearly with each attempt.
+    # Base delay, in seconds, between attempts when the delivery of a completed result
+    # fails. The delay grows linearly with each attempt.
     COMPLETION_RETRY_DELAY = 0.5
 
-    # Seconds allowed for the completion executor to drain during shutdown.
-    # The reactor's teardown and stop() share this budget so the reactor can
-    # never spend longer draining than stop() is willing to wait for it.
+    # Seconds that the completion executor has to drain during a shutdown. The
+    # teardown of the reactor and {#stop} share this budget, so the reactor can never
+    # spend more time draining than {#stop} waits for it.
     COMPLETION_SHUTDOWN_TIMEOUT = 5
 
-    # @return [Configuration] the configuration object for the processor
+    # @return [Configuration] The configuration of the processor.
     attr_reader :config
 
-    # @return [String] the processor's name; used in thread names so multiple
-    #   named processors in one process are distinguishable
+    # @return [String] The name of the processor. The name is part of the thread
+    #   names, so that you can tell several named processors in one process apart.
     attr_reader :name
 
-    # Callback to invoke after each request. Only available in testing mode.
+    # The callback that runs after each request. It is available only in testing mode.
+    #
     # @api private
     attr_accessor :testing_callback
 
-    # Initialize the processor.
+    # Initializes a new Processor.
     #
-    # @param config [Configuration] the configuration object
-    # @param name [String, Symbol] optional name to distinguish this processor
-    #   when a process runs more than one
+    # @param config [Configuration] The configuration.
+    # @param name [String, Symbol] An optional name that identifies this processor
+    #   when a process runs more than one.
     # @return [void]
     def initialize(config, name: "default")
       @config = config
@@ -51,7 +52,7 @@ module PatientHttp
       @pending_tasks = Concurrent::Hash.new
       # Tasks pushed onto @queue but not yet popped by the reactor. Kept in a
       # hash because Thread::Queue cannot be enumerated; used to report all
-      # tracked task ids (e.g. for heartbeat updates on queued tasks).
+      # tracked task ids, for example for heartbeat updates on queued tasks.
       @queued_tasks = Concurrent::Hash.new
       @tasks_lock = Mutex.new
       @idle_condition = ConditionVariable.new
@@ -61,7 +62,7 @@ module PatientHttp
       @completion_executor = nil
     end
 
-    # Start the processor.
+    # Starts the processor.
     #
     # @return [void]
     def start
@@ -100,7 +101,7 @@ module PatientHttp
         ensure
           # Mark the processor stopped when the reactor exits and re-enqueue any
           # tasks still being tracked, so a reactor that exits without a stop()
-          # call (e.g. an unhandled error) does not lose in-flight/pending
+          # call, for example after an unhandled error, does not lose in-flight or pending
           # requests or leak stale tracking entries into a later run.
           #
           # Only act while this is still the current generation: a newer start
@@ -156,9 +157,10 @@ module PatientHttp
       observers_to_notify&.each { |observer| notify_observer(observer) { |o| o.start } }
     end
 
-    # Stop the processor.
+    # Stops the processor.
     #
-    # @param timeout [Numeric, nil] how long to wait for in-flight requests (seconds)
+    # @param timeout [Numeric, nil] How long to wait for in-flight requests, in
+    #   seconds.
     # @return [void]
     def stop(timeout: nil)
       timeout ||= @config.shutdown_timeout
@@ -197,7 +199,7 @@ module PatientHttp
         reenqueue_pending_requests
 
         # Reap the reactor thread — unless stop was called from the reactor
-        # thread itself (e.g. from a task callback or observer), where joining
+        # thread itself, for example from a task callback or observer, where joining
         # the current thread would raise ThreadError. In that case the reactor
         # exits on its own once the callback returns (its loop sees the stopped
         # state) and its ensure block performs the same cleanup.
@@ -243,7 +245,7 @@ module PatientHttp
       notify_observers { |observer| observer.stop } if should_notify_stop
     end
 
-    # Drain the processor (stop accepting new requests).
+    # Drains the processor, which stops it from accepting new requests.
     #
     # @return [void]
     def drain
@@ -254,12 +256,12 @@ module PatientHttp
       @config.logger&.info("[PatientHttp] Processor draining (no longer accepting new requests)")
     end
 
-    # Enqueue a request task for processing.
+    # Enqueues a request task for processing.
     #
-    # @param task [RequestTask] the request task to enqueue
-    # @raise [NotRunningError] if processor is not running
-    # @raise [MaxCapacityError] if at max capacity
+    # @param task [RequestTask] The request task to enqueue.
     # @return [void]
+    # @raise [NotRunningError] If the processor is not running.
+    # @raise [MaxCapacityError] If the processor is at maximum capacity.
     def enqueue(task)
       raise NotRunningError.new("Cannot enqueue request: processor is #{state}") unless running?
 
@@ -278,59 +280,60 @@ module PatientHttp
       end
     end
 
-    # Get the current processor state.
+    # Returns the current state of the processor.
     #
-    # @return [Symbol] the current state
+    # @return [Symbol] The current state.
     def state
       @lifecycle.state
     end
 
-    # Check if processor is starting.
+    # Checks whether the processor is starting.
     #
-    # @return [Boolean]
+    # @return [Boolean] Whether the processor is starting.
     def starting?
       @lifecycle.starting?
     end
 
-    # Check if processor is running.
+    # Checks whether the processor is running.
     #
-    # @return [Boolean]
+    # @return [Boolean] Whether the processor is running.
     def running?
       @lifecycle.running?
     end
 
-    # Check if processor is stopped.
+    # Checks whether the processor is stopped.
     #
-    # @return [Boolean]
+    # @return [Boolean] Whether the processor is stopped.
     def stopped?
       @lifecycle.stopped?
     end
 
-    # Check if processor is draining.
+    # Checks whether the processor is draining.
     #
-    # @return [Boolean]
+    # @return [Boolean] Whether the processor is draining.
     def draining?
       @lifecycle.draining?
     end
 
-    # Check if processor is drained (draining and idle).
+    # Checks whether the processor is drained, that is, draining and idle.
     #
-    # @return [Boolean]
+    # @return [Boolean] Whether the processor is drained.
     def drained?
       @lifecycle.draining? && idle?
     end
 
-    # Check if processor is stopping.
+    # Checks whether the processor is stopping.
     #
-    # @return [Boolean]
+    # @return [Boolean] Whether the processor is stopping.
     def stopping?
       @lifecycle.stopping?
     end
 
-    # Check if processor is idle (no queued or in-flight requests, and no
-    # results still being delivered by the completion executor).
+    # Checks whether the processor is idle, that is, whether it has no queued or
+    # in-flight requests and no results that the completion executor is still
+    # delivering.
     #
-    # @return [Boolean]
+    # @return [Boolean] Whether the processor is idle.
     def idle?
       executor = @completion_executor
       tracking_empty = @tasks_lock.synchronize do
@@ -340,13 +343,15 @@ module PatientHttp
       tracking_empty && (executor.nil? || executor.idle?)
     end
 
-    # Check how many more requests the processor can accept before reaching
-    # max capacity. This is an advisory value: the authoritative check happens
-    # inside {#enqueue}, so a concurrent enqueue can still hit
-    # {MaxCapacityError}. It performs no observer notifications and no durable
-    # registration, so it is cheap to call before paying enqueue costs.
+    # Returns how many more requests the processor can accept before it reaches
+    # maximum capacity.
     #
-    # @return [Integer] remaining capacity (never negative)
+    # This value is advisory. The authoritative check happens inside {#enqueue}, so a
+    # concurrent enqueue can still raise {MaxCapacityError}. This method notifies no
+    # observers and registers nothing durably, so it is cheap to call before you pay
+    # the cost of an enqueue.
+    #
+    # @return [Integer] The remaining capacity, which is never negative.
     def remaining_capacity
       @tasks_lock.synchronize do
         remaining = @config.max_connections - (@queue.size + @pending_tasks.size + @inflight_requests.size)
@@ -354,59 +359,63 @@ module PatientHttp
       end
     end
 
-    # Check if the processor can accept at least one more request. Advisory
-    # only; see {#remaining_capacity}.
+    # Checks whether the processor can accept at least one more request. This value is
+    # advisory. For more information, see {#remaining_capacity}.
     #
-    # @return [Boolean]
+    # @return [Boolean] Whether capacity is available.
     def capacity_available?
       remaining_capacity > 0
     end
 
-    # Get the number of in-flight requests (actively executing HTTP calls).
+    # Returns the number of in-flight requests, that is, the HTTP calls that are
+    # running.
     #
-    # This does not include queued or pending tasks. For the total pipeline
-    # count used by the capacity check, see {#total_count}.
+    # This count does not include queued or pending tasks. For the total pipeline
+    # count that the capacity check uses, see {#total_count}.
     #
-    # @return [Integer]
+    # @return [Integer] The number of in-flight requests.
     def inflight_count
       @inflight_requests.size
     end
 
-    # Get the total number of tasks in the pipeline (queued + pending + in-flight).
+    # Returns the total number of tasks in the pipeline: queued, pending, and
+    # in-flight.
     #
-    # This is the count used by {#enqueue} for capacity enforcement.
+    # {#enqueue} uses this count to enforce the capacity limit.
     #
-    # @return [Integer]
+    # @return [Integer] The number of tasks in the pipeline.
     def total_count
       @tasks_lock.synchronize do
         @queue.size + @pending_tasks.size + @inflight_requests.size
       end
     end
 
-    # Get the IDs of in-flight requests.
+    # Returns the IDs of the in-flight requests.
     #
-    # @return [Array<String>]
+    # @return [Array<String>] The in-flight request IDs.
     def inflight_request_ids
       @tasks_lock.synchronize do
         @inflight_requests.keys
       end
     end
 
-    # Get the IDs of all tasks in the pipeline (queued, pending, and in-flight).
-    # Use this to keep durable tracking (e.g. heartbeats) alive for tasks the
-    # processor has accepted but not yet started.
+    # Returns the IDs of all tasks in the pipeline: queued, pending, and in-flight.
     #
-    # @return [Array<String>]
+    # Use this method to keep durable tracking, such as heartbeats, alive for tasks
+    # that the processor accepted but has not started yet.
+    #
+    # @return [Array<String>] The tracked request IDs.
     def tracked_request_ids
       @tasks_lock.synchronize do
         (@queued_tasks.keys + @pending_tasks.keys + @inflight_requests.keys).uniq
       end
     end
 
-    # Add an observer for processor events.
+    # Adds an observer for processor events.
     #
-    # @param observer [ProcessorObserver] the observer to add
+    # @param observer [ProcessorObserver] The observer to add.
     # @return [void]
+    # @raise [ArgumentError] If the observer is already added.
     def observe(observer)
       notify_start = false
 
@@ -423,30 +432,33 @@ module PatientHttp
       notify_observer(observer) { |o| o.start } if notify_start
     end
 
-    # Wait for the processor to start.
+    # Waits for the processor to start.
     #
-    # @param timeout [Numeric] maximum time to wait in seconds (default: 5)
-    # @return [Boolean] true if started, false if timeout reached
+    # @param timeout [Numeric] The maximum time to wait, in seconds.
+    # @return [Boolean] Whether the processor started. False means that the timeout
+    #   was reached.
     # @api private
     def wait_for_running(timeout: 5)
       start
       @lifecycle.wait_for_running(timeout: timeout)
     end
 
-    # Wait for the queue to be empty and all in-flight requests to complete.
-    # This is mainly for use in tests.
+    # Waits for the queue to become empty and for all in-flight requests to complete.
+    # Use this method in tests.
     #
-    # @param timeout [Numeric] maximum time to wait in seconds (default: 5)
-    # @return [Boolean] true if processing completed, false if timeout reached
+    # @param timeout [Numeric] The maximum time to wait, in seconds.
+    # @return [Boolean] Whether the processing completed. False means that the timeout
+    #   was reached.
     # @api private
     def wait_for_idle(timeout: 1)
       @lifecycle.wait_for_condition(timeout: timeout) { idle? }
     end
 
-    # Wait for at least one request to start processing. This is mainly for use in tests.
+    # Waits for at least one request to start processing. Use this method in tests.
     #
-    # @param timeout [Numeric] maximum time to wait in seconds (default: 5)
-    # @return [Boolean] true if a request started processing, false if timeout reached
+    # @param timeout [Numeric] The maximum time to wait, in seconds.
+    # @return [Boolean] Whether a request started processing. False means that the
+    #   timeout was reached.
     # @api private
     def wait_for_processing(timeout: 1)
       @lifecycle.wait_for_condition(timeout: timeout) do
@@ -454,9 +466,11 @@ module PatientHttp
       end
     end
 
-    # Run the processor in a block. This is intended for use in tests to
-    # ensure the processor is started and stopped properly.
+    # Runs the processor for the duration of a block. Use this method in tests to make
+    # sure that the processor is started and stopped correctly.
     #
+    # @yield A block that runs while the processor is running.
+    # @return [void]
     # @api private
     def run
       start
@@ -469,17 +483,17 @@ module PatientHttp
 
     private
 
-    # Build a thread name for this processor. The default processor keeps the
-    # bare prefix; named processors append their name so multiple processors
-    # in one process are distinguishable.
+    # Builds a thread name for this processor. The default processor keeps the bare
+    # prefix. A named processor appends its name, so that you can tell several
+    # processors in one process apart.
     #
-    # @param prefix [String] the base thread name
-    # @return [String]
+    # @param prefix [String] The base thread name.
+    # @return [String] The thread name.
     def thread_name(prefix)
       (@name == "default") ? prefix : "#{prefix}-#{@name}"
     end
 
-    # Run the async reactor loop.
+    # Runs the async reactor loop.
     #
     # @return [void]
     def run_reactor
@@ -556,10 +570,10 @@ module PatientHttp
       end
     end
 
-    # Dequeue a request task with timeout.
+    # Reads a request task from the queue, with a timeout.
     #
-    # @param timeout [Numeric] timeout in seconds
-    # @return [RequestTask, nil] the request task or nil if timeout
+    # @param timeout [Numeric] The timeout, in seconds.
+    # @return [RequestTask, nil] The request task, or nil if the timeout was reached.
     def dequeue_request(timeout:)
       @queue.pop(timeout: timeout)
     rescue ThreadError
@@ -567,9 +581,9 @@ module PatientHttp
       nil
     end
 
-    # Process a single HTTP request task.
+    # Processes a single HTTP request task.
     #
-    # @param task [RequestTask] the request task to process
+    # @param task [RequestTask] The request task to process.
     # @return [void]
     def process_request(task)
       # Move from pending to in-flight tracking. If the shutdown deadline has
@@ -615,11 +629,11 @@ module PatientHttp
       end
     end
 
-    # Hand off a finished HTTP exchange to the completion executor.
+    # Hands a finished HTTP exchange to the completion executor.
     #
-    # @param task [RequestTask] the request task
-    # @param response_data [Hash, nil] raw response data on success
-    # @param error [Exception, nil] the error on failure
+    # @param task [RequestTask] The request task.
+    # @param response_data [Hash, nil] The raw response data, on success.
+    # @param error [Exception, nil] The error, on failure.
     # @return [void]
     def dispatch_completion(task, response_data: nil, error: nil)
       executor = @completion_executor
@@ -630,15 +644,17 @@ module PatientHttp
       nil
     end
 
-    # Deliver a finished result on a completion worker thread: decode the
-    # response, claim the task, run the result callbacks, and notify
-    # observers. When delivery fails after all retries, request_end is NOT
-    # fired so durable tracking (crash-recovery records) stays in place and
-    # the request can be recovered instead of silently lost.
+    # Delivers a finished result on a completion worker thread. This method decodes
+    # the response, claims the task, runs the result callbacks, and notifies the
+    # observers.
     #
-    # @param task [RequestTask] the request task
-    # @param response_data [Hash, nil] raw response data on success
-    # @param error [Exception, nil] the error on failure
+    # When the delivery fails after all the retries, the `request_end` event is not
+    # sent. Durable tracking, such as a crash-recovery record, therefore stays in
+    # place, and the request can be recovered instead of being lost.
+    #
+    # @param task [RequestTask] The request task.
+    # @param response_data [Hash, nil] The raw response data, on success.
+    # @param error [Exception, nil] The error, on failure.
     # @return [void]
     def run_completion(task, response_data: nil, error: nil)
       response = nil
@@ -679,18 +695,17 @@ module PatientHttp
       raise failure if failure && PatientHttp.testing?
     end
 
-    # Run a delivery block with bounded retries. Returns nil when the block
-    # succeeds or the final exception when all attempts fail. Retries back off
-    # linearly; sleeping is safe here because delivery runs on a completion
-    # worker thread, not the reactor.
+    # Runs a delivery block with a limited number of retries. The retries back off
+    # linearly. Sleeping is safe here, because the delivery runs on a completion
+    # worker thread and not on the reactor thread.
     #
-    # The block calls into the task handler, so a retry calls the handler
-    # again. A handler that raises after its side effect therefore repeats that
-    # side effect; handlers must be idempotent, or completion_retries must be
-    # set to zero.
+    # The block calls the task handler, so a retry calls the handler again. A handler
+    # that raises an error after its side effect therefore repeats that side effect.
+    # Handlers must be idempotent, or `completion_retries` must be set to 0.
     #
-    # @param task [RequestTask] the request task (for log context)
-    # @return [Exception, nil] the final failure or nil on success
+    # @param task [RequestTask] The request task, used for log context.
+    # @yield The delivery block to run.
+    # @return [Exception, nil] The final failure, or nil on success.
     def deliver_with_retries(task)
       attempts = 0
 
@@ -711,33 +726,34 @@ module PatientHttp
       end
     end
 
-    # Atomically take ownership of delivering a task's result by removing it
-    # from in-flight tracking.
+    # Takes ownership of the delivery of the result of a task by removing the task
+    # from in-flight tracking. The operation is atomic.
     #
-    # Returns false when the task has already been claimed by the shutdown
-    # sequence (re-enqueued for retry), in which case the result must not be
-    # delivered.
+    # This method returns false when the shutdown sequence already claimed the task
+    # and re-enqueued it for a retry. In that case, the result must not be delivered.
     #
-    # @param task [RequestTask] the request task
-    # @return [Boolean] true if this caller owns delivery of the task's result
+    # @param task [RequestTask] The request task.
+    # @return [Boolean] Whether this caller owns the delivery of the result.
     def claim_task(task)
       @tasks_lock.synchronize do
         !@inflight_requests.delete(task.id).nil?
       end
     end
 
-    # Signal idle waiters and notify observers after a claimed task finishes.
+    # Signals the idle waiters and notifies the observers after a claimed task
+    # finishes.
     #
-    # @param task [RequestTask] the request task
+    # @param task [RequestTask] The request task.
     # @return [void]
     def finish_task(task)
       signal_idle
       notify_observers { |observer| observer.request_end(task) }
     end
 
-    # Broadcast the idle condition when the pipeline is empty. Called after a
-    # claimed task finishes and by the completion executor after each job, so
-    # stop() waiters wake once the last delivery completes.
+    # Broadcasts the idle condition when the pipeline is empty. This method runs after
+    # a claimed task finishes, and it runs in the completion executor after each job,
+    # so that the threads that wait in {#stop} wake up once the last delivery
+    # completes.
     #
     # @return [void]
     def signal_idle
@@ -749,23 +765,24 @@ module PatientHttp
       end
     end
 
-    # Check whether stop() should keep waiting on the completion executor.
-    # When stop is called from a completion worker itself (via a result
-    # callback), its own in-progress job would never settle, so it is treated
-    # as settled to avoid waiting out the full timeout.
+    # Checks whether {#stop} must keep waiting for the completion executor.
     #
-    # @return [Boolean]
+    # When {#stop} is called from a completion worker itself, through a result
+    # callback, the job of that worker never settles. The job is therefore treated as
+    # settled, so that the processor does not wait for the full timeout.
+    #
+    # @return [Boolean] Whether the completion executor has settled.
     def completion_executor_settled?
       executor = @completion_executor
       executor.nil? || executor.worker_thread? || executor.idle?
     end
 
-    # Handle successful response. The caller must have claimed the task via
-    # {#claim_task} so the result is delivered exactly once.
+    # Handles a successful response. The caller must have claimed the task with
+    # {#claim_task}, so that the result is delivered exactly once.
     #
-    # @param task [RequestTask] the request task
-    # @param response [Response] the response object
-    # @return [Exception, nil] the delivery failure or nil on success
+    # @param task [RequestTask] The request task.
+    # @param response [Response] The response.
+    # @return [Exception, nil] The delivery failure, or nil on success.
     def handle_completion(task, response)
       failure = deliver_with_retries(task) { task.completed!(response) }
 
@@ -784,16 +801,16 @@ module PatientHttp
       failure
     end
 
-    # Handle a redirect response on the reactor thread.
+    # Handles a redirect response on the reactor thread.
     #
-    # Redirect errors are handed to the completion executor for delivery.
-    # When following a redirect, the original task is removed from in-flight
-    # tracking and the redirect task is pushed onto the queue within a single
-    # {@tasks_lock} section, so a concurrent {#idle?} never observes a moment
-    # where neither is tracked.
+    # Redirect errors go to the completion executor for delivery. When the processor
+    # follows a redirect, it removes the original task from in-flight tracking and
+    # pushes the redirect task onto the queue in a single locked section, so that a
+    # concurrent call to {#idle?} never sees a moment when neither task is tracked.
     #
-    # @param task [RequestTask] the request task
-    # @param response_data [Hash] the response data with status, headers, body
+    # @param task [RequestTask] The request task.
+    # @param response_data [Hash] The response data, with the status, headers, and
+    #   body.
     # @return [void]
     def handle_redirect(task, response_data)
       status = response_data[:status]
@@ -816,8 +833,8 @@ module PatientHttp
           !@inflight_requests.delete(task.id).nil?
         end
       rescue => e
-        # The redirect could not be registered (e.g. durable tracking setup
-        # failed). Deliver the failure as the original task's result.
+        # The redirect could not be registered, for example because the durable
+        # tracking setup failed. Deliver the failure as the original task's result.
         dispatch_completion(task, error: e)
         return
       end
@@ -830,12 +847,12 @@ module PatientHttp
       @testing_callback&.call(task) if PatientHttp.testing?
     end
 
-    # Handle error response. The caller must have claimed the task via
-    # {#claim_task} so the result is delivered exactly once.
+    # Handles an error response. The caller must have claimed the task with
+    # {#claim_task}, so that the result is delivered exactly once.
     #
-    # @param task [RequestTask] the request task
-    # @param exception [Exception] the exception
-    # @return [Exception, nil] the delivery failure or nil on success
+    # @param task [RequestTask] The request task.
+    # @param exception [Exception] The exception.
+    # @return [Exception, nil] The delivery failure, or nil on success.
     def handle_error(task, exception)
       failure = deliver_with_retries(task) { task.error!(exception) }
 
@@ -854,19 +871,22 @@ module PatientHttp
       failure
     end
 
-    # Announce a task to observers and make it visible to the reactor. The
-    # task is announced before it can start, finish, or be re-enqueued, so
-    # observers can set up durable tracking first. Errors from the
-    # request_enqueued announcement propagate and reject the task, because a
-    # failed tracking setup must not let the task be accepted as if it were
-    # durable. The block runs while {@tasks_lock} is held and decides whether
-    # the task is accepted; when it returns false or raises, observers receive
-    # request_rejected so they can tear down anything they set up for the
-    # request_enqueued announcement. The rejection notification never replaces
-    # an exception that is already being raised.
+    # Announces a task to the observers and makes it visible to the reactor.
     #
-    # @param task [RequestTask] the request task to announce and enqueue
-    # @return [Boolean] true if the task was accepted
+    # The task is announced before it can start, finish, or be re-enqueued, so that
+    # the observers can set up durable tracking first. An error from the
+    # `request_enqueued` announcement propagates and rejects the task, because a
+    # failed tracking setup must not let the task be accepted as if it were durable.
+    #
+    # The block runs while the task lock is held and decides whether the task is
+    # accepted. When the block returns false or raises an error, the observers receive
+    # `request_rejected`, so that they can tear down anything that they set up for the
+    # `request_enqueued` announcement. The rejection notification never replaces an
+    # exception that is already being raised.
+    #
+    # @param task [RequestTask] The request task to announce and enqueue.
+    # @yield A block that decides whether the task is accepted.
+    # @return [Boolean] Whether the task was accepted.
     def announce_and_enqueue(task)
       task.enqueued!
       accepted = false
@@ -895,8 +915,8 @@ module PatientHttp
       accepted
     end
 
-    # Notify all observers of an event. Observers are called outside of any
-    # internal lock so they can safely call back into the processor.
+    # Notifies all observers of an event. The observers run outside every internal
+    # lock, so that they can safely call back into the processor.
     def notify_observers(&block)
       observers = @tasks_lock.synchronize { @observers.dup }
       observers.each do |observer|
@@ -904,9 +924,9 @@ module PatientHttp
       end
     end
 
-    # Notify all observers of an event and let observer errors propagate.
-    # Used for notifications the caller must be able to react to, such as
-    # durable tracking setup in request_enqueued.
+    # Notifies all observers of an event and lets the errors from the observers
+    # propagate. This is used for the notifications that the caller must be able to
+    # react to, such as the durable tracking setup in `request_enqueued`.
     def notify_observers!
       observers = @tasks_lock.synchronize { @observers.dup }
       observers.each do |observer|
@@ -927,28 +947,29 @@ module PatientHttp
       reenqueue_tasks(drain_tracked_tasks)
     end
 
-    # Atomically transition to stopped and remove all tracked (in-flight and
-    # pending) tasks, returning them so the caller can re-enqueue them.
+    # Changes the state to stopped and removes all tracked tasks, both in-flight and
+    # pending, and returns them so that the caller can re-enqueue them. The operation
+    # is atomic.
     #
-    # Acquires {@tasks_lock}; callers must NOT already hold it. Use
+    # This method acquires the task lock, so the caller must not already hold it. Use
     # {#drain_tracked_tasks_locked} when the lock is already held.
     #
-    # @return [Array<RequestTask>] the tasks that were being tracked
+    # @return [Array<RequestTask>] The tasks that were tracked.
     def drain_tracked_tasks
       @tasks_lock.synchronize { drain_tracked_tasks_locked }
     end
 
-    # Transition to stopped and remove all tracked tasks. Must be called with
-    # {@tasks_lock} held.
+    # Changes the state to stopped and removes all tracked tasks. The caller must hold
+    # the task lock.
     #
-    # @return [Array<RequestTask>] the tasks that were being tracked
+    # @return [Array<RequestTask>] The tasks that were tracked.
     def drain_tracked_tasks_locked
       @lifecycle.stopped!
       tasks = @inflight_requests.values + @pending_tasks.values
       @inflight_requests.clear
       @pending_tasks.clear
       # Wake any stop() thread blocked on the idle condition. Without this, a
-      # reactor-side drain (e.g. after a crash during shutdown) would clear the
+      # reactor-side drain, for example after a crash during shutdown, would clear the
       # tracking hashes without signalling, leaving stop() asleep until its
       # full timeout elapses.
       @idle_condition.broadcast
@@ -990,7 +1011,7 @@ module PatientHttp
         # successful retry so a failed retry leaves the tracking in place.
         notify_observers { |observer| observer.request_requeued(task) }
         # Only emit request_end for tasks that actually started, so observers
-        # that pair request_start/request_end (e.g. an in-flight gauge) stay
+        # that pair request_start with request_end, such as an in-flight gauge, stay
         # balanced. Queued-but-never-started tasks emit neither.
         notify_observers { |observer| observer.request_end(task) } if task.started?
 

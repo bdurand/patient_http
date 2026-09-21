@@ -1,20 +1,22 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Manages the lifecycle state of the Processor.
+  # Manages the lifecycle state of a {Processor}.
   #
-  # Handles state transitions and provides predicates for checking the current state.
-  # Thread-safe state management using Concurrent::AtomicReference.
+  # This class performs the state transitions and reports the current state. State
+  # management is thread-safe and uses `Concurrent::AtomicReference`.
+  #
+  # @api private
   class LifecycleManager
     include TimeHelper
 
-    # Valid processor states
+    # The valid processor states.
     STATES = %i[stopped starting running draining stopping].freeze
 
-    # Polling interval during wait operations
+    # The polling interval, in seconds, for the wait operations.
     POLL_INTERVAL = 0.01
 
-    # Initialize the lifecycle manager.
+    # Initializes a new LifecycleManager.
     #
     # @return [void]
     def initialize
@@ -24,53 +26,53 @@ module PatientHttp
       @lock = Mutex.new
     end
 
-    # Get the current state.
+    # Returns the current state.
     #
-    # @return [Symbol] the current state
+    # @return [Symbol] The current state.
     def state
       @state.get
     end
 
-    # Check if processor is starting.
+    # Checks whether the processor is starting.
     #
-    # @return [Boolean] true if starting
+    # @return [Boolean] Whether the processor is starting.
     def starting?
       state == :starting
     end
 
-    # Check if processor is running.
+    # Checks whether the processor is running.
     #
-    # @return [Boolean] true if running
+    # @return [Boolean] Whether the processor is running.
     def running?
       state == :running
     end
 
-    # Check if processor is stopped.
+    # Checks whether the processor is stopped.
     #
-    # @return [Boolean] true if stopped
+    # @return [Boolean] Whether the processor is stopped.
     def stopped?
       state == :stopped
     end
 
-    # Check if processor is draining.
+    # Checks whether the processor is draining.
     #
-    # @return [Boolean] true if draining
+    # @return [Boolean] Whether the processor is draining.
     def draining?
       state == :draining
     end
 
-    # Check if processor is stopping.
+    # Checks whether the processor is stopping.
     #
-    # @return [Boolean] true if stopping
+    # @return [Boolean] Whether the processor is stopping.
     def stopping?
       state == :stopping
     end
 
-    # Transition to starting state. The processor can only be started from
-    # the stopped state; in particular, starting a draining processor would
-    # spawn a second reactor alongside the one still finishing its drain.
+    # Changes the state to starting. You can start the processor only from the
+    # stopped state. Starting a draining processor would create a second reactor
+    # next to the one that is still finishing its drain.
     #
-    # @return [Boolean] true if transition was successful
+    # @return [Boolean] Whether the transition was successful.
     def start!
       @lock.synchronize do
         return false unless stopped?
@@ -83,12 +85,12 @@ module PatientHttp
       true
     end
 
-    # Transition to running state.
+    # Changes the state to running.
     #
-    # The transition only occurs from the starting state so that a reactor
-    # that already failed and transitioned to stopped is not overwritten.
+    # The transition happens only from the starting state, so that a reactor that
+    # already failed and moved to the stopped state is not overwritten.
     #
-    # @return [Boolean] true if transition was successful
+    # @return [Boolean] Whether the transition was successful.
     def running!
       @lock.synchronize do
         return false unless starting?
@@ -99,9 +101,9 @@ module PatientHttp
       true
     end
 
-    # Transition to draining state.
+    # Changes the state to draining.
     #
-    # @return [Boolean] true if transition was successful
+    # @return [Boolean] Whether the transition was successful.
     def drain!
       @lock.synchronize do
         return false unless running?
@@ -112,9 +114,9 @@ module PatientHttp
       true
     end
 
-    # Transition to stopping state.
+    # Changes the state to stopping.
     #
-    # @return [Boolean] true if transition was successful
+    # @return [Boolean] Whether the transition was successful.
     def stop!
       @lock.synchronize do
         return false if stopped? || stopping? || starting?
@@ -126,11 +128,11 @@ module PatientHttp
       true
     end
 
-    # Transition to stopped state.
+    # Changes the state to stopped.
     #
-    # Also signals the reactor_ready event to unblock any thread
-    # waiting in {#wait_for_reactor} in case the reactor failed
-    # before it could signal readiness.
+    # This method also signals the reactor ready event, which unblocks any thread that
+    # waits in {#wait_for_reactor} if the reactor failed before it could signal that
+    # it was ready.
     #
     # @return [void]
     def stopped!
@@ -138,41 +140,45 @@ module PatientHttp
       @reactor_ready.set
     end
 
-    # Signal that the reactor is ready.
+    # Signals that the reactor is ready.
     #
     # @return [void]
     def reactor_ready!
       @reactor_ready.set
     end
 
-    # Wait for the reactor to be ready.
+    # Waits for the reactor to become ready.
     #
-    # @param timeout [Numeric, nil] maximum time to wait in seconds (nil waits forever)
-    # @return [Boolean] true if the reactor is ready, false if the timeout was reached
+    # @param timeout [Numeric, nil] The maximum time to wait, in seconds. Use nil to
+    #   wait without a limit.
+    # @return [Boolean] Whether the reactor is ready. False means that the timeout was
+    #   reached.
     def wait_for_reactor(timeout: nil)
       @reactor_ready.wait(timeout)
     end
 
-    # Check if shutdown has been signaled.
+    # Checks whether a shutdown was signaled.
     #
-    # @return [Boolean] true if shutdown is signaled
+    # @return [Boolean] Whether a shutdown was signaled.
     def shutdown_signaled?
       @shutdown_barrier.set?
     end
 
-    # Wait for running state.
+    # Waits for the running state.
     #
-    # @param timeout [Numeric] maximum time to wait in seconds
-    # @return [Boolean] true if running, false if timeout reached
+    # @param timeout [Numeric] The maximum time to wait, in seconds.
+    # @return [Boolean] Whether the processor is running. False means that the timeout
+    #   was reached.
     def wait_for_running(timeout: 5)
       wait_for_condition(timeout: timeout) { running? }
     end
 
-    # Wait for a condition to be met.
+    # Waits for a condition to be met.
     #
-    # @param timeout [Numeric] maximum time to wait in seconds
-    # @yield Block that checks the condition.
-    # @return [Boolean] true if the condition is met, false if timeout reached
+    # @param timeout [Numeric] The maximum time to wait, in seconds.
+    # @yield A block that checks the condition.
+    # @return [Boolean] Whether the condition was met. False means that the timeout
+    #   was reached.
     def wait_for_condition(timeout: 1)
       deadline = monotonic_time + timeout
       while monotonic_time <= deadline

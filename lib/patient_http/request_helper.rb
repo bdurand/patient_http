@@ -1,21 +1,23 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Mixin that provides a compact API for scheduling async HTTP requests.
+  # Mixin that gives you a compact API for scheduling async HTTP requests.
   #
-  # Include this module in your class to get instance-level and class-level helpers for building
-  # requests and dispatching them through a registered handler.
+  # Include this module in your class to get instance-level and class-level helpers
+  # that build requests and dispatch them through a registered handler.
   #
-  # This module allows you to use the same interface for making HTTP requests while swapping out
-  # the underlying queueing mechanism for handling responses asynchronously. By registering a
-  # custom handler, you can integrate with any job queue system (Sidekiq, Solid Queue, etc.)
-  # without changing your application code that makes HTTP requests. This decouples your request
-  # interface from your async processing infrastructure.
+  # This module lets you keep one interface for making HTTP requests while you change
+  # the queueing mechanism that handles the responses asynchronously. When you
+  # register a custom handler, you can integrate with any job queue system, such as
+  # Sidekiq or Solid Queue, without changing the application code that makes the HTTP
+  # requests. Your request interface stays separate from your async processing
+  # infrastructure.
   #
-  # The common workflow is:
+  # The usual workflow is:
+  #
   # 1. Register a global request handler with {PatientHttp.register_handler}.
   # 2. Include this module in a class.
-  # 3. Optionally configure defaults with {.request_template}.
+  # 3. Configure the defaults with {ClassMethods#request_template}, which is optional.
   # 4. Call `async_get`, `async_head`, `async_post`, `async_put`, `async_patch`,
   #    `async_delete`, `async_query`, or `async_request`.
   #
@@ -39,11 +41,12 @@ module PatientHttp
     extend self
 
     class << self
-      # Hooks helper behavior into the including class.
+      # Adds the helper behavior to the class that includes this module.
       #
-      # Extends the class with {.ClassMethods} and initializes template storage.
+      # This method extends the class with {ClassMethods} and initializes the storage
+      # for the request template.
       #
-      # @param base [Class] class including this module
+      # @param base [Class] The class that includes this module.
       # @return [void]
       def included(base)
         base.extend(ClassMethods)
@@ -51,92 +54,106 @@ module PatientHttp
       end
     end
 
+    # Helpers that build and dispatch a request for each HTTP method. The module is
+    # available both on the class and on its instances.
     module HttpMethodHelpers
       # Enqueues an asynchronous HTTP GET request.
       #
-      # @param uri [String] absolute URL or path (when using a request template)
-      # @param callback [Class, String] callback class to handle the response
-      # @param kwargs [Hash] forwarded to `async_request`
-      # @return [Object] return value from the registered request handler
+      # @param uri [String] The absolute URL, or the path when you use a request
+      #   template.
+      # @param callback [Class, String] The callback class that handles the response.
+      # @param kwargs [Hash] Additional options forwarded to `async_request`.
+      # @return [Object] The return value from the registered request handler.
       def async_get(uri, callback:, **kwargs)
         async_request(:get, uri, callback: callback, **kwargs)
       end
 
       # Enqueues an asynchronous HTTP HEAD request.
       #
-      # @param uri [String] absolute URL or path (when using a request template)
-      # @param callback [Class, String] callback class to handle the response
-      # @param kwargs [Hash] forwarded to `async_request`
-      # @return [Object] return value from the registered request handler
+      # @param uri [String] The absolute URL, or the path when you use a request
+      #   template.
+      # @param callback [Class, String] The callback class that handles the response.
+      # @param kwargs [Hash] Additional options forwarded to `async_request`.
+      # @return [Object] The return value from the registered request handler.
       def async_head(uri, callback:, **kwargs)
         async_request(:head, uri, callback: callback, **kwargs)
       end
 
       # Enqueues an asynchronous HTTP POST request.
       #
-      # @param uri [String] absolute URL or path (when using a request template)
-      # @param callback [Class, String] callback class to handle the response
-      # @param kwargs [Hash] forwarded to `async_request`
-      # @return [Object] return value from the registered request handler
+      # @param uri [String] The absolute URL, or the path when you use a request
+      #   template.
+      # @param callback [Class, String] The callback class that handles the response.
+      # @param kwargs [Hash] Additional options forwarded to `async_request`.
+      # @return [Object] The return value from the registered request handler.
       def async_post(uri, callback:, **kwargs)
         async_request(:post, uri, callback: callback, **kwargs)
       end
 
       # Enqueues an asynchronous HTTP PUT request.
       #
-      # @param uri [String] absolute URL or path (when using a request template)
-      # @param callback [Class, String] callback class to handle the response
-      # @param kwargs [Hash] forwarded to `async_request`
-      # @return [Object] return value from the registered request handler
+      # @param uri [String] The absolute URL, or the path when you use a request
+      #   template.
+      # @param callback [Class, String] The callback class that handles the response.
+      # @param kwargs [Hash] Additional options forwarded to `async_request`.
+      # @return [Object] The return value from the registered request handler.
       def async_put(uri, callback:, **kwargs)
         async_request(:put, uri, callback: callback, **kwargs)
       end
 
       # Enqueues an asynchronous HTTP PATCH request.
       #
-      # @param uri [String] absolute URL or path (when using a request template)
-      # @param callback [Class, String] callback class to handle the response
-      # @param kwargs [Hash] forwarded to `async_request`
-      # @return [Object] return value from the registered request handler
+      # @param uri [String] The absolute URL, or the path when you use a request
+      #   template.
+      # @param callback [Class, String] The callback class that handles the response.
+      # @param kwargs [Hash] Additional options forwarded to `async_request`.
+      # @return [Object] The return value from the registered request handler.
       def async_patch(uri, callback:, **kwargs)
         async_request(:patch, uri, callback: callback, **kwargs)
       end
 
       # Enqueues an asynchronous HTTP DELETE request.
       #
-      # @param uri [String] absolute URL or path (when using a request template)
-      # @param callback [Class, String] callback class to handle the response
-      # @param kwargs [Hash] forwarded to `async_request`
-      # @return [Object] return value from the registered request handler
+      # @param uri [String] The absolute URL, or the path when you use a request
+      #   template.
+      # @param callback [Class, String] The callback class that handles the response.
+      # @param kwargs [Hash] Additional options forwarded to `async_request`.
+      # @return [Object] The return value from the registered request handler.
       def async_delete(uri, callback:, **kwargs)
         async_request(:delete, uri, callback: callback, **kwargs)
       end
 
       # Enqueues an asynchronous HTTP QUERY request.
       #
-      # @param uri [String] absolute URL or path (when using a request template)
-      # @param callback [Class, String] callback class to handle the response
-      # @param kwargs [Hash] forwarded to `async_request`
-      # @return [Object] return value from the registered request handler
+      # @param uri [String] The absolute URL, or the path when you use a request
+      #   template.
+      # @param callback [Class, String] The callback class that handles the response.
+      # @param kwargs [Hash] Additional options forwarded to `async_request`.
+      # @return [Object] The return value from the registered request handler.
       def async_query(uri, callback:, **kwargs)
         async_request(:query, uri, callback: callback, **kwargs)
       end
     end
 
+    # Class-level helpers that a class receives when it includes {RequestHelper}.
     module ClassMethods
       include HttpMethodHelpers
 
       # Defines a default request template for this class.
       #
-      # Requests created with the helper methods merge these defaults unless explicitly overridden.
+      # A request that you create with a helper method merges these defaults, unless
+      # the request overrides them.
       #
-      # @param base_url [String, nil] optional base URL used to resolve relative request URLs
-      # @param headers [Hash] default headers for requests
-      # @param params [Hash, nil] default query parameters for requests
-      # @param timeout [Float] default timeout in seconds
-      # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] default names of
-      #   preprocessors registered on the configuration to apply to requests
-      # @param processor [String, Symbol, nil] default processor name for requests
+      # @param base_url [String, nil] An optional base URL that resolves relative
+      #   request URLs.
+      # @param headers [Hash] The default headers for the requests.
+      # @param params [Hash, nil] The default query parameters for the requests.
+      # @param timeout [Float] The default timeout, in seconds.
+      # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] The default
+      #   names of the preprocessors that are registered on the configuration and that
+      #   apply to the requests.
+      # @param processor [String, Symbol, nil] The default processor name for the
+      #   requests.
       # @return [void]
       def request_template(base_url: nil, headers: {}, params: nil, timeout: 30, preprocessors: nil, processor: nil)
         @patient_http_request_template = RequestTemplate.new(
@@ -151,29 +168,33 @@ module PatientHttp
 
       # Builds and dispatches an asynchronous HTTP request.
       #
-      # When a request template is configured, the request is built from the template. Otherwise,
-      # it is built directly from the provided arguments.
+      # When a request template is configured, the request is built from the template.
+      # Otherwise, it is built from the given arguments.
       #
-      # @param method [Symbol] HTTP method (`:get`, `:head`, `:post`, `:put`, `:patch`, `:delete`, `:query`)
-      # @param url [String] absolute URL or path (when using a request template)
-      # @param callback [Class, String] callback class to handle the response
-      # @param headers [Hash, nil] request headers
-      # @param body [String, nil] raw request body
-      # @param json [Hash, Array, nil] JSON payload encoded by the request layer
-      # @param params [Hash, nil] query parameters
-      # @param timeout [Numeric, nil] timeout in seconds for this request
-      # @param raise_error_responses [Boolean, nil] when true, non-success responses are
-      #   reported as errors
-      # @param callback_args [Hash, nil] JSON-compatible callback arguments
-      # @param follow_method_changing_redirects [Boolean, nil] whether to follow a redirect that changes the
-      #   HTTP method (nil uses the configuration default)
-      # @param redirect_strip_headers [String, Array<String>, nil] header names (case insensitive)
-      #   to strip from redirected requests, in addition to the configured names
-      # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] names of preprocessors
-      #   registered on the configuration to apply to the request when it is sent
-      # @param processor [String, Symbol, nil] name of the processor that should execute
-      #   the request
-      # @return [Object] return value from the registered request handler
+      # @param method [Symbol] The HTTP method: `:get`, `:head`, `:post`, `:put`,
+      #   `:patch`, `:delete`, or `:query`.
+      # @param url [String] The absolute URL, or the path when you use a request
+      #   template.
+      # @param callback [Class, String] The callback class that handles the response.
+      # @param headers [Hash, nil] The request headers.
+      # @param body [String, nil] The raw request body.
+      # @param json [Hash, Array, nil] A JSON payload that the request layer encodes.
+      # @param params [Hash, nil] The query parameters.
+      # @param timeout [Numeric, nil] The timeout in seconds for this request.
+      # @param raise_error_responses [Boolean, nil] Whether to report non-success
+      #   responses as errors.
+      # @param callback_args [Hash, nil] JSON-compatible callback arguments.
+      # @param follow_method_changing_redirects [Boolean, nil] Whether to follow a
+      #   redirect that changes the HTTP method. Use nil for the configured default.
+      # @param redirect_strip_headers [String, Array<String>, nil] Header names (case
+      #   insensitive) to strip from redirected requests, in addition to the
+      #   configured names.
+      # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] The names of
+      #   the preprocessors that are registered on the configuration and that apply to
+      #   the request when it is sent.
+      # @param processor [String, Symbol, nil] The name of the processor that runs the
+      #   request.
+      # @return [Object] The return value from the registered request handler.
       def async_request(
         method,
         url,
@@ -216,11 +237,12 @@ module PatientHttp
         )
       end
 
-      # Returns the RequestTemplate defined for this class or its ancestors, or nil if none
-      # is defined. This allows subclasses to inherit the request template from their parent
-      # class if they don't define their own.
+      # Returns the {RequestTemplate} that is defined for this class or for one of its
+      # ancestors, or nil if no template is defined. A subclass that defines no
+      # template of its own therefore inherits the template of its parent class.
       #
-      # @return [RequestTemplate, nil] the request template for this class or its ancestors
+      # @return [RequestTemplate, nil] The request template for this class or for one
+      #   of its ancestors.
       # @api private
       def async_request_template
         return @patient_http_request_template if @patient_http_request_template
@@ -230,30 +252,35 @@ module PatientHttp
       end
     end
 
-    # Dispatches an asynchronous HTTP request from an instance context.
+    # Dispatches an asynchronous HTTP request from an instance.
     #
-    # This delegates to {.ClassMethods#async_request} on the including class.
+    # This method delegates to {ClassMethods#async_request} on the class that includes
+    # this module.
     #
-    # @param method [Symbol] HTTP method (`:get`, `:head`, `:post`, `:put`, `:patch`, `:delete`, `:query`)
-    # @param url [String] absolute URL or path (when using a request template)
-    # @param callback [Class, String] callback class to handle the response
-    # @param headers [Hash, nil] request headers
-    # @param body [String, nil] raw request body
-    # @param json [Hash, Array, nil] JSON payload encoded by the request layer
-    # @param params [Hash, nil] query parameters
-    # @param timeout [Numeric, nil] timeout in seconds for this request
-    # @param raise_error_responses [Boolean, nil] when true, non-success responses are
-    #   reported as errors
-    # @param callback_args [Hash, nil] JSON-compatible callback arguments
-    # @param follow_method_changing_redirects [Boolean, nil] whether to follow a redirect that changes the
-    #   HTTP method (nil uses the configuration default)
-    # @param redirect_strip_headers [String, Array<String>, nil] header names (case insensitive)
-    #   to strip from redirected requests, in addition to the configured names
-    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] names of preprocessors
-    #   registered on the configuration to apply to the request when it is sent
-    # @param processor [String, Symbol, nil] name of the processor that should execute
-    #   the request
-    # @return [Object] return value from the registered request handler
+    # @param method [Symbol] The HTTP method: `:get`, `:head`, `:post`, `:put`,
+    #   `:patch`, `:delete`, or `:query`.
+    # @param url [String] The absolute URL, or the path when you use a request
+    #   template.
+    # @param callback [Class, String] The callback class that handles the response.
+    # @param headers [Hash, nil] The request headers.
+    # @param body [String, nil] The raw request body.
+    # @param json [Hash, Array, nil] A JSON payload that the request layer encodes.
+    # @param params [Hash, nil] The query parameters.
+    # @param timeout [Numeric, nil] The timeout in seconds for this request.
+    # @param raise_error_responses [Boolean, nil] Whether to report non-success
+    #   responses as errors.
+    # @param callback_args [Hash, nil] JSON-compatible callback arguments.
+    # @param follow_method_changing_redirects [Boolean, nil] Whether to follow a
+    #   redirect that changes the HTTP method. Use nil for the configured default.
+    # @param redirect_strip_headers [String, Array<String>, nil] Header names (case
+    #   insensitive) to strip from redirected requests, in addition to the configured
+    #   names.
+    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] The names of
+    #   the preprocessors that are registered on the configuration and that apply to
+    #   the request when it is sent.
+    # @param processor [String, Symbol, nil] The name of the processor that runs the
+    #   request.
+    # @return [Object] The return value from the registered request handler.
     def async_request(
       method,
       url,
