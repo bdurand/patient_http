@@ -19,7 +19,7 @@ module PatientHttp
     class RedisStore < Base
       Base.register :redis, self
 
-      # @return [String] The key prefix used for all stored payloads
+      # @return [String] the key prefix used for all stored payloads
       attr_reader :key_prefix
 
       # @return [Float, nil] TTL in seconds for stored payloads
@@ -27,12 +27,13 @@ module PatientHttp
 
       # Initialize a new Redis store.
       #
-      # @param redis [Object] Redis client instance. Required.
-      # @param ttl [Float, nil] Time-to-live in seconds for stored payloads.
-      #   Supports fractional seconds (e.g., 0.5 for 500ms). If nil, payloads do not expire.
-      # @param key_prefix [String] Prefix for all Redis keys.
-      #   Defaults to "patient_http:payloads:"
-      # @raise [ArgumentError] If redis client is not provided
+      # @param redis [Object] Redis client instance (required)
+      # @param ttl [Float, nil] time-to-live in seconds for stored payloads. Fractional
+      #   seconds are supported (e.g., 0.5 for 500 milliseconds). If nil, payloads do
+      #   not expire.
+      # @param key_prefix [String] prefix for all Redis keys; defaults to
+      #   "patient_http:payloads:"
+      # @raise [ArgumentError] if the Redis client is not provided
       def initialize(redis:, ttl: nil, key_prefix: nil)
         raise ArgumentError, "redis client is required" unless redis
 
@@ -43,9 +44,9 @@ module PatientHttp
 
       # Store pre-serialized JSON string directly in Redis.
       #
-      # @param key [String] Unique key (appended to key_prefix)
-      # @param json [String] Pre-serialized JSON string
-      # @return [String] The key
+      # @param key [String] unique key (appended to key_prefix)
+      # @param json [String] pre-serialized JSON string
+      # @return [String] the key
       def store_json(key, json)
         full_key = key_with_prefix(key)
 
@@ -60,8 +61,8 @@ module PatientHttp
 
       # Fetch data from Redis.
       #
-      # @param key [String] The key to fetch
-      # @return [Hash, nil] The stored data or nil if not found
+      # @param key [String] the key to fetch
+      # @return [Hash, nil] the stored data or nil if not found
       def fetch(key)
         full_key = key_with_prefix(key)
         json = @redis.get(full_key)
@@ -72,9 +73,9 @@ module PatientHttp
 
       # Delete a payload from Redis.
       #
-      # Idempotent - does not raise if key doesn't exist.
+      # Idempotent—does not raise if key does not exist.
       #
-      # @param key [String] The key to delete
+      # @param key [String] the key to delete
       # @return [Boolean] true
       def delete(key)
         full_key = key_with_prefix(key)
@@ -82,9 +83,9 @@ module PatientHttp
         true
       end
 
-      # Check if a payload exists.
+      # Check whether a payload exists.
       #
-      # @param key [String] The key to check
+      # @param key [String] the key to check
       # @return [Boolean] true if the payload exists
       def exists?(key)
         full_key = key_with_prefix(key)

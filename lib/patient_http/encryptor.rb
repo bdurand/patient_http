@@ -9,19 +9,20 @@ module PatientHttp
   class Encryptor
     # Initialize a new Encryptor with optional encryption and decryption callables.
     #
-    # @param encryption [#call, nil] A callable object that takes data and returns encrypted data
-    # @param decryption [#call, nil] A callable object that takes encrypted data and returns decrypted data
+    # @param encryption [#call, nil] a callable object that takes data and returns encrypted data
+    # @param decryption [#call, nil] a callable object that takes encrypted data and returns
+    #   decrypted data
     def initialize(encryption: nil, decryption: nil)
       @encryption = encryption
       @decryption = decryption
     end
 
     # Encrypt data using the provided encryption callable. If no encryption callable is set,
-    # returns the original data.
+    # the original data is returned.
     #
-    # @param data [Hash] The data to be encrypted
-    # @return [Hash, nil] The encrypted data as a hash or the original data if no encryption callable is set
-    # @raise [JSON::GeneratorError] If the data cannot be serialized to JSON
+    # @param data [Hash] the data to be encrypted
+    # @return [Hash, nil] the encrypted data as a hash or the original data if no encryption callable is set
+    # @raise [JSON::GeneratorError] if the data cannot be serialized to JSON
     def encrypt(data)
       return nil if data.nil?
 
@@ -38,12 +39,12 @@ module PatientHttp
     end
 
     # Decrypt data using the provided decryption callable. If no decryption callable is set,
-    # or if the data is not marked as encrypted, returns the original data.
+    # or if the data is not marked as encrypted, the original data is returned.
     #
-    # @param data [Hash] The data to be decrypted
-    # @return [Hash, nil] The decrypted data as a hash or the original data if no decryption callable
+    # @param data [Hash] the data to be decrypted
+    # @return [Hash, nil] the decrypted data as a hash or the original data if no decryption callable
     #   is set or if data is not encrypted
-    # @raise [JSON::ParserError] If the decrypted data cannot be parsed as JSON
+    # @raise [JSON::ParserError] if the decrypted data cannot be parsed as JSON
     def decrypt(data)
       return nil if data.nil?
 

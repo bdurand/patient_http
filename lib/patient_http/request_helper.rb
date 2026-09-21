@@ -22,7 +22,7 @@ module PatientHttp
   # @example Register a handler
   #   PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
   #     # Dispatch the request through your app-specific task/enqueue operation
-  #     # and return the request id
+  #     # and return the request ID
   #   end
   #
   # @example Include in a class and enqueue requests
@@ -39,7 +39,7 @@ module PatientHttp
     extend self
 
     class << self
-      # Hooks helper behavior into the including class.
+      # Hook helper behavior into the including class.
       #
       # Extends the class with {.ClassMethods} and initializes template storage.
       #
@@ -52,7 +52,7 @@ module PatientHttp
     end
 
     module HttpMethodHelpers
-      # Enqueues an asynchronous HTTP GET request.
+      # Enqueue an asynchronous HTTP GET request.
       #
       # @param uri [String] absolute URL or path (when using a request template)
       # @param callback [Class, String] callback class to handle the response
@@ -62,7 +62,7 @@ module PatientHttp
         async_request(:get, uri, callback: callback, **kwargs)
       end
 
-      # Enqueues an asynchronous HTTP HEAD request.
+      # Enqueue an asynchronous HTTP HEAD request.
       #
       # @param uri [String] absolute URL or path (when using a request template)
       # @param callback [Class, String] callback class to handle the response
@@ -72,7 +72,7 @@ module PatientHttp
         async_request(:head, uri, callback: callback, **kwargs)
       end
 
-      # Enqueues an asynchronous HTTP POST request.
+      # Enqueue an asynchronous HTTP POST request.
       #
       # @param uri [String] absolute URL or path (when using a request template)
       # @param callback [Class, String] callback class to handle the response
@@ -82,7 +82,7 @@ module PatientHttp
         async_request(:post, uri, callback: callback, **kwargs)
       end
 
-      # Enqueues an asynchronous HTTP PUT request.
+      # Enqueue an asynchronous HTTP PUT request.
       #
       # @param uri [String] absolute URL or path (when using a request template)
       # @param callback [Class, String] callback class to handle the response
@@ -92,7 +92,7 @@ module PatientHttp
         async_request(:put, uri, callback: callback, **kwargs)
       end
 
-      # Enqueues an asynchronous HTTP PATCH request.
+      # Enqueue an asynchronous HTTP PATCH request.
       #
       # @param uri [String] absolute URL or path (when using a request template)
       # @param callback [Class, String] callback class to handle the response
@@ -102,7 +102,7 @@ module PatientHttp
         async_request(:patch, uri, callback: callback, **kwargs)
       end
 
-      # Enqueues an asynchronous HTTP DELETE request.
+      # Enqueue an asynchronous HTTP DELETE request.
       #
       # @param uri [String] absolute URL or path (when using a request template)
       # @param callback [Class, String] callback class to handle the response
@@ -112,7 +112,7 @@ module PatientHttp
         async_request(:delete, uri, callback: callback, **kwargs)
       end
 
-      # Enqueues an asynchronous HTTP QUERY request.
+      # Enqueue an asynchronous HTTP QUERY request.
       #
       # @param uri [String] absolute URL or path (when using a request template)
       # @param callback [Class, String] callback class to handle the response
@@ -126,7 +126,7 @@ module PatientHttp
     module ClassMethods
       include HttpMethodHelpers
 
-      # Defines a default request template for this class.
+      # Define a default request template for this class.
       #
       # Requests created with the helper methods merge these defaults unless explicitly overridden.
       #
@@ -149,7 +149,7 @@ module PatientHttp
         )
       end
 
-      # Builds and dispatches an asynchronous HTTP request.
+      # Build and dispatch an asynchronous HTTP request.
       #
       # When a request template is configured, the request is built from the template. Otherwise,
       # it is built directly from the provided arguments.
@@ -216,9 +216,9 @@ module PatientHttp
         )
       end
 
-      # Returns the RequestTemplate defined for this class or its ancestors, or nil if none
+      # Return the RequestTemplate defined for this class or its ancestors, or nil if none
       # is defined. This allows subclasses to inherit the request template from their parent
-      # class if they don't define their own.
+      # class if they do not define their own.
       #
       # @return [RequestTemplate, nil] the request template for this class or its ancestors
       # @api private
@@ -230,7 +230,7 @@ module PatientHttp
       end
     end
 
-    # Dispatches an asynchronous HTTP request from an instance context.
+    # Dispatch an asynchronous HTTP request from an instance context.
     #
     # This delegates to {.ClassMethods#async_request} on the including class.
     #

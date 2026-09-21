@@ -24,7 +24,7 @@ module PatientHttp
   # @example From a response object
   #   response.callback_args[:user_id]
   class CallbackArgs
-    # JSON-native types that are allowed as values
+    # JSON-native types that are allowed as values.
     ALLOWED_TYPES = [NilClass, TrueClass, FalseClass, String, Integer, Float].freeze
 
     class << self
@@ -81,9 +81,9 @@ module PatientHttp
 
     # Initialize a CallbackArgs with a hash.
     #
-    # @param args [Hash, nil] arguments to store (keys will be deeply converted to strings)
+    # @param args [Hash, nil] arguments to store (keys are deeply converted to strings)
     # @param validate [Boolean] whether to validate values are JSON-native types
-    # @raise [ArgumentError] if args is not nil and doesn't respond to to_h
+    # @raise [ArgumentError] if args is neither nil nor an object that responds to to_h
     # @raise [ArgumentError] if any value is not a JSON-native type (when validate is true)
     def initialize(args = nil, validate: true)
       if args.nil?
@@ -118,13 +118,13 @@ module PatientHttp
     # Access an argument by key with an optional default.
     #
     # @param key [String, Symbol] the key to access
-    # @param default [Object] the default value to return if key doesn't exist
+    # @param default [Object] the default value to return if the key does not exist
     # @return [Object] the value or default
     def fetch(key, default = nil)
       @data.fetch(key.to_s, default)
     end
 
-    # Check if a key exists.
+    # Check whether a key exists.
     #
     # @param key [String, Symbol] the key to check
     # @return [Boolean] true if the key exists
@@ -150,7 +150,7 @@ module PatientHttp
 
     alias_method :dump, :as_json
 
-    # Check if there are no arguments.
+    # Check whether the arguments are empty.
     #
     # @return [Boolean] true if empty
     def empty?

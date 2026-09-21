@@ -8,11 +8,11 @@ module PatientHttp
   module ClassHelper
     extend self
 
-    # Resolve a class from its name class name to the class object.
+    # Resolve a class name to the class object.
     #
     # @param class_name [String] the fully qualified class name
-    # @return [Class, nil] the class object or nil if no class_name given
-    # @raise [NameError] if class cannot be found
+    # @return [Class, nil] the class object, or nil if no class name was given
+    # @raise [NameError] if the class cannot be found
     def resolve_class_name(class_name)
       return class_name if class_name.is_a?(Class)
       return nil if class_name.nil? || class_name.empty?

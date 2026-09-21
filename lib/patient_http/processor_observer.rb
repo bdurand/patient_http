@@ -10,15 +10,15 @@ module PatientHttp
   #   (usually an application thread), and the reactor thread for each task
   #   created to follow a redirect. Work done in these hooks blocks the reactor
   #   for redirected requests, so keep it off the critical path or accept the
-  #   delay it adds to every other in-flight request
+  #   delay it adds to every other in-flight request.
   # - capacity_exceeded: the thread calling Processor#enqueue (usually an
-  #   application thread)
-  # - request_start: the reactor thread
+  #   application thread).
+  # - request_start: the reactor thread.
   # - request_end, request_error, completion_failed: a completion worker
   #   thread (request_end also fires on the reactor thread for followed
-  #   redirects, and on the stopping thread for shutdown re-enqueues)
-  # - request_requeued: the stopping thread or the reactor thread
-  # - start, stop: the thread calling Processor#start / Processor#stop
+  #   redirects, and on the stopping thread for shutdown re-enqueues).
+  # - request_requeued: the stopping thread or the reactor thread.
+  # - start, stop: the thread calling Processor#start or Processor#stop.
   #
   # Observers must be thread-safe. Hooks are called from several threads, and
   # the completion-time hooks run on any of the completion worker threads, so
@@ -49,7 +49,7 @@ module PatientHttp
     # Called when a request task is handed to the processor, before the task is
     # visible to the reactor. The notification is guaranteed to arrive before
     # request_start for the task, so observers can set up durable tracking
-    # (e.g. a crash-recovery registry entry) with no risk that the task
+    # (e.g., a crash-recovery registry entry) with no risk that the task
     # completes first. If the processor does not accept the task,
     # request_rejected is sent afterward. Unlike other notifications, an error
     # raised here propagates from Processor#enqueue and rejects the task, so a
@@ -103,9 +103,9 @@ module PatientHttp
     end
 
     # Called when a finished result could not be delivered to the task handler
-    # after all retries. request_end is NOT sent for the task, so durable
+    # after all retries. request_end is *not* sent for the task, so durable
     # tracking set up in request_enqueued stays in place and an external
-    # recovery process (e.g. an orphan collector) can re-enqueue the request.
+    # recovery process (e.g., an orphan collector) can re-enqueue the request.
     #
     # @param request_task [RequestTask] the request task whose result was not delivered
     # @param error [StandardError] the delivery failure

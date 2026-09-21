@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Helper module for time-related operations using monotonic and wall clock time.
+  # Helper module for time-related operations using monotonic and wall-clock time.
   #
   # This module provides utilities for accurate timing measurements that are immune
-  # to system clock changes, as well as conversion between monotonic and wall clock time.
+  # to system clock changes, as well as conversion between monotonic and wall-clock time.
   module TimeHelper
     extend self
 
@@ -17,10 +17,10 @@ module PatientHttp
       ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
     end
 
-    # Convert a monotonic timestamp to wall clock time.
+    # Convert a monotonic timestamp to wall-clock time.
     #
     # @param monotonic_timestamp [Float] monotonic timestamp to convert
-    # @return [Time] wall clock time corresponding to the monotonic timestamp
+    # @return [Time] wall-clock time corresponding to the monotonic timestamp
     def wall_clock_time(monotonic_timestamp)
       return nil unless monotonic_timestamp
 

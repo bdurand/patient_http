@@ -24,6 +24,7 @@ module PatientHttp
     end
 
     # Execute the request synchronously.
+    #
     # @return [void]
     def call
       Async do
@@ -59,7 +60,7 @@ module PatientHttp
 
               request = Protocol::HTTP::Request[verb, endpoint.path, **options]
               async_response = http_client.call(request)
-              # Note: headers that appear multiple times (e.g. set-cookie) are
+              # Note: headers that appear multiple times (e.g., set-cookie) are
               # flattened to a single joined string value.
               headers_hash = async_response.headers.to_h.transform_values(&:to_s)
 

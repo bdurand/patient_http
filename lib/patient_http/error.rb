@@ -10,7 +10,7 @@ module PatientHttp
       # @param hash [Hash] hash representation of the error
       # @return [Error] the reconstructed error
       def load(hash)
-        # Dispatch based on hash structure
+        # Dispatch based on the hash structure.
         if hash.key?("response")
           HttpError.load(hash)
         elsif hash.key?("redirects")
@@ -21,14 +21,14 @@ module PatientHttp
       end
     end
 
-    # Returns the error type symbol. Provided for compatibility with RequestError.
+    # Return the error type symbol. Provided for compatibility with RequestError.
     #
     # @return [Symbol] the error type
     def error_type
       :unknown
     end
 
-    # @return [String] Request URL
+    # @return [String] request URL
     def url
       raise NotImplementedError, "Subclasses must implement #url"
     end
@@ -38,12 +38,12 @@ module PatientHttp
       raise NotImplementedError, "Subclasses must implement #http_method"
     end
 
-    # @return [Float] Request duration in seconds
+    # @return [Float] request duration in seconds
     def duration
       raise NotImplementedError, "Subclasses must implement #duration"
     end
 
-    # @return [String] Unique request identifier
+    # @return [String] unique request identifier
     def request_id
       raise NotImplementedError, "Subclasses must implement #request_id"
     end

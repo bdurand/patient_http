@@ -30,11 +30,12 @@ module PatientHttp
     # @return [Symbol] HTTP method
     attr_reader :http_method
 
-    # @return [Array<String>] URLs visited during redirect chain (empty if no redirects)
+    # @return [Array<String>] URLs visited during the redirect chain (empty if there were
+    #   no redirects)
     attr_reader :redirects
 
     class << self
-      # Reconstruct a Response from a hash
+      # Reconstruct a Response from a hash.
       #
       # @param hash [Hash] hash representation
       # @return [Response] reconstructed response
@@ -53,7 +54,7 @@ module PatientHttp
       end
     end
 
-    # Initialize a Response from an Async::HTTP::Response
+    # Initialize a Response from an Async::HTTP::Response.
     #
     # @param status [Integer] HTTP status code
     # @param headers [Hash, HttpHeaders] response headers
@@ -63,7 +64,7 @@ module PatientHttp
     # @param url [String] the request URL
     # @param http_method [Symbol] the HTTP method
     # @param callback_args [Hash, nil] callback arguments (string keys)
-    # @param redirects [Array<String>, nil] URLs visited during redirect chain
+    # @param redirects [Array<String>, nil] URLs visited during the redirect chain
     def initialize(status:, headers:, body:, duration:, request_id:, url:, http_method:, callback_args: nil, redirects: nil)
       @status = status
       @headers = HttpHeaders.new(headers)
@@ -80,57 +81,57 @@ module PatientHttp
       @redirects = redirects || []
     end
 
-    # Returns the callback arguments as a CallbackArgs object.
+    # Return the callback arguments as a CallbackArgs object.
     #
     # @return [CallbackArgs] the callback arguments
     def callback_args
       @callback_args ||= CallbackArgs.load(@callback_args_data)
     end
 
-    # Returns the response body, decoding it from the payload if necessary.
+    # Return the response body, decoding it from the payload if necessary.
     #
-    # @return [String, nil] The decoded response body or nil if there was no body.
+    # @return [String, nil] the decoded response body or nil if there was no body
     def body
       @body = @payload&.value if @body.equal?(UNDEFINED)
       @body
     end
 
-    # Check if response is successful (2xx status)
+    # Check whether the response is successful (2xx status).
     #
     # @return [Boolean]
     def success?
       status >= 200 && status < 300
     end
 
-    # Check if response is a redirect (3xx status)
+    # Check whether the response is a redirect (3xx status).
     #
     # @return [Boolean]
     def redirect?
       status >= 300 && status < 400
     end
 
-    # Check if response is a client error (4xx status)
+    # Check whether the response is a client error (4xx status).
     #
     # @return [Boolean]
     def client_error?
       status >= 400 && status < 500
     end
 
-    # Check if response is a server error (5xx status)
+    # Check whether the response is a server error (5xx status).
     #
     # @return [Boolean]
     def server_error?
       status >= 500 && status < 600
     end
 
-    # Check if response is any error (4xx or 5xx status)
+    # Check whether the response is any error (4xx or 5xx status).
     #
     # @return [Boolean]
     def error?
       status >= 400 && status < 600
     end
 
-    # Get the Content-Type header
+    # Get the Content-Type header.
     #
     # @return [String, nil]
     def content_type
@@ -145,7 +146,7 @@ module PatientHttp
       type.match?(%r{\Aapplication/[^ ]*json\b}) || type == "text/json"
     end
 
-    # Parse response body as JSON
+    # Parse response body as JSON.
     #
     # @return [Hash, Array] parsed JSON
     # @raise [RuntimeError] if Content-Type is not application/json

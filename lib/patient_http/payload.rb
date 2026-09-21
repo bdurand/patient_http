@@ -16,7 +16,7 @@ module PatientHttp
     attr_reader :charset
 
     class << self
-      # Reconstructs a Payload from a hash representation.
+      # Reconstruct a Payload from a hash representation.
       #
       # @param hash [Hash, nil] hash with "encoding" and "value" keys
       # @return [Payload, nil] reconstructed payload or nil if hash is invalid
@@ -26,10 +26,10 @@ module PatientHttp
         new(hash["encoding"].to_sym, hash["value"], hash["charset"])
       end
 
-      # Encodes a value based on its MIME type.
+      # Encode a value based on its MIME type.
       #
-      # For text-based content types, applies gzip compression if beneficial.
-      # For binary content, uses Base64 encoding. A value that a text MIME type
+      # Text-based content types are gzip compressed when that makes them smaller,
+      # and binary content is Base64 encoded. A value that a text MIME type
       # claims is text but that does not hold text is encoded as binary as
       # well, because the serialized form must survive JSON encoding.
       #
@@ -47,7 +47,7 @@ module PatientHttp
         [:binary, [value].pack("m0"), Encoding::BINARY.name]
       end
 
-      # Decodes an encoded value based on its encoding type.
+      # Decode an encoded value based on its encoding type.
       #
       # @param encoded_value [String] the encoded data
       # @param encoding [Symbol] the encoding type (:text, :binary, :gzipped)
@@ -148,7 +148,7 @@ module PatientHttp
       end
     end
 
-    # Initializes a new Payload.
+    # Initialize a new Payload.
     #
     # @param encoding [Symbol] the encoding type
     # @param encoded_value [String] the encoded data
@@ -159,14 +159,14 @@ module PatientHttp
       @charset = charset
     end
 
-    # Returns the decoded value.
+    # Return the decoded value.
     #
     # @return [String, nil] the decoded data
     def value
       self.class.decode(encoded_value, encoding, charset)
     end
 
-    # Converts to a hash representation for serialization.
+    # Convert to a hash representation for serialization.
     #
     # @return [Hash] hash with "encoding" and "value" keys
     def as_json

@@ -37,7 +37,7 @@ module PatientHttp
 
         Async::Task.current.with_timeout(timeout) do
           async_response = @client_pool.request(request.http_method, url, headers, body)
-          # Note: headers that appear multiple times (e.g. set-cookie) are
+          # Note: headers that appear multiple times (e.g., set-cookie) are
           # flattened to a single joined string value.
           headers_hash = async_response.headers.to_h.transform_values(&:to_s)
           body = @response_reader.read_raw_body(async_response, headers_hash)

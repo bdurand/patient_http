@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # The RequestTemplate is used to build HTTP requests with shared configuration.
+  # Builds HTTP requests that share a common configuration.
   #
   # Use RequestTemplate when you need to make multiple requests to the same API with shared
   # configuration (base URL, headers, timeout).
@@ -17,24 +17,24 @@ module PatientHttp
   # The RequestTemplate handles building HTTP requests with proper URL joining, header merging,
   # and parameter encoding.
   class RequestTemplate
-    # @return [String, URI::HTTP, nil] Base URL for relative URIs
+    # @return [String, URI::HTTP, nil] base URL for relative URIs
     attr_accessor :base_url
 
-    # @return [HttpHeaders] Default headers for all requests
+    # @return [HttpHeaders] default headers for all requests
     attr_accessor :headers
 
-    # @return [Float] Default request timeout in seconds
+    # @return [Float] default request timeout in seconds
     attr_accessor :timeout
 
-    # Initializes a new RequestTemplate.
+    # Initialize a new RequestTemplate.
     #
-    # @param base_url [String, URI::HTTP, nil] Base URL for relative URIs
-    # @param headers [Hash] Default headers for all requests
-    # @param params [Hash, nil] Default query parameters to add to all requests
-    # @param timeout [Float] Default request timeout in seconds
-    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] Default preprocessors
+    # @param base_url [String, URI::HTTP, nil] base URL for relative URIs
+    # @param headers [Hash] default headers for all requests
+    # @param params [Hash, nil] default query parameters to add to all requests
+    # @param timeout [Float] default request timeout in seconds
+    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] default preprocessors
     #   to apply to all requests
-    # @param processor [String, Symbol, nil] Default processor name for all requests
+    # @param processor [String, Symbol, nil] default processor name for all requests
     def initialize(base_url: nil, headers: {}, params: nil, timeout: 30, preprocessors: nil, processor: nil)
       @base_url = base_url
       @headers = HttpHeaders.new(headers)
@@ -44,14 +44,14 @@ module PatientHttp
       @processor = processor
     end
 
-    # Build an async HTTP request. Returns a Request object.
+    # Build an async HTTP request.
     #
     # @param method [Symbol] HTTP method (:get, :head, :post, :put, :patch, :delete, :query)
     # @param uri [String, URI::HTTP] URI path to request (joined with base_url if relative)
     # @param body [String, nil] request body
     # @param json [Object, nil] JSON object to serialize (cannot use with body)
     # @param headers [Hash] additional headers to merge with client headers
-    # @param params [Hash, nil] query parameters to add to URL
+    # @param params [Hash, nil] query parameters to add to the URL
     # @param timeout [Numeric, nil] request timeout in seconds (overrides the template default)
     # @param follow_method_changing_redirects [Boolean, nil] whether to follow a redirect that changes the
     #   HTTP method (nil uses the configuration default)
@@ -80,7 +80,7 @@ module PatientHttp
       merged_headers = headers&.any? ? @headers.merge(headers) : @headers
       merged_params = @params ? (@params.merge(params || {})) : params
 
-      # Create request with all parameters
+      # Create the request with all parameters.
       Request.new(
         method,
         full_uri.to_s,

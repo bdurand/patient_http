@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Core processor that handles async HTTP requests in a dedicated thread
+  # Core processor that handles async HTTP requests in a dedicated thread.
   class Processor
     include TimeHelper
     include RedirectHelper
 
-    # Timing constants for the reactor loop
+    # Timing constants for the reactor loop.
     DEQUEUE_TIMEOUT = 1.0 # Seconds to wait when dequeueing requests
 
     # Base delay between attempts when delivering a completed result fails.
@@ -26,6 +26,7 @@ module PatientHttp
     attr_reader :name
 
     # Callback to invoke after each request. Only available in testing mode.
+    #
     # @api private
     attr_accessor :testing_callback
 
@@ -51,7 +52,7 @@ module PatientHttp
       @pending_tasks = Concurrent::Hash.new
       # Tasks pushed onto @queue but not yet popped by the reactor. Kept in a
       # hash because Thread::Queue cannot be enumerated; used to report all
-      # tracked task ids (e.g. for heartbeat updates on queued tasks).
+      # tracked task ids (e.g., for heartbeat updates on queued tasks).
       @queued_tasks = Concurrent::Hash.new
       @tasks_lock = Mutex.new
       @idle_condition = ConditionVariable.new
@@ -68,7 +69,7 @@ module PatientHttp
       observers_to_notify = nil
 
       # Hold the lifecycle mutex across the whole start so a concurrent stop
-      # cannot interleave with (and reap) the reactor thread we are creating.
+      # cannot interleave with (and reap) the reactor thread being created.
       @lifecycle_mutex.synchronize do
         # Claim this reactor run's generation atomically with the state
         # transition. The reactor thread captures it below and its teardown
@@ -100,7 +101,7 @@ module PatientHttp
         ensure
           # Mark the processor stopped when the reactor exits and re-enqueue any
           # tasks still being tracked, so a reactor that exits without a stop()
-          # call (e.g. an unhandled error) does not lose in-flight/pending
+          # call (e.g., an unhandled error) does not lose in-flight/pending
           # requests or leak stale tracking entries into a later run.
           #
           # Only act while this is still the current generation: a newer start
@@ -147,7 +148,7 @@ module PatientHttp
         end
         observers_to_notify = observers if started
 
-        # Block until the reactor is ready
+        # Block until the reactor is ready.
         @lifecycle.wait_for_reactor(timeout: 5)
       end
 
@@ -165,22 +166,22 @@ module PatientHttp
       should_notify_stop = false
 
       # Hold the lifecycle mutex across the whole stop so a concurrent start
-      # cannot begin (and reassign @reactor_thread) while we are tearing down.
+      # cannot begin (and reassign @reactor_thread) during the teardown.
       @lifecycle_mutex.synchronize do
         # Atomically transition to stopping and capture the reactor thread for
         # this run. Joining/killing the captured reference rather than the ivar
-        # means we can never tear down a reactor from a different run.
+        # means a reactor from a different run can never be torn down.
         reactor = @tasks_lock.synchronize do
           return unless @lifecycle.stop!
           @reactor_thread
         end
 
-        # Interrupt the reactor's queue wait by pushing a sentinel value
+        # Interrupt the reactor's queue wait by pushing a sentinel value.
         @queue.push(nil)
 
         # Wait for in-flight and pending requests to complete, including
         # results still being delivered by the completion executor.
-        # Queue items are not checked here — they will be re-enqueued by
+        # Queue items are not checked here—they will be re-enqueued by
         # reenqueue_remaining_queue_items after the reactor thread exits.
         if timeout > 0
           deadline = monotonic_time + timeout
@@ -196,8 +197,8 @@ module PatientHttp
 
         reenqueue_pending_requests
 
-        # Reap the reactor thread — unless stop was called from the reactor
-        # thread itself (e.g. from a task callback or observer), where joining
+        # Reap the reactor thread—unless stop was called from the reactor
+        # thread itself (e.g., from a task callback or observer), where joining
         # the current thread would raise ThreadError. In that case the reactor
         # exits on its own once the callback returns (its loop sees the stopped
         # state) and its ensure block performs the same cleanup.
@@ -257,8 +258,8 @@ module PatientHttp
     # Enqueue a request task for processing.
     #
     # @param task [RequestTask] the request task to enqueue
-    # @raise [NotRunningError] if processor is not running
-    # @raise [MaxCapacityError] if at max capacity
+    # @raise [NotRunningError] if the processor is not running
+    # @raise [MaxCapacityError] if the processor is at max capacity
     # @return [void]
     def enqueue(task)
       raise NotRunningError.new("Cannot enqueue request: processor is #{state}") unless running?
@@ -268,7 +269,7 @@ module PatientHttp
         # the lock since observers were notified outside of it.
         raise NotRunningError.new("Cannot enqueue request: processor is #{state}") unless running?
 
-        # Check capacity - the task is only accepted below max connections.
+        # Check capacity—the task is accepted only below max connections.
         @queue.size + @pending_tasks.size + @inflight_requests.size < @config.max_connections
       end
 
@@ -285,49 +286,49 @@ module PatientHttp
       @lifecycle.state
     end
 
-    # Check if processor is starting.
+    # Check whether the processor is starting.
     #
     # @return [Boolean]
     def starting?
       @lifecycle.starting?
     end
 
-    # Check if processor is running.
+    # Check whether the processor is running.
     #
     # @return [Boolean]
     def running?
       @lifecycle.running?
     end
 
-    # Check if processor is stopped.
+    # Check whether the processor is stopped.
     #
     # @return [Boolean]
     def stopped?
       @lifecycle.stopped?
     end
 
-    # Check if processor is draining.
+    # Check whether the processor is draining.
     #
     # @return [Boolean]
     def draining?
       @lifecycle.draining?
     end
 
-    # Check if processor is drained (draining and idle).
+    # Check whether the processor is drained (draining and idle).
     #
     # @return [Boolean]
     def drained?
       @lifecycle.draining? && idle?
     end
 
-    # Check if processor is stopping.
+    # Check whether the processor is stopping.
     #
     # @return [Boolean]
     def stopping?
       @lifecycle.stopping?
     end
 
-    # Check if processor is idle (no queued or in-flight requests, and no
+    # Check whether the processor is idle (no queued or in-flight requests, and no
     # results still being delivered by the completion executor).
     #
     # @return [Boolean]
@@ -340,8 +341,8 @@ module PatientHttp
       tracking_empty && (executor.nil? || executor.idle?)
     end
 
-    # Check how many more requests the processor can accept before reaching
-    # max capacity. This is an advisory value: the authoritative check happens
+    # Get the number of additional requests the processor can accept before
+    # reaching max capacity. This is an advisory value: the authoritative check happens
     # inside {#enqueue}, so a concurrent enqueue can still hit
     # {MaxCapacityError}. It performs no observer notifications and no durable
     # registration, so it is cheap to call before paying enqueue costs.
@@ -354,7 +355,7 @@ module PatientHttp
       end
     end
 
-    # Check if the processor can accept at least one more request. Advisory
+    # Check whether the processor can accept at least one more request. Advisory
     # only; see {#remaining_capacity}.
     #
     # @return [Boolean]
@@ -393,7 +394,7 @@ module PatientHttp
     end
 
     # Get the IDs of all tasks in the pipeline (queued, pending, and in-flight).
-    # Use this to keep durable tracking (e.g. heartbeats) alive for tasks the
+    # Use this to keep durable tracking (e.g., heartbeats) alive for tasks the
     # processor has accepted but not yet started.
     #
     # @return [Array<String>]
@@ -484,29 +485,30 @@ module PatientHttp
     # @return [void]
     def run_reactor
       Async do |task|
-        # Signal that the reactor is ready
+        # Signal that the reactor is ready.
         @lifecycle.reactor_ready!
 
         @config.logger&.info("[PatientHttp] Processor started")
 
-        # Main loop: monitor shutdown/drain and process requests
+        # Main loop: monitor shutdown and drain states, and process requests.
         loop do
           break if stopping? || stopped?
 
-          # Pop request task from queue with timeout to periodically check shutdown
+          # Pop a request task from the queue with a timeout so shutdown is
+          # checked periodically.
           request_task = dequeue_request(timeout: DEQUEUE_TIMEOUT)
           next unless request_task
 
-          # Track as pending immediately to avoid race condition with stop()
+          # Track as pending immediately to avoid a race condition with stop().
           @tasks_lock.synchronize do
             @queued_tasks.delete(request_task.id)
             @pending_tasks[request_task.id] = request_task
           end
 
-          # If we've dequeued a task, we must process it even if stopping
-          # to avoid losing the request (shutdown will handle re-enqueuing if incomplete)
+          # A dequeued task must be processed even while stopping so the request is
+          # not lost; shutdown re-enqueues it if it is incomplete.
 
-          # Spawn a new fiber to process this request task
+          # Spawn a new fiber to process this request task.
           task.async do
             process_request(request_task)
           rescue => e
@@ -545,7 +547,7 @@ module PatientHttp
         #
         # Note: on Ruby < 3.2.7 / < 3.3.7, stopping a gardener still logs a
         # spurious (harmless) ThreadError: "Attempt to unlock a mutex which is
-        # not locked" — a fiber interrupted in ConditionVariable#wait fails to
+        # not locked"—a fiber interrupted in ConditionVariable#wait fails to
         # re-acquire its mutex (https://bugs.ruby-lang.org/issues/20907, fixed
         # in Ruby 3.2.7+, 3.3.7+, and 3.4+).
         begin
@@ -563,7 +565,7 @@ module PatientHttp
     def dequeue_request(timeout:)
       @queue.pop(timeout: timeout)
     rescue ThreadError
-      # Queue is empty and timeout expired
+      # The queue is empty and the timeout expired.
       nil
     end
 
@@ -574,7 +576,7 @@ module PatientHttp
     def process_request(task)
       # Move from pending to in-flight tracking. If the shutdown deadline has
       # already passed, the shutdown sequence re-enqueues the task, so leave
-      # it in pending tracking and don't execute it.
+      # it in pending tracking and do not execute it.
       @tasks_lock.synchronize do
         return if stopped?
 
@@ -632,8 +634,8 @@ module PatientHttp
 
     # Deliver a finished result on a completion worker thread: decode the
     # response, claim the task, run the result callbacks, and notify
-    # observers. When delivery fails after all retries, request_end is NOT
-    # fired so durable tracking (crash-recovery records) stays in place and
+    # observers. When delivery fails after all retries, request_end is *not*
+    # fired, so durable tracking (crash-recovery records) stays in place and
     # the request can be recovered instead of silently lost.
     #
     # @param task [RequestTask] the request task
@@ -816,7 +818,7 @@ module PatientHttp
           !@inflight_requests.delete(task.id).nil?
         end
       rescue => e
-        # The redirect could not be registered (e.g. durable tracking setup
+        # The redirect could not be registered (e.g., durable tracking setup
         # failed). Deliver the failure as the original task's result.
         dispatch_completion(task, error: e)
         return
@@ -948,7 +950,7 @@ module PatientHttp
       @inflight_requests.clear
       @pending_tasks.clear
       # Wake any stop() thread blocked on the idle condition. Without this, a
-      # reactor-side drain (e.g. after a crash during shutdown) would clear the
+      # reactor-side drain (e.g., after a crash during shutdown) would clear the
       # tracking hashes without signalling, leaving stop() asleep until its
       # full timeout elapses.
       @idle_condition.broadcast
@@ -990,7 +992,7 @@ module PatientHttp
         # successful retry so a failed retry leaves the tracking in place.
         notify_observers { |observer| observer.request_requeued(task) }
         # Only emit request_end for tasks that actually started, so observers
-        # that pair request_start/request_end (e.g. an in-flight gauge) stay
+        # that pair request_start/request_end (e.g., an in-flight gauge) stay
         # balanced. Queued-but-never-started tasks emit neither.
         notify_observers { |observer| observer.request_end(task) } if task.started?
 

@@ -20,16 +20,16 @@ module PatientHttp
   #     external_storage.delete(data)
   #   end
   class ExternalStorage
-    # Key used in serialized JSON to indicate an external storage reference
+    # Key used in serialized JSON to indicate an external storage reference.
     REFERENCE_KEY = "$ref"
 
     class PayloadStoreNotFoundError < StandardError; end
     class PayloadNotFoundError < StandardError; end
 
     class << self
-      # Check if a hash is a storage reference.
+      # Check whether a hash is a storage reference.
       #
-      # @param data [Hash, Object] Data to check
+      # @param data [Hash, Object] data to check
       # @return [Boolean] true if this is a reference to external storage
       def storage_ref?(data)
         data.is_a?(Hash) && data.key?(REFERENCE_KEY)
@@ -46,15 +46,15 @@ module PatientHttp
       @config = config
     end
 
-    # Check if a hash is a storage reference.
+    # Check whether a hash is a storage reference.
     #
-    # @param data [Hash, Object] Data to check
+    # @param data [Hash, Object] data to check
     # @return [Boolean] true if this is a reference to external storage
     def storage_ref?(data)
       self.class.storage_ref?(data)
     end
 
-    # Check if external storage is enabled (i.e. a payload store is configured).
+    # Check whether external storage is enabled (i.e., a payload store is configured).
     #
     # @return [Boolean] true if external storage is configured
     def enabled?
@@ -63,16 +63,15 @@ module PatientHttp
 
     # Store a hash externally if it exceeds the configured threshold.
     #
-    # If no payload store is configured, or if the hash is below the
-    # threshold, the original hash is returned unchanged.
+    # If the serialized hash is below the threshold, the original hash is
+    # returned unchanged.
     #
-    # @param data [Hash] Hash to potentially store
-    # @param max_size [Integer, nil] Optional payload size threshold in bytes.
-    #   The JSON payload will only be stored externally if it exceeds this size.
-    #   If the JSON payload does not exceed the threshold, the original hash is returned.
-    #   When nil (the default), the payload is always stored externally.
-    # @return [Hash] Reference hash if stored, original hash if not
-    # @raise [PayloadStoreNotFoundError] If no payload store is configured
+    # @param data [Hash] the hash to store
+    # @param max_size [Integer, nil] optional payload size threshold in bytes. The hash is
+    #   stored externally only if its JSON exceeds this size; otherwise the original hash
+    #   is returned. When nil (the default), the payload is always stored externally.
+    # @return [Hash] reference hash if stored, original hash if not
+    # @raise [PayloadStoreNotFoundError] if no payload store is configured
     def store(data, max_size: nil)
       store = config.payload_store
       raise PayloadStoreNotFoundError.new("No payload store configured") unless store
@@ -93,10 +92,10 @@ module PatientHttp
 
     # Fetch a hash from external storage.
     #
-    # @param data [Hash] Reference hash containing storage location
-    # @return [Hash] Original hash from storage
-    # @raise [PayloadStoreNotFoundError] If the store is not registered
-    # @raise [PayloadNotFoundError] If the stored payload is not found
+    # @param data [Hash] reference hash containing storage location
+    # @return [Hash] original hash from storage
+    # @raise [PayloadStoreNotFoundError] if the store is not registered
+    # @raise [PayloadNotFoundError] if the stored payload is not found
     def fetch(data)
       raise ArgumentError.new("Not a storage reference") unless self.class.storage_ref?(data)
 
@@ -115,10 +114,10 @@ module PatientHttp
 
     # Delete payload from external storage.
     #
-    # This method is idempotent - it's safe to call on non-reference hashes,
-    # already-deleted payloads, or nil values.
+    # This method is idempotent—it is safe to call on non-reference hashes,
+    # already deleted payloads, or nil values.
     #
-    # @param data [Hash, nil] Reference hash (or regular hash, which is ignored)
+    # @param data [Hash, nil] reference hash (or regular hash, which is ignored)
     # @return [void]
     def delete(data)
       return unless data && self.class.storage_ref?(data)

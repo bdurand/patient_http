@@ -4,8 +4,8 @@ module PatientHttp
   # Reads and decodes HTTP response bodies.
   #
   # Reading happens on the reactor thread and collects the raw (possibly
-  # compressed) body chunks with size validation. Decoding — joining the
-  # chunks, inflating compressed content, and applying the charset — is a
+  # compressed) body chunks with size validation. Decoding—joining the
+  # chunks, inflating compressed content, and applying the charset—is a
   # separate step so it can run on a completion worker thread instead of
   # blocking the event loop.
   class ResponseReader
@@ -222,7 +222,7 @@ module PatientHttp
       @config.logger
     end
 
-    # Validate content-length header doesn't exceed max size.
+    # Validate that the content-length header does not exceed the maximum size.
     #
     # @param headers_hash [Hash] the response headers
     # @raise [ResponseTooLargeError] if content-length exceeds max_response_size
@@ -271,8 +271,8 @@ module PatientHttp
 
         chunks
       ensure
-        # Always close the body if we were interrupted or if an error occurred
-        # This ensures the connection is properly released back to the pool
+        # Always close the body if the read was interrupted or an error occurred.
+        # This releases the connection back to the pool.
         async_response.body.close unless finished
       end
     end
@@ -281,7 +281,7 @@ module PatientHttp
     # small compressed body cannot expand past max_response_size.
     #
     # @param chunks [Array<String>] the raw compressed chunks
-    # @param window_bits [Integer] Zlib window bits for the content encoding
+    # @param window_bits [Integer] zlib window bits for the content encoding
     # @return [String] the inflated body
     # @raise [ResponseTooLargeError] if the inflated size exceeds max_response_size
     def inflate_chunks(chunks, window_bits)

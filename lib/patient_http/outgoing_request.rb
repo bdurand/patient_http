@@ -6,7 +6,7 @@ module PatientHttp
   # user-agent) have been set.
   #
   # Preprocessors attached to a request receive this object and can modify the
-  # headers or append query parameters before the request goes out -- for example,
+  # headers or append query parameters before the request goes out—for example,
   # to sign the request. The HTTP method, URL, and body are read-only; headers can
   # be changed in place and query parameters appended with {#add_param}.
   #

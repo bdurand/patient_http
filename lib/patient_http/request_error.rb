@@ -1,33 +1,33 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Error object representing an exception from making an HTTP request. Note that this
-  # is not for HTTP error responses (4xx/5xx), but from actual exceptions raised
-  # during the request (timeouts, connection errors, SSL errors, etc).
+  # Error object representing an exception raised while making an HTTP request. It does
+  # not represent an HTTP error response (4xx or 5xx); it represents an exception raised
+  # during the request, such as a timeout, a connection error, or an SSL error.
   #
   # This is how errors are passed back to the error continuation jobs for processing.
   class RequestError < Error
-    # Valid error types
+    # Valid error types.
     ERROR_TYPES = [:timeout, :connection, :ssl, :response_too_large, :unknown].freeze
 
-    # @return [String] Request URL
+    # @return [String] request URL
     attr_reader :url
 
     # @return [Symbol] HTTP method
     attr_reader :http_method
 
-    # @return [Float] Request duration in seconds
+    # @return [Float] request duration in seconds
     attr_reader :duration
 
-    # @return [String] Unique request identifier
+    # @return [String] unique request identifier
     attr_reader :request_id
 
-    # @return [Symbol] Categorized error type. This provides a higher level categorization
-    # of the error (e.g., :connection is used to group IO and socket errors).
+    # @return [Symbol] categorized error type. This is a higher-level categorization
+    #   of the error (e.g., :connection groups IO and socket errors).
     attr_reader :error_type
 
     class << self
-      # Reconstruct a RequestError from a hash
+      # Reconstruct a RequestError from a hash.
       #
       # @param hash [Hash] hash representation
       # @return [RequestError] reconstructed error
@@ -45,7 +45,7 @@ module PatientHttp
         )
       end
 
-      # Create a RequestError from an exception using pattern matching
+      # Create a RequestError from an exception using pattern matching.
       #
       # @param exception [Exception] the exception to convert
       # @param duration [Float] request duration in seconds
@@ -92,15 +92,15 @@ module PatientHttp
       end
     end
 
-    # Initializes a new RequestError.
+    # Initialize a new RequestError.
     #
-    # @param class_name [String] Name of the exception class
-    # @param message [String] Exception message
-    # @param backtrace [Array<String>] Exception backtrace
-    # @param error_type [Symbol] Categorized error type
-    # @param duration [Float] Request duration in seconds
-    # @param request_id [String] Unique request identifier
-    # @param url [String] Request URL
+    # @param class_name [String] name of the exception class
+    # @param message [String] exception message
+    # @param backtrace [Array<String>] exception backtrace
+    # @param error_type [Symbol] categorized error type
+    # @param duration [Float] request duration in seconds
+    # @param request_id [String] unique request identifier
+    # @param url [String] request URL
     # @param http_method [Symbol, String] HTTP method
     # @param callback_args [Hash, nil] callback arguments (string keys)
     def initialize(class_name:, message:, backtrace:, error_type:, duration:, request_id:, url:, http_method:,
@@ -116,7 +116,7 @@ module PatientHttp
       @callback_args_data = callback_args || {}
     end
 
-    # Convert to hash with string keys for serialization
+    # Convert to hash with string keys for serialization.
     #
     # @return [Hash] hash representation
     def as_json
@@ -133,14 +133,14 @@ module PatientHttp
       }
     end
 
-    # Get the actual Exception class constant from the class_name
+    # Get the Exception class constant named by class_name.
     #
     # @return [Class, nil] the exception class or nil if not found
     def error_class
       ClassHelper.resolve_class_name(@class_name)
     end
 
-    # Returns the callback arguments as a CallbackArgs object.
+    # Return the callback arguments as a CallbackArgs object.
     #
     # @return [CallbackArgs] the callback arguments
     def callback_args

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Represents an async HTTP request that will be processed by the async processor.
+  # Represents an async HTTP request that the processor sends.
   #
   # @example Creating a request
   #   request = PatientHttp::Request.new(:get, "https://api.example.com/users/123")
@@ -16,50 +16,50 @@ module PatientHttp
     UNDEFINED = Object.new.freeze
     private_constant :UNDEFINED
 
-    # Valid HTTP methods
+    # Valid HTTP methods.
     VALID_METHODS = %i[get head post put patch delete query].freeze
 
-    # HTTP methods that must not carry a request body
+    # HTTP methods that must not carry a request body.
     BODYLESS_METHODS = %i[get head delete].freeze
 
     # @return [Symbol] HTTP method (:get, :head, :post, :put, :patch, :delete, :query)
     attr_reader :http_method
 
-    # @return [String] The request URL
+    # @return [String] the request URL
     attr_reader :url
 
-    # @return [HttpHeaders] Request headers
+    # @return [HttpHeaders] request headers
     attr_reader :headers
 
-    # @return [Numeric, nil] Overall timeout in seconds
+    # @return [Numeric, nil] overall timeout in seconds
     attr_reader :timeout
 
-    # @return [Integer, nil] Maximum number of redirects to follow (nil uses config default, 0 disables)
+    # @return [Integer, nil] maximum number of redirects to follow (nil uses config default, 0 disables)
     attr_reader :max_redirects
 
-    # @return [Boolean, nil] Whether a redirect that requires changing the HTTP method
+    # @return [Boolean, nil] whether a redirect that requires changing the HTTP method
     #   (for example POST to GET on a 302) may be followed (nil uses config default)
     attr_reader :follow_method_changing_redirects
 
-    # @return [Array<String>] Lowercase header names stripped from redirected requests,
+    # @return [Array<String>] lowercase header names stripped from redirected requests,
     #   in addition to those configured on the {Configuration}
     attr_reader :redirect_strip_headers
 
-    # @return [Hash{String, Symbol => SecretReference}] Query parameters whose values are
+    # @return [Hash{String, Symbol => SecretReference}] query parameters whose values are
     #   secret references, kept out of the serialized URL and resolved at send time
     attr_reader :secret_params
 
-    # @return [Array<String>] Names of preprocessors registered on the configuration
+    # @return [Array<String>] names of preprocessors registered on the configuration
     #   to apply to the request when it is sent
     attr_reader :preprocessors
 
-    # @return [String, nil] Name of the processor that should execute the request.
+    # @return [String, nil] name of the processor that should execute the request.
     #   Integrations use this to route the request to a named processor; nil
     #   uses the default processor.
     attr_reader :processor
 
     class << self
-      # Reconstruct a Request from a hash
+      # Reconstruct a Request from a hash.
       #
       # @param hash [Hash] hash representation
       # @return [Request] reconstructed request
@@ -98,25 +98,25 @@ module PatientHttp
       end
     end
 
-    # Initializes a new Request.
+    # Initialize a new Request.
     #
-    # @param http_method [Symbol, String] HTTP method (:get, :head, :post, :put, :patch, :delete, :query).
-    # @param url [String, URI::Generic] The request URL.
-    # @param headers [Hash, HttpHeaders] Request headers.
-    # @param body [String, nil] Request body.
-    # @param json [Object, nil] JSON body to be serialized (alternative to body).
-    # @param params [Hash, nil] Query parameters to append to the URL.
-    # @param timeout [Numeric, nil] Overall timeout in seconds.
-    # @param max_redirects [Integer, nil] Maximum redirects to follow (nil uses config, 0 disables).
-    # @param follow_method_changing_redirects [Boolean, nil] Whether to follow a redirect that requires changing
+    # @param http_method [Symbol, String] HTTP method (:get, :head, :post, :put, :patch, :delete, :query)
+    # @param url [String, URI::Generic] the request URL
+    # @param headers [Hash, HttpHeaders] request headers
+    # @param body [String, nil] request body
+    # @param json [Object, nil] JSON body to be serialized (alternative to body)
+    # @param params [Hash, nil] query parameters to append to the URL
+    # @param timeout [Numeric, nil] overall timeout in seconds
+    # @param max_redirects [Integer, nil] maximum redirects to follow (nil uses config, 0 disables)
+    # @param follow_method_changing_redirects [Boolean, nil] whether to follow a redirect that requires changing
     #   the HTTP method (nil uses config). When false, such a redirect response is returned as the
     #   result instead of being followed.
-    # @param redirect_strip_headers [String, Array<String>, nil] Header names (case insensitive)
+    # @param redirect_strip_headers [String, Array<String>, nil] header names (case insensitive)
     #   to strip from redirected requests, in addition to those configured on the
-    #   {Configuration}.
-    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] Names of preprocessors
-    #   registered on the configuration to apply to the request when it is sent.
-    # @param processor [String, Symbol, nil] Name of the processor that should execute the
+    #   {Configuration}
+    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] names of preprocessors
+    #   registered on the configuration to apply to the request when it is sent
+    # @param processor [String, Symbol, nil] name of the processor that should execute the
     #   request. Integrations use this to route the request to a named processor.
     def initialize(
       http_method,
@@ -165,9 +165,9 @@ module PatientHttp
       @body = UNDEFINED
     end
 
-    # Returns the request body, decoding it from the payload if necessary.
+    # Return the request body, decoding it from the payload if necessary.
     #
-    # @return [String, nil] The decoded request body or nil if there was no body.
+    # @return [String, nil] the decoded request body or nil if there was no body
     def body
       @body = @payload&.value if @body.equal?(UNDEFINED)
       @body
@@ -262,6 +262,7 @@ module PatientHttp
     end
 
     # Validate the request has required HTTP parameters.
+    #
     # @raise [ArgumentError] if method or url is invalid
     # @return [self] for chaining
     def validate!

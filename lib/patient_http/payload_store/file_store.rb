@@ -7,7 +7,7 @@ module PatientHttp
     # File-based payload store for testing and development.
     #
     # Stores payloads as JSON files in a directory. This store is intended
-    # for local development and testing only - use Redis or S3 stores for
+    # for local development and testing only—use Redis or S3 stores for
     # production deployments.
     #
     # Thread-safe through mutex synchronization.
@@ -17,13 +17,13 @@ module PatientHttp
     class FileStore < Base
       Base.register :file, self
 
-      # @return [String] The directory where payload files are stored
+      # @return [String] the directory where payload files are stored
       attr_reader :directory
 
       # Initialize a new file store.
       #
-      # @param directory [String] Directory for storing payload files.
-      #   Defaults to Dir.tmpdir. Will be created if it doesn't exist.
+      # @param directory [String] directory for storing payload files. It defaults to
+      #   Dir.tmpdir and is created if it does not exist.
       def initialize(directory: nil)
         @directory = directory || Dir.tmpdir
         @mutex = Mutex.new
@@ -32,9 +32,9 @@ module PatientHttp
 
       # Store pre-serialized JSON string directly to a file.
       #
-      # @param key [String] Unique key (used as filename)
-      # @param json [String] Pre-serialized JSON string
-      # @return [String] The key
+      # @param key [String] unique key (used as filename)
+      # @param json [String] pre-serialized JSON string
+      # @return [String] the key
       def store_json(key, json)
         path = file_path(key)
         @mutex.synchronize do
@@ -45,8 +45,8 @@ module PatientHttp
 
       # Fetch data from a JSON file.
       #
-      # @param key [String] The key to fetch
-      # @return [Hash, nil] The stored data or nil if not found
+      # @param key [String] the key to fetch
+      # @return [Hash, nil] the stored data or nil if not found
       def fetch(key)
         path = file_path(key)
         @mutex.synchronize do
@@ -58,9 +58,9 @@ module PatientHttp
 
       # Delete a payload file.
       #
-      # Idempotent - does not raise if file doesn't exist.
+      # Idempotent—does not raise if file does not exist.
       #
-      # @param key [String] The key to delete
+      # @param key [String] the key to delete
       # @return [Boolean] true
       def delete(key)
         path = file_path(key)
@@ -72,9 +72,9 @@ module PatientHttp
         true
       end
 
-      # Check if a payload exists.
+      # Check whether a payload exists.
       #
-      # @param key [String] The key to check
+      # @param key [String] the key to check
       # @return [Boolean] true if the payload exists
       def exists?(key)
         @mutex.synchronize do

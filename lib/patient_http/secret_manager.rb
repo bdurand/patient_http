@@ -15,12 +15,11 @@ module PatientHttp
     #
     # @param secrets [Hash{String => Object}] static registry mapping names to values
     #   (a value may be a callable, which is invoked with the name to produce the value)
-    #   secret not found in the static registry
     def initialize(secrets: {})
       @secrets = secrets || {}
     end
 
-    # Check if a secret name is registered in the static registry.
+    # Check whether a secret name is registered in the static registry.
     #
     # @param name [String, Symbol] the secret name
     # @return [Boolean] true if the name is registered, false otherwise

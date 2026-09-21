@@ -8,10 +8,10 @@ module PatientHttp
   class LifecycleManager
     include TimeHelper
 
-    # Valid processor states
+    # Valid processor states.
     STATES = %i[stopped starting running draining stopping].freeze
 
-    # Polling interval during wait operations
+    # Polling interval during wait operations.
     POLL_INTERVAL = 0.01
 
     # Initialize the lifecycle manager.
@@ -31,35 +31,35 @@ module PatientHttp
       @state.get
     end
 
-    # Check if processor is starting.
+    # Check whether the processor is starting.
     #
     # @return [Boolean] true if starting
     def starting?
       state == :starting
     end
 
-    # Check if processor is running.
+    # Check whether the processor is running.
     #
     # @return [Boolean] true if running
     def running?
       state == :running
     end
 
-    # Check if processor is stopped.
+    # Check whether the processor is stopped.
     #
     # @return [Boolean] true if stopped
     def stopped?
       state == :stopped
     end
 
-    # Check if processor is draining.
+    # Check whether the processor is draining.
     #
     # @return [Boolean] true if draining
     def draining?
       state == :draining
     end
 
-    # Check if processor is stopping.
+    # Check whether the processor is stopping.
     #
     # @return [Boolean] true if stopping
     def stopping?
@@ -153,7 +153,7 @@ module PatientHttp
       @reactor_ready.wait(timeout)
     end
 
-    # Check if shutdown has been signaled.
+    # Check whether shutdown has been signaled.
     #
     # @return [Boolean] true if shutdown is signaled
     def shutdown_signaled?
@@ -171,7 +171,7 @@ module PatientHttp
     # Wait for a condition to be met.
     #
     # @param timeout [Numeric] maximum time to wait in seconds
-    # @yield Block that checks the condition.
+    # @yield block that checks the condition
     # @return [Boolean] true if the condition is met, false if timeout reached
     def wait_for_condition(timeout: 1)
       deadline = monotonic_time + timeout

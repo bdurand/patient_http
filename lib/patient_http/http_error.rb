@@ -7,17 +7,17 @@ module PatientHttp
   # This error includes the full Response object so you can access the status code,
   # headers, body, and other response data.
   class HttpError < Error
-    # @return [Response] The HTTP response that triggered the error
+    # @return [Response] the HTTP response that triggered the error
     attr_reader :response
 
     class << self
       # Create a new HttpError (or subclass) from a response.
       #
-      # Returns ClientError for 4xx responses, ServerError for 5xx responses,
-      # or HttpError for other non-2xx responses.
+      # The result is a ClientError for a 4xx response, a ServerError for a 5xx
+      # response, or an HttpError for any other non-2xx response.
       #
-      # @param response [Response] The HTTP response with non-2xx status code
-      # @return [HttpError, ClientError, ServerError] The appropriate error instance
+      # @param response [Response] the HTTP response with non-2xx status code
+      # @return [HttpError, ClientError, ServerError] the appropriate error instance
       def new(response)
         if response.client_error?
           ClientError.allocate.tap { |error| error.send(:initialize, response) }
@@ -28,7 +28,7 @@ module PatientHttp
         end
       end
 
-      # Reconstruct an HttpError from a hash
+      # Reconstruct an HttpError from a hash.
       #
       # @param hash [Hash] hash representation
       # @return [HttpError] reconstructed error
@@ -38,22 +38,22 @@ module PatientHttp
       end
     end
 
-    # Initializes a new HttpError.
+    # Initialize a new HttpError.
     #
-    # @param response [Response] The HTTP response with non-2xx status code
+    # @param response [Response] the HTTP response with non-2xx status code
     def initialize(response)
       super("HTTP #{response.status} response from #{response.http_method.to_s.upcase} #{response.url}")
       @response = response
     end
 
-    # Delegate common response methods for convenience.
+    # Delegate the common response methods for convenience.
     #
     # @return [Integer] HTTP status code
     def status
       @response.status
     end
 
-    # Returns the error type symbol. Provided for compatibility with RequestError.
+    # Return the error type symbol. Provided for compatibility with RequestError.
     #
     # @return [Symbol] the error type
     def error_type
@@ -84,7 +84,7 @@ module PatientHttp
       response.callback_args
     end
 
-    # Convert to hash with string keys for serialization
+    # Convert to hash with string keys for serialization.
     #
     # @return [Hash] hash representation
     def as_json

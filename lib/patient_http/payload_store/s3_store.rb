@@ -23,15 +23,15 @@ module PatientHttp
     class S3Store < Base
       Base.register :s3, self
 
-      # @return [String] The key prefix used for all stored payloads
+      # @return [String] the key prefix used for all stored payloads
       attr_reader :key_prefix
 
       # Initialize a new S3 store.
       #
-      # @param bucket [Aws::S3::Bucket] S3 Bucket object. Required.
-      # @param key_prefix [String] Prefix for all S3 object keys.
-      #   Defaults to "patient_http/payloads/"
-      # @raise [ArgumentError] If bucket is not provided
+      # @param bucket [Aws::S3::Bucket] S3 bucket object (required)
+      # @param key_prefix [String] prefix for all S3 object keys; defaults to
+      #   "patient_http/payloads/"
+      # @raise [ArgumentError] if the bucket is not provided
       def initialize(bucket:, key_prefix: nil)
         raise ArgumentError, "S3 bucket is required" unless bucket
 
@@ -41,9 +41,9 @@ module PatientHttp
 
       # Store pre-serialized JSON string directly in S3.
       #
-      # @param key [String] Unique key (appended to key_prefix)
-      # @param json [String] Pre-serialized JSON string
-      # @return [String] The key
+      # @param key [String] unique key (appended to key_prefix)
+      # @param json [String] pre-serialized JSON string
+      # @return [String] the key
       def store_json(key, json)
         full_key = key_with_prefix(key)
         @bucket.object(full_key).put(body: json, content_type: "application/json")
@@ -52,8 +52,8 @@ module PatientHttp
 
       # Fetch data from S3.
       #
-      # @param key [String] The key to fetch
-      # @return [Hash, nil] The stored data or nil if not found
+      # @param key [String] the key to fetch
+      # @return [Hash, nil] the stored data or nil if not found
       def fetch(key)
         full_key = key_with_prefix(key)
         response = @bucket.object(full_key).get
@@ -65,9 +65,9 @@ module PatientHttp
 
       # Delete a payload from S3.
       #
-      # Idempotent - does not raise if object doesn't exist.
+      # Idempotent—does not raise if object does not exist.
       #
-      # @param key [String] The key to delete
+      # @param key [String] the key to delete
       # @return [Boolean] true
       def delete(key)
         full_key = key_with_prefix(key)
@@ -75,9 +75,9 @@ module PatientHttp
         true
       end
 
-      # Check if a payload exists.
+      # Check whether a payload exists.
       #
-      # @param key [String] The key to check
+      # @param key [String] the key to check
       # @return [Boolean] true if the payload exists
       def exists?(key)
         full_key = key_with_prefix(key)

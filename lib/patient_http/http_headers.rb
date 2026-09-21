@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Case insensitive HTTP headers.
+  # Case-insensitive HTTP headers.
   #
   # This class provides a hash-like interface for HTTP headers with case-insensitive
   # key access. Header names are normalized to lowercase for storage and lookup.
@@ -11,7 +11,7 @@ module PatientHttp
   class HttpHeaders
     include Enumerable
 
-    # Initializes a new HttpHeaders instance. Entries with a nil or empty value
+    # Initialize a new HttpHeaders instance. Entries with a nil or empty value
     # are skipped.
     #
     # @param headers [Hash, HttpHeaders] initial headers to set
@@ -22,7 +22,7 @@ module PatientHttp
       end
     end
 
-    # Retrieves the value for a header (case insensitive).
+    # Retrieve the value for a header (case insensitive).
     #
     # @param key [String, Symbol] header name
     # @return [String, nil] header value or nil if not found
@@ -30,7 +30,7 @@ module PatientHttp
       @headers[key.to_s.downcase]
     end
 
-    # Sets the value for a header (case insensitive). Setting a header to nil
+    # Set the value for a header (case insensitive). Setting a header to nil
     # or an empty string removes it.
     #
     # @param key [String, Symbol] header name
@@ -44,7 +44,7 @@ module PatientHttp
       end
     end
 
-    # Removes a header (case insensitive).
+    # Remove a header (case insensitive).
     #
     # @param key [String, Symbol] header name
     # @return [String, nil] the removed value or nil if not found
@@ -52,16 +52,16 @@ module PatientHttp
       @headers.delete(key.to_s.downcase)
     end
 
-    # Fetches the value for a header with an optional default.
+    # Fetch the value for a header with an optional default.
     #
     # @param key [String, Symbol] header name
-    # @param default [Object] default value if header not found
-    # @return [String, Object] header value or default
+    # @param default [Object] default value if the header is not found
+    # @return [String, Object] header value or the default
     def fetch(key, default = nil)
       @headers.fetch(key.to_s.downcase, default)
     end
 
-    # Merges another set of headers into a new HttpHeaders instance.
+    # Merge another set of headers into a new HttpHeaders instance.
     #
     # @param other_headers [Hash, HttpHeaders] headers to merge
     # @return [HttpHeaders] new instance with merged headers
@@ -73,7 +73,7 @@ module PatientHttp
       new_headers
     end
 
-    # Returns a new HttpHeaders without the specified keys (case-insensitive).
+    # Return a new HttpHeaders without the specified keys (case insensitive).
     #
     # @param keys [Array<String, Symbol>] header names to exclude
     # @return [HttpHeaders] new instance without the specified headers
@@ -83,25 +83,25 @@ module PatientHttp
       self.class.new(filtered_headers)
     end
 
-    # Converts to a regular hash with lowercase keys.
+    # Convert to a regular hash with lowercase keys.
     #
     # @return [Hash] hash representation
     def to_h
       @headers.dup
     end
 
-    # Iterates over each header.
+    # Iterate over each header.
     #
     # @yield [key, value] yields each header key-value pair
-    # @return [Enumerator] if no block given
+    # @return [Enumerator] if no block is given
     def each(&block)
       @headers.each(&block)
     end
 
-    # Checks if a header exists (case insensitive).
+    # Check whether a header exists (case insensitive).
     #
     # @param name [String, Symbol] header name
-    # @return [Boolean] true if header exists
+    # @return [Boolean] true if the header exists
     def include?(name)
       @headers.include?(name.to_s.downcase)
     end

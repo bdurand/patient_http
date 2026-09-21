@@ -4,7 +4,7 @@ module PatientHttp
   # A reference to a named secret that can be used as a header or query parameter
   # value when building a {Request}.
   #
-  # A SecretReference holds only the secret's name -- never its value. When a request
+  # A SecretReference holds only the secret's name—never its value. When a request
   # is serialized (for example, to be enqueued in a job system), the reference is
   # serialized as a lightweight marker (`{"$secret" => name}`) so the sensitive value
   # is never written to the queue or logs. The actual value is resolved on the
@@ -26,7 +26,7 @@ module PatientHttp
     attr_reader :name
 
     class << self
-      # Check if a value is a secret reference (either a SecretReference instance or a
+      # Check whether a value is a secret reference (either a SecretReference instance or a
       # serialized marker hash).
       #
       # @param value [Object] the value to check

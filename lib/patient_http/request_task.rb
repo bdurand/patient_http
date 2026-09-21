@@ -7,51 +7,52 @@ module PatientHttp
   class RequestTask
     include TimeHelper
 
-    # Headers that are sensitive to origin and should be stripped on cross-origin redirects
+    # Headers that are sensitive to origin and should be stripped on cross-origin redirects.
     SENSITIVE_HEADERS = %w[authorization cookie].freeze
 
     # Headers that describe a request body. They are removed when a redirect drops the body.
     BODY_HEADERS = %w[content-type content-length content-encoding content-language content-location].freeze
 
-    # @return [String] Unique UUID for tracking the task
+    # @return [String] unique UUID for tracking the task
     attr_reader :id
 
-    # @return [Request] The HTTP request details
+    # @return [Request] the HTTP request details
     attr_reader :request
 
-    # @return [TaskHandler] The handler for job lifecycle operations
+    # @return [TaskHandler] the handler for job lifecycle operations
     attr_reader :task_handler
 
-    # @return [String] Class name for the callback service
+    # @return [String] class name for the callback service
     attr_reader :callback
 
-    # @return [Hash] Callback arguments to include in Response/Error objects (never nil, defaults to empty hash)
+    # @return [Hash] callback arguments to include in Response/Error objects (never nil, defaults to empty hash)
     attr_reader :callback_args
 
-    # @return [Boolean] Whether to raise HttpError for non-2xx responses
+    # @return [Boolean] whether to raise HttpError for non-2xx responses
     attr_reader :raise_error_responses
 
-    # @return [Array<String>] URLs visited during redirect chain
+    # @return [Array<String>] URLs visited during the redirect chain
     attr_reader :redirects
 
-    # @return [Response, nil] The HTTP response, set on success
+    # @return [Response, nil] the HTTP response, set on success
     attr_reader :response
 
-    # @return [Exception, nil] The error, set on failure
+    # @return [Exception, nil] the error, set on failure
     attr_reader :error
 
-    # Initializes a new RequestTask.
+    # Initialize a new RequestTask.
     #
-    # @param request [Request] The HTTP request to wrap.
-    # @param task_handler [TaskHandler] The handler for job lifecycle operations.
-    # @param callback [String, Class] Class name or class for the callback service.
-    # @param callback_args [Hash] Callback arguments (with string keys) to include
-    #   in Response/Error objects. These will be accessible via response.callback_args
-    #   or error.callback_args.
-    # @param raise_error_responses [Boolean] Whether to raise HttpError for non-2xx responses.
-    # @param redirects [Array<String>] URLs visited during redirect chain.
-    # @param id [String, nil] Unique UUID for tracking the task. If nil, a new UUID will be generated.
-    # @param default_max_redirects [Integer] Fallback max_redirects when request doesn't specify one.
+    # @param request [Request] the HTTP request to wrap
+    # @param task_handler [TaskHandler] the handler for job lifecycle operations
+    # @param callback [String, Class] class name or class for the callback service
+    # @param callback_args [Hash] callback arguments (with string keys) to include
+    #   in Response and Error objects, where they are available as
+    #   response.callback_args or error.callback_args
+    # @param raise_error_responses [Boolean] whether to raise HttpError for non-2xx responses
+    # @param redirects [Array<String>] URLs visited during the redirect chain
+    # @param id [String, nil] unique UUID for tracking the task; a new UUID is generated when nil
+    # @param default_max_redirects [Integer] fallback max_redirects for a request that does not
+    #   specify one
     def initialize(
       request:,
       task_handler:,
@@ -83,19 +84,21 @@ module PatientHttp
       CallbackValidator.validate!(@callback)
     end
 
-    # Mark task as enqueued
+    # Mark task as enqueued.
+    #
     # @return [void]
     def enqueued!
       @enqueued_at = monotonic_time
     end
 
-    # Mark task as started
+    # Mark task as started.
+    #
     # @return [void]
     def started!
       @started_at = monotonic_time
     end
 
-    # Return true if the task has started processing (i.e. {#started!} was
+    # Return true if the task has started processing (i.e., {#started!} was
     # called). Used to keep observer request_start/request_end notifications
     # balanced when a task is re-enqueued during shutdown.
     #
@@ -104,29 +107,30 @@ module PatientHttp
       !@started_at.nil?
     end
 
-    # Returns the wall clock time when the task was enqueued.
+    # Return the wall-clock time when the task was enqueued.
     #
-    # @return [Time, nil] The enqueued time or nil if not enqueued.
+    # @return [Time, nil] the enqueued time or nil if not enqueued
     def enqueued_at
       wall_clock_time(@enqueued_at) if @enqueued_at
     end
 
-    # Returns the wall clock time when the task was started.
+    # Return the wall-clock time when the task was started.
     #
-    # @return [Time, nil] The started time or nil if not started.
+    # @return [Time, nil] the started time or nil if not started
     def started_at
       wall_clock_time(@started_at) if @started_at
     end
 
-    # Returns the wall clock time when the task was completed.
+    # Return the wall-clock time when the task was completed.
     #
-    # @return [Time, nil] The completed time or nil if not completed.
+    # @return [Time, nil] the completed time or nil if not completed
     def completed_at
       wall_clock_time(@completed_at) if @completed_at
     end
 
     # Enqueued duration in seconds.
-    # @return [Float, nil] duration or nil if not enqueued yet.
+    #
+    # @return [Float, nil] duration or nil if not enqueued yet
     def enqueued_duration
       return nil unless @enqueued_at
 
@@ -134,7 +138,8 @@ module PatientHttp
     end
 
     # Execution duration in seconds.
-    # @return [Float, nil] duration or nil if not started yet.
+    #
+    # @return [Float, nil] duration or nil if not started yet
     def duration
       return nil unless @started_at
 
@@ -142,6 +147,7 @@ module PatientHttp
     end
 
     # Re-enqueue the original job via the task handler.
+    #
     # @return [String] job ID
     def retry
       @task_handler.retry
@@ -197,7 +203,7 @@ module PatientHttp
       !@error.nil?
     end
 
-    # Returns the maximum number of redirects to follow.
+    # Return the maximum number of redirects to follow.
     # Uses the request's max_redirects if set, otherwise falls back to the default.
     #
     # @return [Integer] maximum number of redirects
@@ -216,21 +222,21 @@ module PatientHttp
     # list are removed from the redirected request. Authorization and Cookie
     # headers and preprocessors are removed on cross-origin redirects.
     #
-    # @param location [String] The redirect URL from the Location header
-    # @param status [Integer] The HTTP status code of the redirect response
-    # @param strip_headers [Array<String>] Additional header names to strip,
+    # @param location [String] the redirect URL from the Location header
+    # @param status [Integer] the HTTP status code of the redirect response
+    # @param strip_headers [Array<String>] additional header names to strip,
     #   typically from the {Configuration}
-    # @return [RequestTask] A new task configured for the redirect
+    # @return [RequestTask] a new task configured for the redirect
     def redirect_task(location:, status:, strip_headers: [])
       redirect_method = RedirectHelper.redirect_method(request.http_method, status)
       method_changed = (redirect_method != request.http_method)
       redirect_body = method_changed ? nil : request.body
 
-      # Resolve the redirect URL (handle relative URLs)
+      # Resolve the redirect URL, which may be relative.
       redirect_url = resolve_redirect_url(location)
 
       # Strip sensitive headers and preprocessors on cross-origin redirects to
-      # prevent credential leakage
+      # prevent credential leakage.
       cross_origin = cross_origin?(request.url, redirect_url)
       redirect_headers = cross_origin ? request.headers.except(*SENSITIVE_HEADERS) : request.headers
       redirect_headers = redirect_headers.except(*BODY_HEADERS) if method_changed
@@ -239,7 +245,7 @@ module PatientHttp
       strip_names = request.redirect_strip_headers + Array(strip_headers)
       redirect_headers = redirect_headers.except(*strip_names) if strip_names.any?
 
-      # Create a new request for the redirect
+      # Create a new request for the redirect.
       redirect_request = Request.new(
         redirect_method,
         redirect_url,
@@ -255,7 +261,7 @@ module PatientHttp
 
       redirect_task_id = "#{id.split("/").first}/#{@redirects.size + 2}"
 
-      # Create the new task with updated redirects chain
+      # Create the new task with the updated redirect chain.
       self.class.new(
         request: redirect_request,
         task_handler: @task_handler,
@@ -291,20 +297,20 @@ module PatientHttp
       )
     end
 
-    # Get the id of the first request task before any redirects. This is useful for tracking
-    # the overall request across multiple redirect tasks.
+    # Get the ID of the first request task, before any redirects. Use it to track the
+    # overall request across the tasks created for each redirect.
     #
-    # @return [String] the original request id
+    # @return [String] the original request ID
     def original_id
       id.split("/").first
     end
 
     private
 
-    # Check if two URLs have different origins (scheme + host + port).
+    # Check whether two URLs have different origins (scheme + host + port).
     #
-    # @param original_url [String] The original request URL
-    # @param target_url [String] The redirect target URL
+    # @param original_url [String] the original request URL
+    # @param target_url [String] the redirect target URL
     # @return [Boolean] true if the origins differ
     def cross_origin?(original_url, target_url)
       original = URI.parse(original_url)
@@ -317,8 +323,8 @@ module PatientHttp
 
     # Resolve a redirect URL, handling relative URLs.
     #
-    # @param location [String] The Location header value
-    # @return [String] The resolved absolute URL
+    # @param location [String] the Location header value
+    # @return [String] the resolved absolute URL
     def resolve_redirect_url(location)
       base_uri = URI.parse(request.url)
       redirect_uri = URI.parse(location)

@@ -4,7 +4,7 @@ module PatientHttp
   # Pool of HTTP clients with LRU eviction.
   #
   # Maintains a pool of clients lazily instantiated for each host. The pool
-  # is capped with an LRU algorithm - when a new client is needed and the
+  # is capped with an LRU algorithm—when a new client is needed and the
   # pool is at capacity, the least recently used client is closed and removed.
   class ClientPool
     # Supported protocol names mapped to their async-http implementations. Forcing

@@ -43,8 +43,8 @@ module PatientHttp
       class << self
         # Register a payload store adapter.
         #
-        # @param name [Symbol] Unique identifier for this adapter
-        # @param klass [Class] The adapter class
+        # @param name [Symbol] unique identifier for this adapter
+        # @param klass [Class] the adapter class
         # @return [void]
         def register(name, klass)
           registry_mutex.synchronize do
@@ -54,8 +54,8 @@ module PatientHttp
 
         # Look up a registered adapter by name.
         #
-        # @param name [Symbol, String] The adapter name
-        # @return [Class, nil] The adapter class or nil if not found
+        # @param name [Symbol, String] the adapter name
+        # @return [Class, nil] the adapter class or nil if not found
         def lookup(name)
           registry_mutex.synchronize do
             registry[name.to_sym]
@@ -64,10 +64,10 @@ module PatientHttp
 
         # Create a new store instance from a registered adapter.
         #
-        # @param name [Symbol, String] The adapter name
-        # @param options [Hash] Options to pass to the adapter constructor
-        # @return [Base] A new store instance
-        # @raise [ArgumentError] If the adapter is not registered
+        # @param name [Symbol, String] the adapter name
+        # @param options [Hash] options to pass to the adapter constructor
+        # @return [Base] a new store instance
+        # @raise [ArgumentError] if the adapter is not registered
         def create(name, **options)
           klass = lookup(name)
           raise ArgumentError, "Unknown payload store adapter: #{name.inspect}" unless klass
@@ -77,7 +77,7 @@ module PatientHttp
 
         # List all registered adapter names.
         #
-        # @return [Array<Symbol>] Registered adapter names
+        # @return [Array<Symbol>] registered adapter names
         def registered_adapters
           registry_mutex.synchronize do
             registry.keys
@@ -97,9 +97,9 @@ module PatientHttp
 
       # Store data with the given key.
       #
-      # @param key [String] Unique key for this data
-      # @param data [Hash] The data to store (will be serialized as JSON)
-      # @return [String] The key
+      # @param key [String] unique key for this data
+      # @param data [Hash] the data to store (serialized as JSON)
+      # @return [String] the key
       def store(key, data)
         json = JSON.generate(data)
         store_json(key, json)
@@ -110,38 +110,38 @@ module PatientHttp
       # Subclasses that serialize in #store should override this to write
       # the string directly, avoiding double serialization.
       #
-      # @param key [String] Unique key for this data
-      # @param json [String] Pre-serialized JSON string
-      # @return [String] The key
-      # @raise [NotImplementedError] Subclasses must implement this method
+      # @param key [String] unique key for this data
+      # @param json [String] pre-serialized JSON string
+      # @return [String] the key
+      # @raise [NotImplementedError] subclasses must implement this method
       def store_json(key, json)
         raise NotImplementedError, "#{self.class.name} must implement #store_json"
       end
 
       # Fetch data by key.
       #
-      # @param key [String] The key to fetch
-      # @return [Hash, nil] The stored data or nil if not found
-      # @raise [NotImplementedError] Subclasses must implement this method
+      # @param key [String] the key to fetch
+      # @return [Hash, nil] the stored data or nil if not found
+      # @raise [NotImplementedError] subclasses must implement this method
       def fetch(key)
         raise NotImplementedError, "#{self.class.name} must implement #fetch"
       end
 
       # Delete data by key.
       #
-      # This method should be idempotent - deleting a non-existent key
+      # This method should be idempotent—deleting a non-existent key
       # should not raise an error.
       #
-      # @param key [String] The key to delete
+      # @param key [String] the key to delete
       # @return [Boolean] true
-      # @raise [NotImplementedError] Subclasses must implement this method
+      # @raise [NotImplementedError] subclasses must implement this method
       def delete(key)
         raise NotImplementedError, "#{self.class.name} must implement #delete"
       end
 
       # Generate a unique key for storing data.
       #
-      # @return [String] A UUID key
+      # @return [String] a UUID key
       def generate_key
         SecureRandom.uuid
       end

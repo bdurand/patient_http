@@ -37,23 +37,23 @@ module PatientHttp
         scope :older_than, ->(time) { where(created_at: nil...time) }
       end
 
-      # @return [Class] The ActiveRecord model class used for storage
+      # @return [Class] the ActiveRecord model class used for storage
       attr_reader :model
 
       # Initialize a new ActiveRecord store.
       #
-      # @param model [Class] ActiveRecord model class to use for storage.
-      #   Defaults to PatientHttp::PayloadStore::ActiveRecordStore::Payload.
-      #   Custom models must have: key (string PK), data (text), timestamps
+      # @param model [Class] ActiveRecord model class to use for storage. It defaults to
+      #   PatientHttp::PayloadStore::ActiveRecordStore::Payload. A custom model must have
+      #   a key column (string primary key), a data column (text), and timestamps.
       def initialize(model: nil)
         @model = model || Payload
       end
 
       # Store pre-serialized JSON string directly in the database.
       #
-      # @param key [String] Unique key (used as primary key)
-      # @param json [String] Pre-serialized JSON string
-      # @return [String] The key
+      # @param key [String] unique key (used as primary key)
+      # @param json [String] pre-serialized JSON string
+      # @return [String] the key
       def store_json(key, json)
         now = Time.current
 
@@ -70,8 +70,8 @@ module PatientHttp
 
       # Fetch data from the database.
       #
-      # @param key [String] The key to fetch
-      # @return [Hash, nil] The stored data or nil if not found
+      # @param key [String] the key to fetch
+      # @return [Hash, nil] the stored data or nil if not found
       def fetch(key)
         record = @model.find_by(key: key)
         return nil unless record
@@ -81,18 +81,18 @@ module PatientHttp
 
       # Delete a payload from the database.
       #
-      # Idempotent - does not raise if record doesn't exist.
+      # Idempotent—does not raise if record does not exist.
       #
-      # @param key [String] The key to delete
+      # @param key [String] the key to delete
       # @return [Boolean] true
       def delete(key)
         @model.where(key: key).delete_all
         true
       end
 
-      # Check if a payload exists.
+      # Check whether a payload exists.
       #
-      # @param key [String] The key to check
+      # @param key [String] the key to check
       # @return [Boolean] true if the payload exists
       def exists?(key)
         @model.exists?(key: key)

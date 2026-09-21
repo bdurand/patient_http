@@ -32,7 +32,7 @@ module PatientHttp
         end
       end
 
-      # Check if following a redirect requires changing the request method.
+      # Check whether following a redirect requires changing the request method.
       #
       # @param http_method [Symbol] the current request method
       # @param status [Integer] the redirect status code
@@ -62,7 +62,7 @@ module PatientHttp
 
     private
 
-    # Check if a redirect response should be followed.
+    # Check whether a redirect response should be followed.
     #
     # @param task [RequestTask] the request task
     # @param response_data [Hash] the response data with status, headers, body
@@ -82,7 +82,7 @@ module PatientHttp
       true
     end
 
-    # Check if the request may change its method to follow a redirect.
+    # Check whether the request may change its method to follow a redirect.
     # The request setting takes precedence over the configuration.
     #
     # @param task [RequestTask] the request task
@@ -107,11 +107,11 @@ module PatientHttp
       )
     end
 
-    # Check for either too-many-redirects or recursive redirect.
+    # Check for either too many redirects or a redirect loop.
     #
     # @param task [RequestTask] the request task
     # @param response_data [Hash] the response data with status, headers, body
-    # @return [RedirectError, nil] error if redirect should not proceed, nil otherwise
+    # @return [RedirectError, nil] an error if the redirect should not proceed, nil otherwise
     def check_redirect_error(task, response_data)
       location = response_data[:headers]["location"]
       redirect_url = resolve_redirect_url(task.request.url, location)
@@ -119,11 +119,11 @@ module PatientHttp
       check_too_many_redirects(task, location) || check_recursive_redirect(task, redirect_url)
     end
 
-    # Check if the redirect count has exceeded the maximum.
+    # Check whether the redirect count has exceeded the maximum.
     #
     # @param task [RequestTask] the request task
     # @param location [String] the redirect location URL
-    # @return [TooManyRedirectsError, nil] error if exceeded, nil otherwise
+    # @return [TooManyRedirectsError, nil] an error if the count was exceeded, nil otherwise
     def check_too_many_redirects(task, location)
       return nil if task.redirects.size < task.max_redirects
 
@@ -137,11 +137,11 @@ module PatientHttp
       )
     end
 
-    # Check if the redirect URL has already been visited (redirect loop).
+    # Check whether the redirect URL has already been visited (redirect loop).
     #
     # @param task [RequestTask] the request task
     # @param redirect_url [String] the resolved redirect URL
-    # @return [RecursiveRedirectError, nil] error if loop detected, nil otherwise
+    # @return [RecursiveRedirectError, nil] an error if a loop was detected, nil otherwise
     def check_recursive_redirect(task, redirect_url)
       visited_urls = task.redirects + [task.request.url]
       return nil unless visited_urls.include?(redirect_url)
@@ -158,9 +158,9 @@ module PatientHttp
 
     # Resolve a redirect URL, handling relative URLs.
     #
-    # @param base_url [String] The base URL
-    # @param location [String] The Location header value
-    # @return [String] The resolved absolute URL
+    # @param base_url [String] the base URL
+    # @param location [String] the Location header value
+    # @return [String] the resolved absolute URL
     def resolve_redirect_url(base_url, location)
       base_uri = URI.parse(base_url)
       redirect_uri = URI.parse(location)

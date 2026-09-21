@@ -23,11 +23,13 @@ require "logger"
 # This module can be used standalone or integrated with job systems
 # like Sidekiq via adapters.
 module PatientHttp
-  # Raised when trying to enqueue a request when the processor is not running
+  # Raised when trying to enqueue a request when the processor is not running.
   class NotRunningError < StandardError; end
 
+  # Raised when the processor is already handling its maximum number of requests.
   class MaxCapacityError < StandardError; end
 
+  # Raised when a response body exceeds the configured maximum response size.
   class ResponseTooLargeError < StandardError; end
 
   # Raised when a request names a processor that is not configured. Handlers
@@ -94,7 +96,7 @@ module PatientHttp
   @config_mutex = Monitor.new
 
   class << self
-    # Check if running in testing mode.
+    # Check whether the library is running in testing mode.
     #
     # @api private
     def testing?
@@ -108,15 +110,15 @@ module PatientHttp
       @testing = !!value
     end
 
-    # Registers a request handler that will be called to process each request.
-    # The handler must be a callable object (responds to `call`) or a block.
+    # Register a request handler that is called to process each request.
+    # The handler must be a callable object (one that responds to `call`) or a block.
     #
-    # The handler will receive keyword arguments: request, callback, callback_args,
-    # and raise_error_responses. It should return the request id for the enqueued request.
+    # The handler receives the keyword arguments request, callback, callback_args,
+    # and raise_error_responses. It should return the request ID for the enqueued request.
     #
-    # @param callable [#call, nil] A callable object that will handle requests.
-    # @yield [request, callback, callback_args, raise_error_responses] If a block is given,
-    #   it will be used as the request handler
+    # @param callable [#call, nil] a callable object that handles requests
+    # @yield [request, callback, callback_args, raise_error_responses] a block used as the
+    #   request handler
     # @raise [ArgumentError] if neither a callable nor a block is provided, or if both are provided
     # @raise [ArgumentError] if the provided callable does not respond to `call`
     # @raise [ArgumentError] if the handler does not support the required keyword arguments
@@ -133,14 +135,14 @@ module PatientHttp
       @handler_mutex.synchronize { @handler = handler }
     end
 
-    # Registers a request handler, raising an error if one is already registered.
+    # Register a request handler, raising an error if one is already registered.
     #
     # This is a safer alternative to {.register_handler} that prevents accidental
     # double-registration.
     #
-    # @param callable [#call, nil] A callable object that will handle requests.
-    # @yield [request, callback, callback_args, raise_error_responses] If a block is given,
-    #   it will be used as the request handler
+    # @param callable [#call, nil] a callable object that handles requests
+    # @yield [request, callback, callback_args, raise_error_responses] a block used as the
+    #   request handler
     # @raise [RuntimeError] if a handler is already registered
     # @raise [ArgumentError] if neither a callable nor a block is provided, or if both are provided
     # @raise [ArgumentError] if the provided callable does not respond to `call`
@@ -156,10 +158,10 @@ module PatientHttp
       end
     end
 
-    # Unregisters the current request handler.
+    # Unregister the current request handler.
     #
-    # @param handler [#call, nil] If provided, only unregisters if the given handler matches
-    #   the current handler
+    # @param handler [#call, nil] if provided, the handler is unregistered only when it
+    #   matches the current handler
     # @return [void]
     def unregister_handler(handler = nil)
       @handler_mutex.synchronize do
@@ -167,7 +169,7 @@ module PatientHttp
       end
     end
 
-    # Registers a request handler that executes requests inline (synchronously,
+    # Register a request handler that executes requests inline (synchronously and
     # in-process) instead of dispatching them to a job system.
     #
     # This is intended for consoles, tests, and development environments where no
@@ -196,7 +198,7 @@ module PatientHttp
       end
     end
 
-    # Check if the currently registered handler is the inline handler registered
+    # Check whether the currently registered handler is the inline handler registered
     # by {.inline!}.
     #
     # @return [Boolean]
@@ -204,14 +206,14 @@ module PatientHttp
       @handler_mutex.synchronize { !@handler.nil? && @handler.equal?(@inline_handler) }
     end
 
-    # Check if a request handler is registered.
+    # Check whether a request handler is registered.
     #
     # @return [Boolean]
     def handler_registered?
       @handler_mutex.synchronize { !@handler.nil? }
     end
 
-    # Executes a request inline (synchronously, in-process) through
+    # Execute a request inline (synchronously and in-process) through
     # {SynchronousExecutor}, invoking the callback with the response or error
     # before returning.
     #
@@ -223,7 +225,7 @@ module PatientHttp
     # @param config [Configuration, nil] configuration to execute the request against.
     #   Defaults to {.default_configuration}, or a lazily created configuration that
     #   includes any secrets registered with {.register_secret}.
-    # @return [String] the request id
+    # @return [String] the request ID
     def execute_inline(request:, callback:, callback_args: nil, raise_error_responses: nil, config: nil)
       config ||= default_configuration || inline_configuration
       raise_error_responses = config.raise_error_responses if raise_error_responses.nil?
@@ -242,7 +244,7 @@ module PatientHttp
       task.id
     end
 
-    # Executes the registered request handler with the given request parameters.
+    # Execute the registered request handler with the given request parameters.
     #
     # @param request [Request] the HTTP request to handle
     # @param callback [Class, String] the callback class or name
@@ -266,7 +268,7 @@ module PatientHttp
       )
     end
 
-    # Enqueues an HTTP GET request.
+    # Enqueue an HTTP GET request.
     #
     # @param uri [String] absolute URL
     # @param callback [Class, String] callback class to handle the response
@@ -276,7 +278,7 @@ module PatientHttp
       request(:get, uri, callback: callback, **kwargs)
     end
 
-    # Enqueues an HTTP HEAD request.
+    # Enqueue an HTTP HEAD request.
     #
     # @param uri [String] absolute URL
     # @param callback [Class, String] callback class to handle the response
@@ -286,7 +288,7 @@ module PatientHttp
       request(:head, uri, callback: callback, **kwargs)
     end
 
-    # Enqueues an HTTP POST request.
+    # Enqueue an HTTP POST request.
     #
     # @param uri [String] absolute URL
     # @param callback [Class, String] callback class to handle the response
@@ -296,7 +298,7 @@ module PatientHttp
       request(:post, uri, callback: callback, **kwargs)
     end
 
-    # Enqueues an HTTP PUT request.
+    # Enqueue an HTTP PUT request.
     #
     # @param uri [String] absolute URL
     # @param callback [Class, String] callback class to handle the response
@@ -306,7 +308,7 @@ module PatientHttp
       request(:put, uri, callback: callback, **kwargs)
     end
 
-    # Enqueues an HTTP PATCH request.
+    # Enqueue an HTTP PATCH request.
     #
     # @param uri [String] absolute URL
     # @param callback [Class, String] callback class to handle the response
@@ -316,7 +318,7 @@ module PatientHttp
       request(:patch, uri, callback: callback, **kwargs)
     end
 
-    # Enqueues an HTTP DELETE request.
+    # Enqueue an HTTP DELETE request.
     #
     # @param uri [String] absolute URL
     # @param callback [Class, String] callback class to handle the response
@@ -326,7 +328,7 @@ module PatientHttp
       request(:delete, uri, callback: callback, **kwargs)
     end
 
-    # Enqueues an HTTP QUERY request.
+    # Enqueue an HTTP QUERY request.
     #
     # @param uri [String] absolute URL
     # @param callback [Class, String] callback class to handle the response
@@ -336,9 +338,9 @@ module PatientHttp
       request(:query, uri, callback: callback, **kwargs)
     end
 
-    # Builds and dispatches an HTTP request.
+    # Build and dispatch an HTTP request.
     #
-    # @param method [Symbol] HTTP method (`:get`, `:head`, `:post`, `:put`, `:patch`, `:delete`, `:query`)
+    # @param method [Symbol] HTTP method (`:get`, `:head`, `:post`, `:put`, `:patch`, `:delete`, or `:query`)
     # @param url [String] absolute URL
     # @param callback [Class, String] callback class to handle the response
     # @param headers [Hash, nil] request headers
@@ -399,7 +401,7 @@ module PatientHttp
       )
     end
 
-    # Build a reference to a named secret for use as a sensitive header or query
+    # Build a reference to a named secret to use as a sensitive header or query
     # parameter value when building a request.
     #
     # The reference holds only the secret's name; the value is resolved on the
@@ -443,7 +445,7 @@ module PatientHttp
       end
     end
 
-    # Check if a secret name is registered, either at the module level via
+    # Check whether a secret name is registered, either at the module level via
     # {.register_secret} or on the {.default_configuration}.
     #
     # @param name [String, Symbol] the secret name
@@ -499,7 +501,7 @@ module PatientHttp
       @module_secrets.each { |name, value| config.register_secret(name, value) }
     end
 
-    # Validates that the handler accepts the required keyword arguments.
+    # Validate that the handler accepts the required keyword arguments.
     #
     # @param handler [#call] the handler to validate
     # @raise [ArgumentError] if the handler does not support the required keyword arguments
@@ -507,11 +509,11 @@ module PatientHttp
     def validate_handler_parameters!(handler)
       required_keywords = %i[request callback callback_args raise_error_responses]
 
-      # Get the parameters of the handler's call method
+      # Get the parameters of the handler's call method.
       method_obj = handler.is_a?(Proc) ? handler : handler.method(:call)
       params = method_obj.parameters
 
-      # Check if handler has keyword rest parameter (**kwargs)
+      # Check whether the handler has a keyword rest parameter (**kwargs).
       has_keyrest = params.any? { |type, _name| type == :keyrest }
       return if has_keyrest
 
