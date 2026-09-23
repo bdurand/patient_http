@@ -257,13 +257,22 @@ PatientHttp.configure do |config|
   # Maximum number of hosts to maintain persistent connections for (default: 100)
   config.connection_pool_size = 100
 
-  # Connection timeout in seconds (default: nil, uses request_timeout)
+  # The seconds to make a connection (default: nil, no limit). This includes the
+  # TCP connect and the TLS handshake. It does not limit the time that a request
+  # waits for a response. The request_timeout setting does that.
   config.connection_timeout = 10
 
-  # TCP keepalive in seconds (default: nil, disabled)
+  # TCP keepalive for pooled connections (default: nil, the kernel sends no
+  # probes). A number sets the idle seconds before the first probe. A Hash also
+  # sets the interval and the probe count, for example
+  # {idle: 30, interval: 10, count: 3}. The Hash must contain :idle. The
+  # :interval default is 10 seconds and the :count default is 3 probes.
   config.tcp_keepalive = 30
 
-  # Timeout for server to acknowledge receipt of data in seconds.
+  # The seconds that sent data can stay unacknowledged (default: nil, the kernel
+  # default applies). The kernel then ends the connection. This sets
+  # TCP_USER_TIMEOUT, which is available on Linux only. Other platforms keep
+  # their own retransmission limits.
   config.tcp_user_timeout = 30
 
   # HTTP/HTTPS proxy URL (default: nil)
@@ -320,6 +329,9 @@ Profile options override the top-level configuration. Everything not overridden 
 - **max_connections**: Each connection uses memory and file descriptors. A tuned system can handle thousands.
 - **max_connections_per_host**: Bounds sockets per host (default unlimited). Set a value such as 32 for high-concurrency deployments so one host cannot consume every file descriptor. Verify the process file descriptor limit covers `max_connections` plus pooled idle host connections plus the application's own connections.
 - **request_timeout**: Set based on expected API response times. AI/LLM APIs may need minutes.
+- **connection_timeout**: This limits only the TCP connect and the TLS handshake (default nil, no limit). Set it to fail quickly when a host does not answer. It does not limit the time for a response, because `request_timeout` controls the full exchange.
+- **tcp_keepalive**: The kernel sends probes on an idle pooled connection. The probes keep NAT and firewall mappings open. They also let the kernel find a dead peer, thus the pool can remove the connection before it sends a request on it. Set this when connections stay idle in the pool between requests.
+- **tcp_user_timeout**: The kernel ends a connection when the peer does not acknowledge sent data (Linux only). A request to a peer that stopped without notice then fails after these seconds. It does not wait for `request_timeout`. Acknowledged data is not affected, thus a slow response continues.
 - **connection_pool_size**: Increase for applications calling many different API hosts.
 - **max_response_size**: Keeps memory usage bounded. Large responses may need a payload store. The limit applies to the inflated bytes of compressed responses.
 - **Response compression**: Requests ask for `gzip` by default and the body is inflated on a completion worker thread. Set `accept-encoding` on a request to change this: `identity` skips compression, and any other encoding is delivered still encoded with its `content-encoding` header kept so you can decode it yourself.
