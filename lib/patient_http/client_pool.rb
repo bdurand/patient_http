@@ -203,7 +203,12 @@ module PatientHttp
     def connectable_endpoint(endpoint)
       return endpoint unless @connection_timeout || @tcp_keepalive || @tcp_user_timeout
 
-      ConnectionEndpoint.new(endpoint, tcp_keepalive: @tcp_keepalive, tcp_user_timeout: @tcp_user_timeout)
+      ConnectionEndpoint.new(
+        endpoint,
+        connection_timeout: @connection_timeout,
+        tcp_keepalive: @tcp_keepalive,
+        tcp_user_timeout: @tcp_user_timeout
+      )
     end
 
     def configure_endpoint(endpoint)

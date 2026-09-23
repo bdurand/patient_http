@@ -16,6 +16,12 @@ module PatientHttp
   # timeout once the connection is established so the request timeout alone
   # governs the exchange.
   #
+  # Ruby versions before 3.4 do not apply `IO#timeout` to `Socket#connect`, so
+  # an unanswered TCP handshake would wait for the kernel to give up. When a
+  # connection timeout is given, the wrapper also bounds establishing the
+  # connection with a fiber scheduler timeout that raises `IO::TimeoutError`,
+  # the same error the socket raises on Ruby versions that honor its timeout.
+  #
   # When TCP keepalive settings are given, they are applied to each TCP socket.
   # Keepalive probes keep the mappings of NAT gateways and stateful firewalls
   # alive while a pooled connection is idle, and let the kernel detect a dead
@@ -29,6 +35,9 @@ module PatientHttp
   #
   # @api private
   class ConnectionEndpoint < SimpleDelegator
+    # @return [Numeric, nil] seconds allowed to establish a connection
+    attr_reader :connection_timeout
+
     # @return [Hash, nil] the keepalive settings with :idle, :interval, and :count
     attr_reader :tcp_keepalive
 
@@ -36,12 +45,15 @@ module PatientHttp
     attr_reader :tcp_user_timeout
 
     # @param endpoint [Async::HTTP::Endpoint] the endpoint to wrap
+    # @param connection_timeout [Numeric, nil] seconds allowed to establish a
+    #   connection, or nil for no limit beyond the endpoint's own
     # @param tcp_keepalive [Hash, nil] keepalive settings with :idle, :interval, and
     #   :count in seconds and probes, or nil to leave the kernel defaults
     # @param tcp_user_timeout [Numeric, nil] seconds transmitted data may stay
     #   unacknowledged, or nil to leave the kernel default
-    def initialize(endpoint, tcp_keepalive: nil, tcp_user_timeout: nil)
+    def initialize(endpoint, connection_timeout: nil, tcp_keepalive: nil, tcp_user_timeout: nil)
       super(endpoint)
+      @connection_timeout = connection_timeout
       @tcp_keepalive = tcp_keepalive
       @tcp_user_timeout = tcp_user_timeout
     end
@@ -51,7 +63,7 @@ module PatientHttp
     # @yield [socket] the connected socket, closed when the block returns
     # @return [IO] the connected socket when no block is given
     def connect
-      socket = __getobj__.connect
+      socket = connect_within_timeout
       clear_timeout(socket)
       apply_tcp_keepalive(socket)
       apply_tcp_user_timeout(socket)
@@ -66,6 +78,15 @@ module PatientHttp
     end
 
     private
+
+    def connect_within_timeout
+      task = ::Async::Task.current?
+      return __getobj__.connect unless @connection_timeout && task
+
+      task.with_timeout(@connection_timeout, ::IO::TimeoutError, "Connect timed out") do
+        __getobj__.connect
+      end
+    end
 
     def clear_timeout(socket)
       if socket.respond_to?(:timeout=)

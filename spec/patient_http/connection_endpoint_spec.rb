@@ -55,6 +55,22 @@ RSpec.describe PatientHttp::ConnectionEndpoint do
       end
     end
 
+    context "with a connection timeout and a peer that never answers the handshake" do
+      # 192.0.2.0/24 is reserved for documentation and is never routed.
+      let(:endpoint) { Async::HTTP::Endpoint.parse("http://192.0.2.1:81", timeout: 0.2) }
+      let(:wrapped) { described_class.new(endpoint, connection_timeout: 0.2) }
+
+      it "raises IO::TimeoutError once the connection timeout elapses" do
+        started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+        expect do
+          Async { wrapped.connect }.wait
+        end.to raise_error(IO::TimeoutError)
+
+        expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at).to be < 2
+      end
+    end
+
     context "with a TCP user timeout" do
       let(:wrapped) { described_class.new(endpoint, tcp_user_timeout: 30) }
 
