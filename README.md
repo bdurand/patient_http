@@ -260,6 +260,12 @@ PatientHttp.configure do |config|
   # Connection timeout in seconds (default: nil, uses request_timeout)
   config.connection_timeout = 10
 
+  # TCP keepalive in seconds (default: nil, disabled)
+  config.tcp_keepalive = 30
+
+  # Timeout for server to acknowledge receipt of data in seconds.
+  config.tcp_user_timeout = 30
+
   # HTTP/HTTPS proxy URL (default: nil)
   config.proxy_url = "http://proxy.example.com:8080"
 

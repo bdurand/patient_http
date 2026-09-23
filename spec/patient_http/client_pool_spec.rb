@@ -18,6 +18,12 @@ RSpec.describe PatientHttp::ClientPool do
       expect(pool.retries).to eq(3)
     end
 
+    it "treats an integer tcp_keepalive as the idle time" do
+      pool_with_keepalive = described_class.new(max_size: 3, tcp_keepalive: 30)
+      expect(pool_with_keepalive.tcp_keepalive).to eq({idle: 30})
+      pool_with_keepalive.close
+    end
+
     it "sets connection_timeout when provided" do
       pool_with_timeout = described_class.new(max_size: 3, connection_timeout: 10)
       expect(pool_with_timeout.connection_timeout).to eq(10)
@@ -101,10 +107,78 @@ RSpec.describe PatientHttp::ClientPool do
     end
   end
 
+  describe "#evict" do
+    let(:endpoint) { Async::HTTP::Endpoint.parse("https://example.com/path") }
+
+    it "removes the client for the host" do
+      pool.client_for(endpoint)
+
+      pool.evict("https://example.com/path")
+
+      expect(pool.size).to eq(0)
+    end
+
+    it "removes the client when it is the one that failed" do
+      client = pool.client_for(endpoint)
+
+      pool.evict("https://example.com/path", client)
+
+      expect(pool.size).to eq(0)
+    end
+
+    it "keeps a replacement client when the client that failed was already evicted" do
+      failed_client = pool.client_for(endpoint)
+      pool.evict("https://example.com/path", failed_client)
+      replacement = pool.client_for(endpoint)
+
+      pool.evict("https://example.com/path", failed_client)
+
+      expect(pool.size).to eq(1)
+      expect(pool.client_for(endpoint)).to be(replacement)
+    end
+  end
+
   describe "#close" do
     it "handles multiple close calls gracefully" do
       pool.close
       expect { pool.close }.not_to raise_error
+    end
+
+    it "waits for an evicted client that is still closing" do
+      endpoint = Async::HTTP::Endpoint.parse("https://example.com/path")
+      client = pool.client_for(endpoint)
+      gate = Async::Notification.new
+      closed = false
+      closed_when_pool_closed = nil
+      allow(client).to receive(:close) do
+        gate.wait
+        closed = true
+      end
+
+      Async do |task|
+        pool.evict("https://example.com/path", client)
+        task.async { gate.signal }
+        pool.close
+        closed_when_pool_closed = closed
+      end.wait
+
+      expect(closed_when_pool_closed).to be(true)
+    end
+
+    it "runs the close of an evicted client as a transient task" do
+      endpoint = Async::HTTP::Endpoint.parse("https://example.com/path")
+      client = pool.client_for(endpoint)
+      gate = Async::Notification.new
+      allow(client).to receive(:close) { gate.wait }
+
+      Async do |task|
+        request_task = task.async { pool.evict("https://example.com/path", client) }
+        request_task.wait
+
+        expect(task.children.to_a.reject(&:transient?)).to be_empty
+        gate.signal
+        pool.close
+      end.wait
     end
   end
 end

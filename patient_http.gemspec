@@ -40,7 +40,8 @@ Gem::Specification.new do |spec|
   spec.required_ruby_version = ">= 3.2"
 
   spec.add_dependency "async", "~> 2.0"
-  spec.add_dependency "async-http", "~> 0.60"
+  spec.add_dependency "async-http", "~> 0.99"
   spec.add_dependency "concurrent-ruby", "~> 1.2"
   spec.add_dependency "logger"
+  spec.add_dependency "protocol-http", "~> 0.66"
 end
