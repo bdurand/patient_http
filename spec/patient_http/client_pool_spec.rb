@@ -18,6 +18,12 @@ RSpec.describe PatientHttp::ClientPool do
       expect(pool.retries).to eq(3)
     end
 
+    it "treats an integer tcp_keepalive as the idle time" do
+      pool_with_keepalive = described_class.new(max_size: 3, tcp_keepalive: 30)
+      expect(pool_with_keepalive.tcp_keepalive).to eq({idle: 30})
+      pool_with_keepalive.close
+    end
+
     it "sets connection_timeout when provided" do
       pool_with_timeout = described_class.new(max_size: 3, connection_timeout: 10)
       expect(pool_with_timeout.connection_timeout).to eq(10)

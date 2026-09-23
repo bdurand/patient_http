@@ -35,7 +35,9 @@ RSpec.describe "Connection Eviction Integration", :integration do
   def enqueue(url, timeout: nil)
     handler = TestTaskHandler.new({"class" => "Worker", "jid" => url, "args" => []})
     request = PatientHttp::Request.new(:get, url, timeout: timeout)
-    task = PatientHttp::RequestTask.new(request: request, task_handler: handler, callback: TestCallback)
+    task = PatientHttp::RequestTask.new(
+      request: request, task_handler: handler, callback: TestCallback
+    )
     processor.enqueue(task)
     handler
   end
@@ -66,7 +68,8 @@ RSpec.describe "Connection Eviction Integration", :integration do
     end
 
     it "closes the evicted client once its in-flight request finishes" do
-      client_pool = processor.instance_variable_get(:@http_client).instance_variable_get(:@client_pool)
+      http_client = processor.instance_variable_get(:@http_client)
+      client_pool = http_client.instance_variable_get(:@client_pool)
       evicted_client = client_pool.client_for(Async::HTTP::Endpoint.parse(slow_host))
 
       enqueue("#{slow_host}/delay/300")
@@ -76,7 +79,9 @@ RSpec.describe "Connection Eviction Integration", :integration do
 
       processor.wait_for_idle(timeout: 5)
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 1
-      sleep 0.01 until evicted_client.pool.empty? || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+      until evicted_client.pool.empty? || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        sleep 0.01
+      end
       expect(evicted_client.pool).to be_empty
     end
   end

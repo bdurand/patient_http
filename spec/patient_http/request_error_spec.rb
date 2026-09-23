@@ -24,8 +24,9 @@ RSpec.describe PatientHttp::RequestError do
     context "with IO::TimeoutError" do
       it "classifies as :timeout rather than as the IOError it inherits from" do
         exception = IO::TimeoutError.new("read timeout")
-        error = described_class.from_exception(exception, request_id: request_id, duration: 1.0, url: url,
-          http_method: :get)
+        error = described_class.from_exception(
+          exception, request_id: request_id, duration: 1.0, url: url, http_method: :get
+        )
 
         expect(error.error_class).to eq(IO::TimeoutError)
         expect(error.error_type).to eq(:timeout)

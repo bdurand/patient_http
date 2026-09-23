@@ -115,8 +115,9 @@ module PatientHttp
         headers = outgoing.headers.to_h
         body = Protocol::HTTP::Body::Buffered.wrap([@task.request.body.to_s]) if @task.request.body
 
+        endpoint = Async::HTTP::Endpoint.parse(outgoing.url)
         async_response = request_with_immediate_retries(
-          @client_pool, @task.request, outgoing.url, headers, body
+          @client_pool, @task.request, endpoint, headers, body
         )
         # Note: headers that appear multiple times (e.g. set-cookie) are
         # flattened to a single joined string value.

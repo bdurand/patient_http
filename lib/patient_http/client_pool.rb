@@ -43,7 +43,7 @@ module PatientHttp
       @clients = {}
       @max_size = max_size
       @connection_timeout = connection_timeout
-      @tcp_keepalive = tcp_keepalive
+      @tcp_keepalive = tcp_keepalive.is_a?(Numeric) ? {idle: tcp_keepalive} : tcp_keepalive
       @tcp_user_timeout = tcp_user_timeout
       @proxy_url = proxy_url
       @retries = retries
@@ -140,7 +140,7 @@ module PatientHttp
       pending = @closing_mutex.synchronize { @closing_tasks.dup }
       pending.each do |task|
         task.wait
-      rescue
+      rescue StandardError, Async::Stop
         nil
       end
     end
@@ -218,12 +218,16 @@ module PatientHttp
       # Response bodies are decoded by ResponseReader on a completion worker
       # thread instead of a Protocol::HTTP::AcceptEncoding wrapper, so the
       # reactor thread never pays for inflating compressed bodies.
+      #
+      # Each client makes a single attempt per request. Retries, bounded by the
+      # pool's retries setting, are applied by ImmediateRetries so that only
+      # one layer decides when a request is sent again.
       @proxy_url ? make_proxied_client(endpoint) : make_direct_client(endpoint)
     end
 
     def make_direct_client(endpoint)
       configured_endpoint = connectable_endpoint(configure_endpoint(endpoint))
-      Async::HTTP::Client.new(configured_endpoint, retries: @retries, **client_options)
+      Async::HTTP::Client.new(configured_endpoint, retries: 1, **client_options)
     end
 
     def make_proxied_client(endpoint)
@@ -234,7 +238,7 @@ module PatientHttp
 
       proxy = @proxy_client.proxy(configured_endpoint)
       tunneled_endpoint = connectable_endpoint(proxy.wrap_endpoint(configured_endpoint))
-      Async::HTTP::Client.new(tunneled_endpoint, retries: @retries, **client_options)
+      Async::HTTP::Client.new(tunneled_endpoint, retries: 1, **client_options)
     end
 
     def client_options
@@ -243,18 +247,18 @@ module PatientHttp
 
     def create_proxy_client
       proxy_endpoint = Async::HTTP::Endpoint.parse(@proxy_url)
-      if @connection_timeout
-        proxy_endpoint = Async::HTTP::Endpoint.new(proxy_endpoint.url, timeout: @connection_timeout)
-      end
       Async::HTTP::Client.new(connectable_endpoint(proxy_endpoint))
     end
 
-    # The connection timeout reaches the socket as an IO timeout that would
-    # otherwise apply to every read and write for the life of the connection.
-    # The wrapper limits it to establishing the connection, and applies the
-    # TCP keepalive and user timeout settings to each new socket.
+    # The connection timeout is enforced by the wrapper around establishing the
+    # connection rather than passed to the endpoint, which would set it as an IO
+    # timeout on every read and write for the life of the connection. The
+    # wrapper also applies the TCP keepalive and user timeout settings to each
+    # new socket.
     def connectable_endpoint(endpoint)
-      return endpoint unless @connection_timeout || @tcp_keepalive || @tcp_user_timeout
+      unless @connection_timeout || @tcp_keepalive || @tcp_user_timeout
+        return endpoint
+      end
 
       ConnectionEndpoint.new(
         endpoint,
@@ -266,7 +270,6 @@ module PatientHttp
 
     def configure_endpoint(endpoint)
       options = {}
-      options[:timeout] = @connection_timeout if @connection_timeout
       options[:protocol] = PROTOCOLS.fetch(@protocol) if @protocol
       return endpoint if options.empty?
 

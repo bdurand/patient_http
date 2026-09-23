@@ -30,7 +30,9 @@ RSpec.describe "Connection Timeout Integration", :integration do
 
   def run_request(request)
     handler = TestTaskHandler.new({"class" => "Worker", "jid" => "connect-timeout", "args" => []})
-    task = PatientHttp::RequestTask.new(request: request, task_handler: handler, callback: TestCallback)
+    task = PatientHttp::RequestTask.new(
+      request: request, task_handler: handler, callback: TestCallback
+    )
     processor.enqueue(task)
     processor.wait_for_idle(timeout: 5)
     handler
@@ -67,7 +69,9 @@ RSpec.describe "Connection Timeout Integration", :integration do
     it "delivers the response through the synchronous executor" do
       TestCallback.reset_calls!
       template = PatientHttp::RequestTemplate.new(base_url: test_web_server.base_url)
-      handler = TestTaskHandler.new({"class" => "Worker", "jid" => "inline-connect-timeout", "args" => []})
+      handler = TestTaskHandler.new(
+        {"class" => "Worker", "jid" => "inline-connect-timeout", "args" => []}
+      )
       task = PatientHttp::RequestTask.new(
         request: template.get("/delay/1500"), task_handler: handler, callback: TestCallback
       )
@@ -90,7 +94,8 @@ RSpec.describe "Connection Timeout Integration", :integration do
     end
 
     it "fails with a timeout error once the connection timeout elapses" do
-      template = PatientHttp::RequestTemplate.new(base_url: "https://127.0.0.1:#{silent_server.addr[1]}")
+      base_url = "https://127.0.0.1:#{silent_server.addr[1]}"
+      template = PatientHttp::RequestTemplate.new(base_url: base_url)
       started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       handler = run_request(template.get("/unreachable"))
       elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at

@@ -53,8 +53,7 @@ RSpec.describe PatientHttp::SynchronousExecutor do
   end
 
   describe "immediate retries" do
-    # WebMock bypasses Async::HTTP::Client's own retries, so the client is
-    # limited to one attempt to exercise the immediate retries alone.
+    # A retries setting of one leaves IMMEDIATE_RETRY_LIMIT as the retry limit.
     before { config.retries = 1 }
 
     it "retries an idempotent request that fails before any response byte" do

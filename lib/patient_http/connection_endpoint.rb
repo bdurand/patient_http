@@ -6,21 +6,12 @@ require "socket"
 module PatientHttp
   # Wraps an HTTP endpoint to configure each connection as it is established.
   #
-  # The endpoint's `timeout:` option is applied by setting `IO#timeout` on the
-  # new socket, which limits the TCP connect and the TLS handshake. Left in
-  # place, the same timeout would also limit every later read and write for as
-  # long as the connection lives, including reads on a reused keep-alive
-  # connection, so a server that pauses longer than the connection timeout
-  # before or between response bytes would fail with `IO::TimeoutError` even
-  # when the request timeout allows more time. This wrapper clears the socket
-  # timeout once the connection is established so the request timeout alone
-  # governs the exchange.
-  #
-  # Ruby versions before 3.4 do not apply `IO#timeout` to `Socket#connect`, so
-  # an unanswered TCP handshake would wait for the kernel to give up. When a
-  # connection timeout is given, the wrapper also bounds establishing the
-  # connection with a fiber scheduler timeout that raises `IO::TimeoutError`,
-  # the same error the socket raises on Ruby versions that honor its timeout.
+  # When a connection timeout is given, establishing the connection (the TCP
+  # connect and the TLS handshake) is bounded by a fiber scheduler timeout that
+  # raises `IO::TimeoutError`. The timeout is not set as the socket's
+  # `IO#timeout`, which would also limit every later read and write for as long
+  # as the connection lives, so once the connection is established the request
+  # timeout alone governs the exchange.
   #
   # When TCP keepalive settings are given, they are applied to each TCP socket.
   # Keepalive probes keep the mappings of NAT gateways and stateful firewalls
@@ -48,7 +39,8 @@ module PatientHttp
     # @param connection_timeout [Numeric, nil] seconds allowed to establish a
     #   connection, or nil for no limit beyond the endpoint's own
     # @param tcp_keepalive [Hash, nil] keepalive settings with :idle, :interval, and
-    #   :count in seconds and probes, or nil to leave the kernel defaults
+    #   :count in seconds and probes (:interval and :count optional), or nil to leave
+    #   the kernel defaults
     # @param tcp_user_timeout [Numeric, nil] seconds transmitted data may stay
     #   unacknowledged, or nil to leave the kernel default
     def initialize(endpoint, connection_timeout: nil, tcp_keepalive: nil, tcp_user_timeout: nil)
@@ -64,9 +56,13 @@ module PatientHttp
     # @return [IO] the connected socket when no block is given
     def connect
       socket = connect_within_timeout
-      clear_timeout(socket)
-      apply_tcp_keepalive(socket)
-      apply_tcp_user_timeout(socket)
+      begin
+        apply_tcp_keepalive(socket)
+        apply_tcp_user_timeout(socket)
+      rescue
+        socket.close
+        raise
+      end
 
       return socket unless block_given?
 
@@ -88,23 +84,11 @@ module PatientHttp
       end
     end
 
-    # The timeout is set on the underlying IO, which a TLS socket may not forward
-    # `timeout=` to, so both the socket and its IO are cleared.
-    def clear_timeout(socket)
-      if socket.respond_to?(:timeout=)
-        socket.timeout = nil
-      end
-
-      raw_socket = socket.respond_to?(:to_io) ? socket.to_io : nil
-      if raw_socket && !raw_socket.equal?(socket) && raw_socket.respond_to?(:timeout=)
-        raw_socket.timeout = nil
-      end
-    end
-
     # Keepalive is a TCP feature, so it is skipped for the socket pair behind a
     # proxy tunnel. The kernel constants differ by platform: Linux names the idle
     # time TCP_KEEPIDLE, macOS names it TCP_KEEPALIVE. A socket that rejects an
-    # option keeps working without it.
+    # option keeps working without it, and an interval or count that is not
+    # given keeps the kernel default.
     #
     # Top-level constants are written with a leading `::` because Delegator
     # descends from BasicObject, where `defined?` cannot see them.
@@ -118,12 +102,13 @@ module PatientHttp
       if (idle_option = keepalive_idle_option)
         raw_socket.setsockopt(::Socket::IPPROTO_TCP, idle_option, @tcp_keepalive[:idle])
       end
-      if defined?(::Socket::TCP_KEEPINTVL)
-        interval = @tcp_keepalive[:interval]
+      interval = @tcp_keepalive[:interval]
+      if interval && defined?(::Socket::TCP_KEEPINTVL)
         raw_socket.setsockopt(::Socket::IPPROTO_TCP, ::Socket::TCP_KEEPINTVL, interval)
       end
-      if defined?(::Socket::TCP_KEEPCNT)
-        raw_socket.setsockopt(::Socket::IPPROTO_TCP, ::Socket::TCP_KEEPCNT, @tcp_keepalive[:count])
+      count = @tcp_keepalive[:count]
+      if count && defined?(::Socket::TCP_KEEPCNT)
+        raw_socket.setsockopt(::Socket::IPPROTO_TCP, ::Socket::TCP_KEEPCNT, count)
       end
     rescue ::SystemCallError
       nil

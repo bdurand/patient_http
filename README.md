@@ -738,15 +738,15 @@ config = PatientHttp::Configuration.new(
   # server that takes minutes to respond is never cut short.
   tcp_user_timeout: 30,
 
-  # Retries for failed requests (default: 3). A request that fails before any
-  # response byte arrives is also retried at once on a new connection when that
-  # is known to be safe and this setting has not already retried it: the server
-  # refused it before processing it (for example on an HTTP/2 GOAWAY), or the
-  # method is idempotent (GET, HEAD, PUT, DELETE, QUERY) and the connection
-  # failed with EOF, a reset, a broken pipe, or the kernel giving up on
-  # unacknowledged data. A POST or PATCH whose connection failed with an unknown
-  # outcome is not retried, and neither is a request that reached
-  # request_timeout.
+  # Attempts for a request that fails before any response byte arrives
+  # (default: 3; at least 3 attempts are always allowed). A failure is retried at
+  # once when that is known to be safe: the server refused the request before
+  # processing it (for example on an HTTP/2 GOAWAY), or the method is idempotent
+  # (GET, HEAD, PUT, DELETE, QUERY) and the connection failed, for example with
+  # EOF, a reset, a broken pipe, or the kernel giving up on unacknowledged data.
+  # A connection failure retries on a new connection. A POST or PATCH whose
+  # connection failed with an unknown outcome is not retried, and neither is a
+  # request that reached request_timeout.
   retries: 3,
 
   # Force the HTTP protocol to :http1 or :http2 (default: nil, negotiates with

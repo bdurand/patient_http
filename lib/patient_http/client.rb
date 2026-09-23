@@ -33,10 +33,9 @@ module PatientHttp
 
         Async::Task.current.with_timeout(timeout) do
           endpoint = Async::HTTP::Endpoint.parse(url)
-          client = @client_pool.client_for(endpoint)
           async_response = request_with_immediate_retries(
-            @client_pool, request, endpoint, headers, body, client: client
-          )
+            @client_pool, request, endpoint, headers, body
+          ) { |pooled_client| client = pooled_client }
           # Note: headers that appear multiple times (e.g. set-cookie) are
           # flattened to a single joined string value.
           headers_hash = async_response.headers.to_h.transform_values(&:to_s)
