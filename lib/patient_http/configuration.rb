@@ -12,6 +12,10 @@ module PatientHttp
     SALT = "patient_http_payload_encryption"
     private_constant :SALT
 
+    # Default size in bytes above which a serialized payload is written to a
+    # payload store instead of being passed through the job queue.
+    DEFAULT_PAYLOAD_STORE_THRESHOLD = 64 * 1024 # 64KB
+
     # @return [Integer] Maximum number of concurrent connections
     attr_reader :max_connections
 
@@ -85,6 +89,10 @@ module PatientHttp
     # @return [SecretManager] the secret manager instance
     attr_reader :secret_manager
 
+    # @return [Integer] Size in bytes above which a serialized payload is written
+    #   to the registered payload store instead of being passed through the job queue
+    attr_reader :payload_store_threshold
+
     # Initializes a new Configuration with the specified options.
     #
     # @param max_connections [Integer] Maximum number of concurrent connections
@@ -117,6 +125,8 @@ module PatientHttp
     #   A retry calls TaskHandler#on_complete or #on_error again, so a handler that raises after
     #   its side effect delivers the callback more than once unless it is idempotent. Set to 0 to
     #   report the first failure without retrying.
+    # @param payload_store_threshold [Integer, nil] Size in bytes above which a serialized
+    #   payload is written to the registered payload store (default: 64KB)
     def initialize(
       max_connections: 256,
       request_timeout: 60,
@@ -138,7 +148,8 @@ module PatientHttp
       encryption_key: nil,
       max_connections_per_host: nil,
       completion_threads: 2,
-      completion_retries: 2
+      completion_retries: 2,
+      payload_store_threshold: DEFAULT_PAYLOAD_STORE_THRESHOLD
     )
       @mutex = Mutex.new
 
@@ -176,6 +187,7 @@ module PatientHttp
       self.max_connections_per_host = max_connections_per_host
       self.completion_threads = completion_threads
       self.completion_retries = completion_retries
+      self.payload_store_threshold = payload_store_threshold
     end
 
     # Get the logger to use to report pool events. Default is to log errors to STDERR.
@@ -205,6 +217,19 @@ module PatientHttp
     def completion_retries=(value)
       validate_non_negative_integer(:completion_retries, value)
       @completion_retries = value
+    end
+
+    # Set the size in bytes above which a serialized payload is written to the
+    # registered payload store instead of being passed through the job queue.
+    # Has no effect unless a payload store is registered with
+    # {#register_payload_store}.
+    #
+    # @param value [Integer, nil] threshold in bytes; nil restores the default
+    # @return [void]
+    def payload_store_threshold=(value)
+      value = DEFAULT_PAYLOAD_STORE_THRESHOLD if value.nil?
+      validate_positive_integer(:payload_store_threshold, value)
+      @payload_store_threshold = value
     end
 
     def request_timeout=(value)
@@ -532,6 +557,7 @@ module PatientHttp
         "completion_retries" => completion_retries,
         "payload_stores" => payload_stores.keys,
         "default_payload_store" => default_payload_store_name,
+        "payload_store_threshold" => payload_store_threshold,
         "secrets" => @mutex.synchronize { @secrets.keys },
         "preprocessors" => @mutex.synchronize { @preprocessors.keys }
       }
