@@ -457,7 +457,8 @@ RSpec.describe PatientHttp::Client do
           end.wait
         }.to raise_error(Errno::ECONNABORTED)
 
-        expect(client_pool).to have_received(:evict).with("https://api.example.com/users")
+        expect(client_pool).to have_received(:evict)
+          .with("https://api.example.com/users", kind_of(Async::HTTP::Client))
       end
     end
 

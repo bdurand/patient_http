@@ -2,18 +2,7 @@
 
 module PatientHttp
   class Client
-    # Attempts made after a failure that is safe to retry at once, such as the
-    # server refusing a request before processing it.
-    IMMEDIATE_RETRY_LIMIT = 2
-
-    # Errors from a connection that failed before delivering any response byte.
-    # They are ambiguous for a non-idempotent request: the server may have
-    # processed it and then died, or it may never have received it. ETIMEDOUT is
-    # the kernel giving up on unacknowledged data (see the TCP user timeout), not
-    # the request timeout, which is never retried.
-    STALE_CONNECTION_ERRORS = [
-      EOFError, Errno::ECONNRESET, Errno::ECONNABORTED, Errno::ETIMEDOUT
-    ].freeze
+    include ImmediateRetries
 
     def initialize(processor)
       @processor = processor
@@ -42,6 +31,7 @@ module PatientHttp
     # @return [Hash] the response data with keys for :status, :headers, and :body
     def make_request(request, request_id)
       async_response = nil
+      client = nil
 
       begin
         outgoing = @request_preparer.prepare(request, request_id)
@@ -51,7 +41,8 @@ module PatientHttp
         timeout = request.timeout || config.request_timeout
 
         Async::Task.current.with_timeout(timeout) do
-          async_response = request_with_immediate_retries(request, url, headers, body)
+          client = @client_pool.client_for(Async::HTTP::Endpoint.parse(url))
+          async_response = request_with_immediate_retries(@client_pool, request, url, headers, body, client: client)
           # Note: headers that appear multiple times (e.g. set-cookie) are
           # flattened to a single joined string value.
           headers_hash = async_response.headers.to_h.transform_values(&:to_s)
@@ -64,11 +55,12 @@ module PatientHttp
           }
         end
       rescue => e
-        # Close the response and evict the client for this host to ensure the
-        # stale connection is not reused for subsequent requests.
+        # Close the response and evict the client that failed so its stale
+        # connections are not reused. Evicting by identity leaves a replacement
+        # client for the host alone.
         async_response&.close
-        if connection_error?(e)
-          @client_pool.evict(request.url)
+        if client && connection_error?(e)
+          @client_pool.evict(url, client)
         end
         raise
       end
@@ -105,44 +97,6 @@ module PatientHttp
 
     def config
       @processor.config
-    end
-
-    # Send the request, retrying at once when a failure is known to be safe to
-    # retry. Only failures raised before any response byte arrives reach this
-    # method; a failure while reading the body is never retried. The pool retires
-    # a connection that failed when it is released, so a retry opens a new one.
-    def request_with_immediate_retries(request, url, headers, body)
-      attempt = 1
-
-      loop do
-        return @client_pool.request(request.http_method, url, headers, body)
-      rescue => e
-        raise unless attempt <= IMMEDIATE_RETRY_LIMIT && immediately_retryable?(request, e)
-
-        attempt += 1
-        body&.rewind
-        config.logger&.info(
-          "[PatientHttp] Request to #{url} failed before a response (#{e.class.name}: #{e.message}); " \
-          "retrying on a new connection (attempt #{attempt})"
-        )
-      end
-    end
-
-    # A refused request (an HTTP/2 GOAWAY, a pooled connection closed after it was
-    # acquired, or a rejected stream) was never processed by the server. EPIPE is
-    # raised while writing, so the server did not receive the whole request. Both
-    # are safe to retry whatever the method. A connection that fails in any other
-    # way before responding may have processed the request, so that failure is
-    # retried only for idempotent methods.
-    def immediately_retryable?(request, error)
-      case error
-      when ::Protocol::HTTP::RefusedError, Errno::EPIPE
-        true
-      when *STALE_CONNECTION_ERRORS
-        request.idempotent?
-      else
-        false
-      end
     end
 
     def connection_error?(exception)

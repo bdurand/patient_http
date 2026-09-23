@@ -14,9 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A request that fails before any response byte arrives is retried at once on a new connection, up to `Client::IMMEDIATE_RETRY_LIMIT` times and regardless of the `retries` setting, when the failure is known to be safe to retry: the server refused the request before processing it (`Protocol::HTTP::RefusedError`, raised for an HTTP/2 GOAWAY, a pooled connection that closed after it was acquired, or a refused stream), the write failed with `EPIPE` so the server never received the whole request, or the request method is idempotent (`Request#idempotent?`: GET, HEAD, PUT, DELETE, QUERY). A POST or PATCH that fails with `EOFError`, `ECONNRESET`, or `ECONNABORTED` before a response is not retried, because the server may have processed it.
+- A request that fails before any response byte arrives is retried at once on a new connection, up to `ImmediateRetries::IMMEDIATE_RETRY_LIMIT` times and regardless of the `retries` setting, when the failure is known to be safe to retry: the server refused the request before processing it (`Protocol::HTTP::RefusedError`, raised for an HTTP/2 GOAWAY, a pooled connection that closed after it was acquired, or a refused stream), the write failed with `EPIPE` so the server never received the whole request, or the request method is idempotent (`Request#idempotent?`: GET, HEAD, PUT, DELETE, QUERY). A POST or PATCH that fails with `EOFError`, `ECONNRESET`, or `ECONNABORTED` before a response is not retried, because the server may have processed it.
 - `Configuration#tcp_keepalive` enables TCP keepalive on pooled connections, as an idle time in seconds or a Hash with `:idle`, `:interval`, and `:count`. Keepalive probes keep NAT and firewall mappings alive while a connection is idle and let the kernel detect a dead peer, so the connection is retired before a request is sent on it.
 - `Configuration#tcp_user_timeout` sets `TCP_USER_TIMEOUT` (Linux only) on pooled connections: the seconds transmitted data may stay unacknowledged before the kernel aborts the connection with `ETIMEDOUT`. A request sent on a connection whose peer has silently gone away fails after this long instead of waiting for `request_timeout`. Acknowledged data is not affected, so a slow response is never cut short. `ETIMEDOUT` from the socket is retried at once for idempotent requests like the other connection failures; the request timeout itself is still never retried.
+
+### Changed
+
+- `PatientHttp.execute_inline` and `SynchronousExecutor` make their connections through a `ClientPool` that lives for the one execution, so inline requests honor `connection_timeout`, `protocol`, `tcp_keepalive`, `tcp_user_timeout`, and the immediate retry rules exactly as processor-backed requests do. Previously the connection timeout capped inline response reads and no immediate retries applied inline.
 
 ## 1.6.1
 

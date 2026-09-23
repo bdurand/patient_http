@@ -52,6 +52,45 @@ RSpec.describe PatientHttp::SynchronousExecutor do
     end
   end
 
+  describe "immediate retries" do
+    it "retries an idempotent request that fails before any response byte" do
+      stub_request(:get, "https://api.example.com/data")
+        .to_raise(EOFError.new("end of file reached"))
+        .then.to_return(status: 200, body: "ok")
+
+      described_class.new(create_task, config: config).call
+
+      expect(TestCallback.error_calls).to be_empty
+      expect(TestCallback.completion_calls.size).to eq(1)
+      expect(TestCallback.completion_calls.first.body).to eq("ok")
+      expect(a_request(:get, "https://api.example.com/data")).to have_been_made.times(2)
+    end
+
+    it "retries a request the server refused before processing it" do
+      stub_request(:post, "https://api.example.com/data")
+        .to_raise(Protocol::HTTP::RefusedError.new("GOAWAY: request not processed."))
+        .then.to_return(status: 201)
+
+      described_class.new(create_task(method: :post), config: config).call
+
+      expect(TestCallback.error_calls).to be_empty
+      expect(TestCallback.completion_calls.first.status).to eq(201)
+    end
+
+    it "does not retry a non-idempotent request whose outcome is unknown" do
+      stub_request(:post, "https://api.example.com/data")
+        .to_raise(EOFError.new("end of file reached"))
+        .then.to_return(status: 201)
+
+      described_class.new(create_task(method: :post), config: config).call
+
+      expect(TestCallback.completion_calls).to be_empty
+      expect(TestCallback.error_calls.size).to eq(1)
+      expect(TestCallback.error_calls.first.error_class).to eq(EOFError)
+      expect(a_request(:post, "https://api.example.com/data")).to have_been_made.once
+    end
+  end
+
   describe "#call" do
     it "invokes the callback on_complete with the response" do
       stub_request(:get, "https://api.example.com/data")

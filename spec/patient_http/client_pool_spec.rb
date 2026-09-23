@@ -101,6 +101,37 @@ RSpec.describe PatientHttp::ClientPool do
     end
   end
 
+  describe "#evict" do
+    let(:endpoint) { Async::HTTP::Endpoint.parse("https://example.com/path") }
+
+    it "removes the client for the host" do
+      pool.client_for(endpoint)
+
+      pool.evict("https://example.com/path")
+
+      expect(pool.size).to eq(0)
+    end
+
+    it "removes the client when it is the one that failed" do
+      client = pool.client_for(endpoint)
+
+      pool.evict("https://example.com/path", client)
+
+      expect(pool.size).to eq(0)
+    end
+
+    it "keeps a replacement client when the client that failed was already evicted" do
+      failed_client = pool.client_for(endpoint)
+      pool.evict("https://example.com/path", failed_client)
+      replacement = pool.client_for(endpoint)
+
+      pool.evict("https://example.com/path", failed_client)
+
+      expect(pool.size).to eq(1)
+      expect(pool.client_for(endpoint)).to be(replacement)
+    end
+  end
+
   describe "#close" do
     it "handles multiple close calls gracefully" do
       pool.close

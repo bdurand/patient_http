@@ -60,6 +60,7 @@ module PatientHttp
   autoload :ExternalStorage, File.join(__dir__, "patient_http/external_storage")
   autoload :HttpError, File.join(__dir__, "patient_http/http_error")
   autoload :HttpHeaders, File.join(__dir__, "patient_http/http_headers")
+  autoload :ImmediateRetries, File.join(__dir__, "patient_http/immediate_retries")
   autoload :InlineTaskHandler, File.join(__dir__, "patient_http/inline_task_handler")
   autoload :LifecycleManager, File.join(__dir__, "patient_http/lifecycle_manager")
   autoload :OutgoingRequest, File.join(__dir__, "patient_http/outgoing_request")

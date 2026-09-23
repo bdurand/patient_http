@@ -63,11 +63,34 @@ RSpec.describe "Connection Timeout Integration", :integration do
     end
   end
 
-  context "when the server does not complete the TCP handshake" do
+  context "when a request runs inline and the server pauses longer than the connection timeout" do
+    it "delivers the response through the synchronous executor" do
+      TestCallback.reset_calls!
+      template = PatientHttp::RequestTemplate.new(base_url: test_web_server.base_url)
+      handler = TestTaskHandler.new({"class" => "Worker", "jid" => "inline-connect-timeout", "args" => []})
+      task = PatientHttp::RequestTask.new(
+        request: template.get("/delay/1500"), task_handler: handler, callback: TestCallback
+      )
+
+      PatientHttp::SynchronousExecutor.new(task, config: config).call
+
+      expect(TestCallback.error_calls).to be_empty
+      expect(TestCallback.completion_calls.size).to eq(1)
+      expect(TestCallback.completion_calls.first.body).to include('"chunk":4')
+    end
+  end
+
+  context "when the server accepts the TCP connection but never completes the TLS handshake" do
+    # A listening socket that is never read from: the kernel completes the TCP
+    # handshake, so the client's TLS ClientHello goes unanswered.
+    let(:silent_server) { TCPServer.new("127.0.0.1", 0) }
+
+    after do
+      silent_server.close
+    end
+
     it "fails with a timeout error once the connection timeout elapses" do
-      # 192.0.2.0/24 is reserved for documentation and is never routed, so the
-      # SYN is never answered.
-      template = PatientHttp::RequestTemplate.new(base_url: "http://192.0.2.1:81")
+      template = PatientHttp::RequestTemplate.new(base_url: "https://127.0.0.1:#{silent_server.addr[1]}")
       started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       handler = run_request(template.get("/unreachable"))
       elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at

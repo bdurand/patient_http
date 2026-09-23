@@ -55,9 +55,10 @@ RSpec.describe PatientHttp::ConnectionEndpoint do
       end
     end
 
-    context "with a connection timeout and a peer that never answers the handshake" do
-      # 192.0.2.0/24 is reserved for documentation and is never routed.
-      let(:endpoint) { Async::HTTP::Endpoint.parse("http://192.0.2.1:81", timeout: 0.2) }
+    context "with a connection timeout and a peer that never answers the TLS handshake" do
+      # The listening socket is never read from: the kernel completes the TCP
+      # handshake, so the client's TLS ClientHello goes unanswered.
+      let(:endpoint) { Async::HTTP::Endpoint.parse("https://127.0.0.1:#{port}", timeout: 0.2) }
       let(:wrapped) { described_class.new(endpoint, connection_timeout: 0.2) }
 
       it "raises IO::TimeoutError once the connection timeout elapses" do

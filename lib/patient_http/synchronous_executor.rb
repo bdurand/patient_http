@@ -6,8 +6,13 @@ module PatientHttp
   # Used for testing or when synchronous execution is needed.
   # Accepts configuration and optional callback hooks so it has
   # no dependency on any module-level singleton state.
+  #
+  # Connections are made through a {ClientPool} that lives for the one
+  # execution, so the connection timeout, TCP socket settings, protocol, proxy,
+  # and immediate retry rules apply exactly as they do on the async path.
   class SynchronousExecutor
     include RedirectHelper
+    include ImmediateRetries
 
     # @param task [RequestTask] the request task to execute
     # @param config [Configuration] the pool configuration
@@ -18,9 +23,18 @@ module PatientHttp
       @config = config
       @on_complete = on_complete
       @on_error = on_error
-      @proxy_client = nil
       @request_preparer = RequestPreparer.new(config)
       @response_reader = ResponseReader.new(nil, config: config)
+      @client_pool = ClientPool.new(
+        max_size: config.connection_pool_size,
+        connection_timeout: config.connection_timeout,
+        proxy_url: config.proxy_url,
+        retries: config.retries,
+        protocol: config.protocol,
+        connection_limit: config.max_connections_per_host,
+        tcp_keepalive: config.tcp_keepalive,
+        tcp_user_timeout: config.tcp_user_timeout
+      )
     end
 
     # Execute the request synchronously.
@@ -30,48 +44,11 @@ module PatientHttp
         start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
         begin
-          http_client = nil
           response_data = nil
           redirect_error = nil
 
           loop do
-            http_client&.close
-            @proxy_client&.close
-            @proxy_client = nil
-            outgoing = @request_preparer.prepare(@task.request, @task.id)
-            http_client = create_http_client(outgoing.url)
-            timeout = @task.request.timeout || @config.request_timeout
-
-            response_data = Async::Task.current.with_timeout(timeout) do
-              headers = outgoing.headers.to_h
-              body = Protocol::HTTP::Body::Buffered.wrap([@task.request.body.to_s]) if @task.request.body
-
-              endpoint = Async::HTTP::Endpoint.parse(outgoing.url)
-              endpoint = configure_endpoint(endpoint) if @config.connection_timeout
-
-              verb = @task.request.http_method.to_s.upcase
-              options = {
-                headers: headers,
-                body: body,
-                scheme: endpoint.scheme,
-                authority: endpoint.authority
-              }
-
-              request = Protocol::HTTP::Request[verb, endpoint.path, **options]
-              async_response = http_client.call(request)
-              # Note: headers that appear multiple times (e.g. set-cookie) are
-              # flattened to a single joined string value.
-              headers_hash = async_response.headers.to_h.transform_values(&:to_s)
-
-              chunks = @response_reader.read_raw_body(async_response, headers_hash)
-              body_content = @response_reader.decode_body(chunks, headers_hash)
-
-              {
-                status: async_response.status,
-                headers: ResponseReader.rewrite_content_encoding(headers_hash),
-                body: body_content
-              }
-            end
+            response_data = perform_request
 
             # Check for redirect
             break unless should_follow_redirect?(@task, response_data)
@@ -123,59 +100,44 @@ module PatientHttp
           )
           invoke_callback(error, :error)
         ensure
-          http_client&.close
-          @proxy_client&.close
-          @proxy_client = nil
+          @client_pool.close
         end
       end
     end
 
     private
 
-    # Create HTTP client with config settings (retries, proxy, connection timeout).
-    #
-    # The client is not wrapped in a Protocol::HTTP::AcceptEncoding middleware.
-    # That wrapper overwrites the request's accept-encoding header, which would
-    # ignore a caller opting out of compression, so response bodies are decoded
-    # by ResponseReader here exactly as they are on the async path.
-    #
-    # @param url [String] the resolved request URL
-    # @return [Async::HTTP::Client] the HTTP client
-    def create_http_client(url)
-      endpoint = Async::HTTP::Endpoint.parse(url)
-      endpoint = configure_endpoint(endpoint) if @config.connection_timeout
+    attr_reader :config
 
-      if @config.proxy_url
-        create_proxied_client(endpoint)
-      else
-        Async::HTTP::Client.new(endpoint, retries: @config.retries)
+    # Send the current task's request and read the whole response.
+    #
+    # Response bodies are decoded by ResponseReader rather than by a
+    # Protocol::HTTP::AcceptEncoding wrapper, which would overwrite an
+    # accept-encoding header set by a caller opting out of compression.
+    #
+    # @return [Hash] the response data with keys for :status, :headers, and :body
+    def perform_request
+      outgoing = @request_preparer.prepare(@task.request, @task.id)
+      timeout = @task.request.timeout || @config.request_timeout
+
+      Async::Task.current.with_timeout(timeout) do
+        headers = outgoing.headers.to_h
+        body = Protocol::HTTP::Body::Buffered.wrap([@task.request.body.to_s]) if @task.request.body
+
+        async_response = request_with_immediate_retries(@client_pool, @task.request, outgoing.url, headers, body)
+        # Note: headers that appear multiple times (e.g. set-cookie) are
+        # flattened to a single joined string value.
+        headers_hash = async_response.headers.to_h.transform_values(&:to_s)
+
+        chunks = @response_reader.read_raw_body(async_response, headers_hash)
+        body_content = @response_reader.decode_body(chunks, headers_hash)
+
+        {
+          status: async_response.status,
+          headers: ResponseReader.rewrite_content_encoding(headers_hash),
+          body: body_content
+        }
       end
-    end
-
-    # Create a proxied HTTP client.
-    #
-    # @param endpoint [Async::HTTP::Endpoint] the target endpoint
-    # @return [Async::HTTP::Client] the proxied client
-    def create_proxied_client(endpoint)
-      require "async/http/proxy"
-
-      proxy_endpoint = Async::HTTP::Endpoint.parse(@config.proxy_url)
-      proxy_endpoint = configure_endpoint(proxy_endpoint) if @config.connection_timeout
-      @proxy_client = Async::HTTP::Client.new(proxy_endpoint)
-
-      proxy = @proxy_client.proxy(endpoint)
-      Async::HTTP::Client.new(proxy.wrap_endpoint(endpoint), retries: @config.retries)
-    end
-
-    # Configure endpoint with connection timeout if specified.
-    #
-    # @param endpoint [Async::HTTP::Endpoint] the endpoint to configure
-    # @return [Async::HTTP::Endpoint] the configured endpoint
-    def configure_endpoint(endpoint)
-      Async::HTTP::Endpoint.new(
-        endpoint.url,
-        timeout: @config.connection_timeout
-      )
     end
 
     # Invoke callback synchronously.

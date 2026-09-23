@@ -63,11 +63,13 @@ module PatientHttp
     # @param url [String] request URL
     # @param headers [Hash] request headers
     # @param body [String, nil] request body
+    # @param client [Async::HTTP::Client, nil] the pooled client to send through,
+    #   normally the one {#client_for} returned for the URL; nil looks it up
     # @param block [Proc] optional block to process the response
     # @return [Protocol::HTTP::Response] the response
-    def request(http_method, url, headers, body, &block)
+    def request(http_method, url, headers, body, client: nil, &block)
       endpoint = Async::HTTP::Endpoint.parse(url)
-      client = client_for(endpoint)
+      client ||= client_for(endpoint)
 
       verb = http_method.to_s.upcase
 
@@ -114,15 +116,24 @@ module PatientHttp
     # Evict and close the client for the given URL.
     #
     # This forces a new connection to be established on the next request to this host.
+    # When the client that failed is given, only that client is evicted: a
+    # replacement installed for the host after an earlier eviction is left alone,
+    # so a late failure on the old client cannot discard a healthy new one.
     #
     # @param url [String] the request URL whose host client should be evicted
+    # @param client [Async::HTTP::Client, nil] the client that failed, or nil to
+    #   evict whichever client the pool currently holds for the host
     # @return [void]
-    def evict(url)
+    def evict(url, client = nil)
       endpoint = Async::HTTP::Endpoint.parse(url)
       key = host_key(endpoint)
 
-      client = @mutex.synchronize { @clients.delete(key) }
-      close_later(client) if client
+      evicted = @mutex.synchronize do
+        if client.nil? || @clients[key].equal?(client)
+          @clients.delete(key)
+        end
+      end
+      close_later(evicted) if evicted
     end
 
     # @return [Integer] number of clients in the pool

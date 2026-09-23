@@ -129,15 +129,17 @@ module PatientHttp
       end
     end
 
-    # The kernel takes the user timeout in milliseconds. Platforms without the
-    # option keep their default retransmission limits.
+    # The kernel takes the user timeout in milliseconds, and a value of zero
+    # restores its default instead of enforcing a limit, so a positive duration
+    # is rounded up to at least one millisecond. Platforms without the option
+    # keep their default retransmission limits.
     def apply_tcp_user_timeout(socket)
       return unless @tcp_user_timeout && defined?(::Socket::TCP_USER_TIMEOUT)
 
       raw_socket = tcp_socket(socket)
       return unless raw_socket
 
-      milliseconds = (@tcp_user_timeout * 1000).round
+      milliseconds = (@tcp_user_timeout * 1000).ceil
       raw_socket.setsockopt(::Socket::IPPROTO_TCP, ::Socket::TCP_USER_TIMEOUT, milliseconds)
     rescue ::SystemCallError
       nil
