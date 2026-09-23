@@ -784,6 +784,12 @@ RSpec.describe PatientHttp do
         end.to raise_error(ArgumentError, /must respond to #new_configuration and #configure/)
       end
 
+      it "returns the registered provider" do
+        provider = double("provider", new_configuration: PatientHttp::Configuration.new, configure: nil)
+
+        expect(described_class.register_configuration_provider(provider)).to be(provider)
+      end
+
       it "warns when a different provider replaces an existing one" do
         config = PatientHttp::Configuration.new
         first = double("first", new_configuration: config, configure: nil)

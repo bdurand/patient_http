@@ -497,6 +497,8 @@ module PatientHttp
           @default_configuration = nil
         end
       end
+
+      provider
     end
 
     # The registered configuration provider, if a job-system integration gem is loaded.
