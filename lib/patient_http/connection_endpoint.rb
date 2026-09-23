@@ -88,9 +88,16 @@ module PatientHttp
       end
     end
 
+    # The timeout is set on the underlying IO, which a TLS socket may not forward
+    # `timeout=` to, so both the socket and its IO are cleared.
     def clear_timeout(socket)
       if socket.respond_to?(:timeout=)
         socket.timeout = nil
+      end
+
+      raw_socket = socket.respond_to?(:to_io) ? socket.to_io : nil
+      if raw_socket && !raw_socket.equal?(socket) && raw_socket.respond_to?(:timeout=)
+        raw_socket.timeout = nil
       end
     end
 
@@ -112,7 +119,8 @@ module PatientHttp
         raw_socket.setsockopt(::Socket::IPPROTO_TCP, idle_option, @tcp_keepalive[:idle])
       end
       if defined?(::Socket::TCP_KEEPINTVL)
-        raw_socket.setsockopt(::Socket::IPPROTO_TCP, ::Socket::TCP_KEEPINTVL, @tcp_keepalive[:interval])
+        interval = @tcp_keepalive[:interval]
+        raw_socket.setsockopt(::Socket::IPPROTO_TCP, ::Socket::TCP_KEEPINTVL, interval)
       end
       if defined?(::Socket::TCP_KEEPCNT)
         raw_socket.setsockopt(::Socket::IPPROTO_TCP, ::Socket::TCP_KEEPCNT, @tcp_keepalive[:count])

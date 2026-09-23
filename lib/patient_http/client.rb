@@ -6,16 +6,7 @@ module PatientHttp
 
     def initialize(processor)
       @processor = processor
-      @client_pool = ClientPool.new(
-        max_size: config.connection_pool_size,
-        connection_timeout: config.connection_timeout,
-        proxy_url: config.proxy_url,
-        retries: config.retries,
-        protocol: config.protocol,
-        connection_limit: config.max_connections_per_host,
-        tcp_keepalive: config.tcp_keepalive,
-        tcp_user_timeout: config.tcp_user_timeout
-      )
+      @client_pool = ClientPool.from_config(config)
       @response_reader = ResponseReader.new(@processor)
       @request_preparer = RequestPreparer.new(config)
     end
@@ -41,8 +32,11 @@ module PatientHttp
         timeout = request.timeout || config.request_timeout
 
         Async::Task.current.with_timeout(timeout) do
-          client = @client_pool.client_for(Async::HTTP::Endpoint.parse(url))
-          async_response = request_with_immediate_retries(@client_pool, request, url, headers, body, client: client)
+          endpoint = Async::HTTP::Endpoint.parse(url)
+          client = @client_pool.client_for(endpoint)
+          async_response = request_with_immediate_retries(
+            @client_pool, request, endpoint, headers, body, client: client
+          )
           # Note: headers that appear multiple times (e.g. set-cookie) are
           # flattened to a single joined string value.
           headers_hash = async_response.headers.to_h.transform_values(&:to_s)

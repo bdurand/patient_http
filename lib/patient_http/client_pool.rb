@@ -15,6 +15,25 @@ module PatientHttp
       http2: Async::HTTP::Protocol::HTTP2
     }.freeze
 
+    class << self
+      # Build a pool with the connection settings from a configuration.
+      #
+      # @param config [Configuration] the configuration to read settings from
+      # @return [ClientPool] the new pool
+      def from_config(config)
+        new(
+          max_size: config.connection_pool_size,
+          connection_timeout: config.connection_timeout,
+          proxy_url: config.proxy_url,
+          retries: config.retries,
+          protocol: config.protocol,
+          connection_limit: config.max_connections_per_host,
+          tcp_keepalive: config.tcp_keepalive,
+          tcp_user_timeout: config.tcp_user_timeout
+        )
+      end
+    end
+
     def initialize(max_size:, connection_timeout: nil, proxy_url: nil, retries: 3, protocol: nil,
       connection_limit: nil, tcp_keepalive: nil, tcp_user_timeout: nil)
       if protocol && !PROTOCOLS.include?(protocol)
@@ -32,6 +51,8 @@ module PatientHttp
       @connection_limit = connection_limit
       @mutex = Mutex.new
       @proxy_client = nil
+      @closing_tasks = []
+      @closing_mutex = Mutex.new
     end
 
     attr_reader :max_size, :connection_timeout, :proxy_url, :retries, :protocol, :connection_limit,
@@ -60,7 +81,8 @@ module PatientHttp
     # Make a request.
     #
     # @param http_method [String, Symbol] HTTP method
-    # @param url [String] request URL
+    # @param url [String, Async::HTTP::Endpoint] request URL, or the endpoint
+    #   already parsed from it
     # @param headers [Hash] request headers
     # @param body [String, nil] request body
     # @param client [Async::HTTP::Client, nil] the pooled client to send through,
@@ -68,7 +90,7 @@ module PatientHttp
     # @param block [Proc] optional block to process the response
     # @return [Protocol::HTTP::Response] the response
     def request(http_method, url, headers, body, client: nil, &block)
-      endpoint = Async::HTTP::Endpoint.parse(url)
+      endpoint = url.is_a?(Async::HTTP::Endpoint) ? url : Async::HTTP::Endpoint.parse(url)
       client ||= client_for(endpoint)
 
       verb = http_method.to_s.upcase
@@ -94,6 +116,9 @@ module PatientHttp
 
     # Close all clients and release resources.
     #
+    # Clients evicted earlier whose close is still waiting for their in-flight
+    # requests are waited on as well, so no connection outlives the pool.
+    #
     # @return [void]
     def close
       @mutex.synchronize do
@@ -110,6 +135,13 @@ module PatientHttp
           nil
         end
         @proxy_client = nil
+      end
+
+      pending = @closing_mutex.synchronize { @closing_tasks.dup }
+      pending.each do |task|
+        task.wait
+      rescue
+        nil
       end
     end
 
@@ -156,11 +188,21 @@ module PatientHttp
     # waiting to be dispatched, so the close runs in its own task and neither the
     # evicting request nor the pool mutex waits for it. Outside a reactor the
     # block runs inline.
+    #
+    # The task is transient so it does not hold the evicting request's task
+    # open, and it is tracked so {#close} can wait for it. The tracking list has
+    # its own mutex because evictions spawn the task while holding the pool mutex.
     def close_later(client)
-      Async do
+      task = Async(transient: true) do |current|
         client.close
       rescue
         nil
+      ensure
+        @closing_mutex.synchronize { @closing_tasks.delete(current) }
+      end
+
+      unless task.finished?
+        @closing_mutex.synchronize { @closing_tasks << task }
       end
     end
 

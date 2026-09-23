@@ -25,16 +25,7 @@ module PatientHttp
       @on_error = on_error
       @request_preparer = RequestPreparer.new(config)
       @response_reader = ResponseReader.new(nil, config: config)
-      @client_pool = ClientPool.new(
-        max_size: config.connection_pool_size,
-        connection_timeout: config.connection_timeout,
-        proxy_url: config.proxy_url,
-        retries: config.retries,
-        protocol: config.protocol,
-        connection_limit: config.max_connections_per_host,
-        tcp_keepalive: config.tcp_keepalive,
-        tcp_user_timeout: config.tcp_user_timeout
-      )
+      @client_pool = ClientPool.from_config(config)
     end
 
     # Execute the request synchronously.
@@ -124,7 +115,9 @@ module PatientHttp
         headers = outgoing.headers.to_h
         body = Protocol::HTTP::Body::Buffered.wrap([@task.request.body.to_s]) if @task.request.body
 
-        async_response = request_with_immediate_retries(@client_pool, @task.request, outgoing.url, headers, body)
+        async_response = request_with_immediate_retries(
+          @client_pool, @task.request, outgoing.url, headers, body
+        )
         # Note: headers that appear multiple times (e.g. set-cookie) are
         # flattened to a single joined string value.
         headers_hash = async_response.headers.to_h.transform_values(&:to_s)

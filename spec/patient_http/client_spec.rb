@@ -467,6 +467,10 @@ RSpec.describe PatientHttp::Client do
         PatientHttp::Request.new(:post, "https://api.example.com/users", body: '{"name": "Bob"}')
       end
 
+      # WebMock bypasses Async::HTTP::Client's own retries, so the client is
+      # limited to one attempt to exercise the immediate retries alone.
+      before { config.retries = 1 }
+
       it "retries the request with its body on a new connection" do
         stub_request(:post, "https://api.example.com/users")
           .with(body: '{"name": "Bob"}')
@@ -515,6 +519,10 @@ RSpec.describe PatientHttp::Client do
         PatientHttp::Request.new(:post, "https://api.example.com/users", body: '{"name": "Bob"}')
       end
 
+      # WebMock bypasses Async::HTTP::Client's own retries, so the client is
+      # limited to one attempt to exercise the immediate retries alone.
+      before { config.retries = 1 }
+
       it "retries an idempotent request on a new connection" do
         stub_request(:get, "https://api.example.com/users")
           .to_raise(EOFError.new("end of file reached"))
@@ -550,17 +558,52 @@ RSpec.describe PatientHttp::Client do
         expect(a_request(:post, "https://api.example.com/users")).to have_been_made.once
       end
 
-      it "retries a non-idempotent request when the write failed with EPIPE" do
+      it "retries an idempotent request when the write failed with EPIPE" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_raise(Errno::EPIPE)
+          .then.to_return(status: 200, body: "ok")
+
+        result = Async { client.make_request(get_request, request_id) }.wait
+
+        expect(result[:status]).to eq(200)
+        expect(a_request(:get, "https://api.example.com/users")).to have_been_made.times(2)
+      end
+
+      it "does not retry a non-idempotent request when the write failed with EPIPE" do
         stub_request(:post, "https://api.example.com/users")
-          .with(body: '{"name": "Bob"}')
           .to_raise(Errno::EPIPE)
           .then.to_return(status: 201)
 
-        result = Async { client.make_request(post_request, request_id) }.wait
+        expect {
+          Async { client.make_request(post_request, request_id) }.wait
+        }.to raise_error(Errno::EPIPE)
 
-        expect(result[:status]).to eq(201)
-        expect(a_request(:post, "https://api.example.com/users").with(body: '{"name": "Bob"}'))
-          .to have_been_made.times(2)
+        expect(a_request(:post, "https://api.example.com/users")).to have_been_made.once
+      end
+
+      it "does not retry again a failure the async-http client retries itself" do
+        config.retries = 3
+        stub_request(:get, "https://api.example.com/users")
+          .to_raise(EOFError.new("end of file reached"))
+          .then.to_return(status: 200, body: "ok")
+
+        expect {
+          Async { client.make_request(get_request, request_id) }.wait
+        }.to raise_error(EOFError)
+
+        expect(a_request(:get, "https://api.example.com/users")).to have_been_made.once
+      end
+
+      it "retries a failure the async-http client does not retry itself" do
+        config.retries = 3
+        stub_request(:get, "https://api.example.com/users")
+          .to_raise(Errno::ECONNABORTED)
+          .then.to_return(status: 200, body: "ok")
+
+        result = Async { client.make_request(get_request, request_id) }.wait
+
+        expect(result[:status]).to eq(200)
+        expect(a_request(:get, "https://api.example.com/users")).to have_been_made.times(2)
       end
 
       it "retries an idempotent request when the kernel gave up on unacknowledged data" do

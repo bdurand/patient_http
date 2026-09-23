@@ -137,5 +137,42 @@ RSpec.describe PatientHttp::ClientPool do
       pool.close
       expect { pool.close }.not_to raise_error
     end
+
+    it "waits for an evicted client that is still closing" do
+      endpoint = Async::HTTP::Endpoint.parse("https://example.com/path")
+      client = pool.client_for(endpoint)
+      gate = Async::Notification.new
+      closed = false
+      closed_when_pool_closed = nil
+      allow(client).to receive(:close) do
+        gate.wait
+        closed = true
+      end
+
+      Async do |task|
+        pool.evict("https://example.com/path", client)
+        task.async { gate.signal }
+        pool.close
+        closed_when_pool_closed = closed
+      end.wait
+
+      expect(closed_when_pool_closed).to be(true)
+    end
+
+    it "runs the close of an evicted client as a transient task" do
+      endpoint = Async::HTTP::Endpoint.parse("https://example.com/path")
+      client = pool.client_for(endpoint)
+      gate = Async::Notification.new
+      allow(client).to receive(:close) { gate.wait }
+
+      Async do |task|
+        request_task = task.async { pool.evict("https://example.com/path", client) }
+        request_task.wait
+
+        expect(task.children.to_a.reject(&:transient?)).to be_empty
+        gate.signal
+        pool.close
+      end.wait
+    end
   end
 end

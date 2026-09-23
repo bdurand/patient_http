@@ -45,6 +45,27 @@ RSpec.describe PatientHttp::ConnectionEndpoint do
       expect(yielded).to be_closed
     end
 
+    it "clears the timeout on the IO behind a wrapper that does not forward it" do
+      raw_socket = nil
+      wrapper = Object.new
+      wrapper.define_singleton_method(:to_io) { raw_socket }
+      wrapper.define_singleton_method(:close) { raw_socket.close }
+      allow(endpoint).to receive(:connect) do
+        raw_socket = Socket.tcp("127.0.0.1", port)
+        raw_socket.timeout = 5
+        wrapper
+      end
+
+      socket = Async { wrapped.connect }.wait
+
+      begin
+        expect(socket).to be(wrapper)
+        expect(raw_socket.timeout).to be_nil
+      ensure
+        socket.close
+      end
+    end
+
     it "leaves the timeout in place on the endpoint it wraps" do
       socket = Async { endpoint.connect }.wait
 

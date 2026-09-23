@@ -276,7 +276,7 @@ module PatientHttp
       validate_positive_integer(:tcp_keepalive_idle, settings[:idle])
       validate_positive_integer(:tcp_keepalive_interval, settings[:interval])
       validate_positive_integer(:tcp_keepalive_count, settings[:count])
-      @tcp_keepalive = {idle: settings[:idle], interval: settings[:interval], count: settings[:count]}.freeze
+      @tcp_keepalive = settings.slice(:idle, :interval, :count).freeze
     end
 
     # Limit how long transmitted data may stay unacknowledged before the kernel aborts
