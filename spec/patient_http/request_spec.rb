@@ -170,6 +170,22 @@ RSpec.describe PatientHttp::Request do
     end
   end
 
+  describe "#idempotent?" do
+    [:get, :head, :put, :delete, :query].each do |http_method|
+      it "is true for #{http_method.to_s.upcase}" do
+        request = described_class.new(http_method, "https://api.example.com/users")
+        expect(request.idempotent?).to be(true)
+      end
+    end
+
+    [:post, :patch].each do |http_method|
+      it "is false for #{http_method.to_s.upcase}" do
+        request = described_class.new(http_method, "https://api.example.com/users", body: "data")
+        expect(request.idempotent?).to be(false)
+      end
+    end
+  end
+
   describe "redirect options" do
     it "defaults follow_method_changing_redirects to nil" do
       request = described_class.new(:get, "https://api.example.com")

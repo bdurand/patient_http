@@ -22,6 +22,10 @@ module PatientHttp
     # HTTP methods that must not carry a request body
     BODYLESS_METHODS = %i[get head delete].freeze
 
+    # HTTP methods whose requests can be sent again without changing the outcome.
+    # POST and PATCH are excluded, as they are by RFC 9110.
+    IDEMPOTENT_METHODS = [:get, :head, :put, :delete, :query].freeze
+
     # @return [Symbol] HTTP method (:get, :head, :post, :put, :patch, :delete, :query)
     attr_reader :http_method
 
@@ -171,6 +175,14 @@ module PatientHttp
     def body
       @body = @payload&.value if @body.equal?(UNDEFINED)
       @body
+    end
+
+    # Whether the request can be sent again without changing the outcome, based
+    # on its HTTP method.
+    #
+    # @return [Boolean]
+    def idempotent?
+      IDEMPOTENT_METHODS.include?(@http_method)
     end
 
     # Serialize to JSON hash.

@@ -15,7 +15,8 @@ module PatientHttp
       http2: Async::HTTP::Protocol::HTTP2
     }.freeze
 
-    def initialize(max_size:, connection_timeout: nil, proxy_url: nil, retries: 3, protocol: nil, connection_limit: nil)
+    def initialize(max_size:, connection_timeout: nil, proxy_url: nil, retries: 3, protocol: nil,
+      connection_limit: nil, tcp_keepalive: nil, tcp_user_timeout: nil)
       if protocol && !PROTOCOLS.include?(protocol)
         raise ArgumentError.new("protocol must be one of #{PROTOCOLS.keys.inspect}, got: #{protocol.inspect}")
       end
@@ -23,6 +24,8 @@ module PatientHttp
       @clients = {}
       @max_size = max_size
       @connection_timeout = connection_timeout
+      @tcp_keepalive = tcp_keepalive
+      @tcp_user_timeout = tcp_user_timeout
       @proxy_url = proxy_url
       @retries = retries
       @protocol = protocol
@@ -31,7 +34,8 @@ module PatientHttp
       @proxy_client = nil
     end
 
-    attr_reader :max_size, :connection_timeout, :proxy_url, :retries, :protocol, :connection_limit
+    attr_reader :max_size, :connection_timeout, :proxy_url, :retries, :protocol, :connection_limit,
+      :tcp_keepalive, :tcp_user_timeout
 
     # Get or create a client for the given endpoint.
     #
@@ -117,14 +121,8 @@ module PatientHttp
       endpoint = Async::HTTP::Endpoint.parse(url)
       key = host_key(endpoint)
 
-      @mutex.synchronize do
-        client = @clients.delete(key)
-        begin
-          client&.close
-        rescue
-          nil
-        end
-      end
+      client = @mutex.synchronize { @clients.delete(key) }
+      close_later(client) if client
     end
 
     # @return [Integer] number of clients in the pool
@@ -139,8 +137,17 @@ module PatientHttp
       return unless lru_key
 
       @clients.delete(lru_key)
-      begin
-        lru_client.close
+      close_later(lru_client)
+    end
+
+    # Closing a client waits for its in-flight requests to finish before closing
+    # their connections. Evictions run on a request task while other requests are
+    # waiting to be dispatched, so the close runs in its own task and neither the
+    # evicting request nor the pool mutex waits for it. Outside a reactor the
+    # block runs inline.
+    def close_later(client)
+      Async do
+        client.close
       rescue
         nil
       end
@@ -162,7 +169,7 @@ module PatientHttp
     end
 
     def make_direct_client(endpoint)
-      configured_endpoint = configure_endpoint(endpoint)
+      configured_endpoint = connectable_endpoint(configure_endpoint(endpoint))
       Async::HTTP::Client.new(configured_endpoint, retries: @retries, **client_options)
     end
 
@@ -173,7 +180,8 @@ module PatientHttp
       configured_endpoint = configure_endpoint(endpoint)
 
       proxy = @proxy_client.proxy(configured_endpoint)
-      Async::HTTP::Client.new(proxy.wrap_endpoint(configured_endpoint), retries: @retries, **client_options)
+      tunneled_endpoint = connectable_endpoint(proxy.wrap_endpoint(configured_endpoint))
+      Async::HTTP::Client.new(tunneled_endpoint, retries: @retries, **client_options)
     end
 
     def client_options
@@ -185,7 +193,17 @@ module PatientHttp
       if @connection_timeout
         proxy_endpoint = Async::HTTP::Endpoint.new(proxy_endpoint.url, timeout: @connection_timeout)
       end
-      Async::HTTP::Client.new(proxy_endpoint)
+      Async::HTTP::Client.new(connectable_endpoint(proxy_endpoint))
+    end
+
+    # The connection timeout reaches the socket as an IO timeout that would
+    # otherwise apply to every read and write for the life of the connection.
+    # The wrapper limits it to establishing the connection, and applies the
+    # TCP keepalive and user timeout settings to each new socket.
+    def connectable_endpoint(endpoint)
+      return endpoint unless @connection_timeout || @tcp_keepalive || @tcp_user_timeout
+
+      ConnectionEndpoint.new(endpoint, tcp_keepalive: @tcp_keepalive, tcp_user_timeout: @tcp_user_timeout)
     end
 
     def configure_endpoint(endpoint)

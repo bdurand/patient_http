@@ -461,6 +461,141 @@ RSpec.describe PatientHttp::Client do
       end
     end
 
+    context "when the server refuses the request before processing it" do
+      let(:request) do
+        PatientHttp::Request.new(:post, "https://api.example.com/users", body: '{"name": "Bob"}')
+      end
+
+      it "retries the request with its body on a new connection" do
+        stub_request(:post, "https://api.example.com/users")
+          .with(body: '{"name": "Bob"}')
+          .to_raise(Protocol::HTTP::RefusedError.new("GOAWAY: request not processed."))
+          .then.to_return(status: 201, body: "created")
+
+        result = Async do
+          client.decode_response(client.make_request(request, request_id))
+        end.wait
+
+        expect(result[:status]).to eq(201)
+        expect(result[:body]).to eq("created")
+        expect(a_request(:post, "https://api.example.com/users").with(body: '{"name": "Bob"}'))
+          .to have_been_made.times(2)
+      end
+
+      it "does not evict the pooled client" do
+        stub_request(:post, "https://api.example.com/users")
+          .to_raise(Protocol::HTTP::RefusedError.new("Connection is going away!"))
+          .then.to_return(status: 201)
+
+        client_pool = client.instance_variable_get(:@client_pool)
+        allow(client_pool).to receive(:evict).and_call_original
+
+        Async { client.make_request(request, request_id) }.wait
+
+        expect(client_pool).not_to have_received(:evict)
+      end
+
+      it "raises the refusal once the retry limit is reached" do
+        stub_request(:post, "https://api.example.com/users")
+          .to_raise(Protocol::HTTP::RefusedError.new("Connection is going away!"))
+
+        expect {
+          Async { client.make_request(request, request_id) }.wait
+        }.to raise_error(Protocol::HTTP::RefusedError)
+
+        expect(a_request(:post, "https://api.example.com/users"))
+          .to have_been_made.times(described_class::IMMEDIATE_RETRY_LIMIT + 1)
+      end
+    end
+
+    context "when the connection fails before any response byte" do
+      let(:get_request) { PatientHttp::Request.new(:get, "https://api.example.com/users") }
+      let(:post_request) do
+        PatientHttp::Request.new(:post, "https://api.example.com/users", body: '{"name": "Bob"}')
+      end
+
+      it "retries an idempotent request on a new connection" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_raise(EOFError.new("end of file reached"))
+          .then.to_return(status: 200, body: "ok")
+
+        result = Async do
+          client.decode_response(client.make_request(get_request, request_id))
+        end.wait
+
+        expect(result[:status]).to eq(200)
+        expect(a_request(:get, "https://api.example.com/users")).to have_been_made.times(2)
+      end
+
+      it "retries an idempotent request after a connection reset" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_raise(Errno::ECONNRESET)
+          .then.to_return(status: 200, body: "ok")
+
+        result = Async { client.make_request(get_request, request_id) }.wait
+
+        expect(result[:status]).to eq(200)
+      end
+
+      it "does not retry a non-idempotent request whose outcome is unknown" do
+        stub_request(:post, "https://api.example.com/users")
+          .to_raise(EOFError.new("end of file reached"))
+          .then.to_return(status: 201)
+
+        expect {
+          Async { client.make_request(post_request, request_id) }.wait
+        }.to raise_error(EOFError)
+
+        expect(a_request(:post, "https://api.example.com/users")).to have_been_made.once
+      end
+
+      it "retries a non-idempotent request when the write failed with EPIPE" do
+        stub_request(:post, "https://api.example.com/users")
+          .with(body: '{"name": "Bob"}')
+          .to_raise(Errno::EPIPE)
+          .then.to_return(status: 201)
+
+        result = Async { client.make_request(post_request, request_id) }.wait
+
+        expect(result[:status]).to eq(201)
+        expect(a_request(:post, "https://api.example.com/users").with(body: '{"name": "Bob"}'))
+          .to have_been_made.times(2)
+      end
+
+      it "retries an idempotent request when the kernel gave up on unacknowledged data" do
+        stub_request(:get, "https://api.example.com/users")
+          .to_raise(Errno::ETIMEDOUT)
+          .then.to_return(status: 200, body: "ok")
+
+        result = Async { client.make_request(get_request, request_id) }.wait
+
+        expect(result[:status]).to eq(200)
+        expect(a_request(:get, "https://api.example.com/users")).to have_been_made.times(2)
+      end
+
+      it "does not retry a non-idempotent request when the kernel gave up on unacknowledged data" do
+        stub_request(:post, "https://api.example.com/users")
+          .to_raise(Errno::ETIMEDOUT)
+          .then.to_return(status: 201)
+
+        expect {
+          Async { client.make_request(post_request, request_id) }.wait
+        }.to raise_error(Errno::ETIMEDOUT)
+
+        expect(a_request(:post, "https://api.example.com/users")).to have_been_made.once
+      end
+
+      it "does not retry a timeout" do
+        stub_request(:get, "https://api.example.com/users").to_timeout
+
+        expect {
+          Async { client.make_request(get_request, request_id) }.wait
+        }.to raise_error(Async::TimeoutError)
+
+        expect(a_request(:get, "https://api.example.com/users")).to have_been_made.once
+      end
+    end
+
     context "with response headers containing multiple values" do
       it "converts headers to hash with string values" do
         stub_request(:get, "https://api.example.com/users")

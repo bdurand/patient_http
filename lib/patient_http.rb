@@ -54,6 +54,7 @@ module PatientHttp
   autoload :ClientPool, File.join(__dir__, "patient_http/client_pool")
   autoload :CompletionExecutor, File.join(__dir__, "patient_http/completion_executor")
   autoload :Configuration, File.join(__dir__, "patient_http/configuration")
+  autoload :ConnectionEndpoint, File.join(__dir__, "patient_http/connection_endpoint")
   autoload :Encryptor, File.join(__dir__, "patient_http/encryptor")
   autoload :Error, File.join(__dir__, "patient_http/error")
   autoload :ExternalStorage, File.join(__dir__, "patient_http/external_storage")
