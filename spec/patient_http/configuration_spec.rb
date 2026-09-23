@@ -250,6 +250,78 @@ RSpec.describe PatientHttp::Configuration do
     end
   end
 
+  describe "#tcp_keepalive=" do
+    it "defaults to nil" do
+      expect(config.tcp_keepalive).to be_nil
+    end
+
+    it "treats an integer as the idle time with default probe settings" do
+      config.tcp_keepalive = 30
+      expect(config.tcp_keepalive).to eq({idle: 30, interval: 10, count: 3})
+    end
+
+    it "accepts a hash with idle, interval, and count" do
+      config.tcp_keepalive = {"idle" => 45, "interval" => 7, "count" => 4}
+      expect(config.tcp_keepalive).to eq({idle: 45, interval: 7, count: 4})
+    end
+
+    it "accepts nil to disable keepalive" do
+      config.tcp_keepalive = 30
+      config.tcp_keepalive = nil
+      expect(config.tcp_keepalive).to be_nil
+    end
+
+    it "rejects unknown keys" do
+      expect { config.tcp_keepalive = {idle: 30, probes: 3} }
+        .to raise_error(ArgumentError, /unknown keys: \[:probes\]/)
+    end
+
+    it "rejects a non-positive idle time" do
+      expect { config.tcp_keepalive = 0 }.to raise_error(ArgumentError, /tcp_keepalive_idle/)
+    end
+
+    it "rejects a fractional interval" do
+      expect { config.tcp_keepalive = {idle: 30, interval: 2.5} }
+        .to raise_error(ArgumentError, /tcp_keepalive_interval/)
+    end
+
+    it "can be set through the constructor" do
+      configured = described_class.new(tcp_keepalive: 60)
+      expect(configured.tcp_keepalive).to eq({idle: 60, interval: 10, count: 3})
+    end
+  end
+
+  describe "#tcp_user_timeout=" do
+    it "defaults to nil" do
+      expect(config.tcp_user_timeout).to be_nil
+    end
+
+    it "accepts a positive number of seconds" do
+      config.tcp_user_timeout = 30
+      expect(config.tcp_user_timeout).to eq(30)
+    end
+
+    it "accepts fractional seconds" do
+      config.tcp_user_timeout = 2.5
+      expect(config.tcp_user_timeout).to eq(2.5)
+    end
+
+    it "accepts nil to use the kernel default" do
+      config.tcp_user_timeout = 30
+      config.tcp_user_timeout = nil
+      expect(config.tcp_user_timeout).to be_nil
+    end
+
+    it "rejects a non-positive value" do
+      expect { config.tcp_user_timeout = 0 }.to raise_error(ArgumentError, /tcp_user_timeout/)
+    end
+
+    it "can be set through the constructor" do
+      configured = described_class.new(tcp_user_timeout: 45)
+      expect(configured.tcp_user_timeout).to eq(45)
+    end
+  end
+
   describe "#protocol=" do
     it "defaults to nil" do
       expect(config.protocol).to be_nil

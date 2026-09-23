@@ -2,16 +2,11 @@
 
 module PatientHttp
   class Client
+    include ImmediateRetries
+
     def initialize(processor)
       @processor = processor
-      @client_pool = ClientPool.new(
-        max_size: config.connection_pool_size,
-        connection_timeout: config.connection_timeout,
-        proxy_url: config.proxy_url,
-        retries: config.retries,
-        protocol: config.protocol,
-        connection_limit: config.max_connections_per_host
-      )
+      @client_pool = ClientPool.from_config(config)
       @response_reader = ResponseReader.new(@processor)
       @request_preparer = RequestPreparer.new(config)
     end
@@ -27,6 +22,7 @@ module PatientHttp
     # @return [Hash] the response data with keys for :status, :headers, and :body
     def make_request(request, request_id)
       async_response = nil
+      client = nil
 
       begin
         outgoing = @request_preparer.prepare(request, request_id)
@@ -36,7 +32,10 @@ module PatientHttp
         timeout = request.timeout || config.request_timeout
 
         Async::Task.current.with_timeout(timeout) do
-          async_response = @client_pool.request(request.http_method, url, headers, body)
+          endpoint = Async::HTTP::Endpoint.parse(url)
+          async_response = request_with_immediate_retries(
+            @client_pool, request, endpoint, headers, body
+          ) { |pooled_client| client = pooled_client }
           # Note: headers that appear multiple times (e.g. set-cookie) are
           # flattened to a single joined string value.
           headers_hash = async_response.headers.to_h.transform_values(&:to_s)
@@ -49,11 +48,12 @@ module PatientHttp
           }
         end
       rescue => e
-        # Close the response and evict the client for this host to ensure the
-        # stale connection is not reused for subsequent requests.
+        # Close the response and evict the client that failed so its stale
+        # connections are not reused. Evicting by identity leaves a replacement
+        # client for the host alone.
         async_response&.close
-        if connection_error?(e)
-          @client_pool.evict(request.url)
+        if client && connection_error?(e)
+          @client_pool.evict(url, client)
         end
         raise
       end

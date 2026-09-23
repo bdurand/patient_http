@@ -715,13 +715,38 @@ config = PatientHttp::Configuration.new(
   # Maximum number of hosts to maintain persistent connections for (default: 100)
   connection_pool_size: 100,
 
-  # Connection timeout in seconds (default: nil, uses request_timeout)
+  # Time limit in seconds for establishing a connection: the TCP connect and the
+  # TLS handshake (default: nil, no separate limit). Waiting for the response is
+  # bounded by request_timeout alone.
   connection_timeout: 10,
 
   # HTTP/HTTPS proxy URL (default: nil)
   proxy_url: "http://proxy.example.com:8080",
 
-  # Retries for failed requests (default: 3)
+  # TCP keepalive for pooled connections (default: nil, kernel defaults). An
+  # integer is the idle seconds before the first probe; a Hash may also set
+  # :interval (seconds between probes, default 10) and :count (probes before the
+  # peer is declared dead, default 3). Probes keep NAT and firewall mappings
+  # alive while a connection is idle and let a dead peer be detected before the
+  # connection is reused.
+  tcp_keepalive: 30,
+
+  # Seconds transmitted data may stay unacknowledged before the kernel aborts
+  # the connection (default: nil, kernel default; Linux only). A request sent to
+  # a peer that has silently gone away then fails after this long instead of
+  # after request_timeout. Data the peer has acknowledged is not affected, so a
+  # server that takes minutes to respond is never cut short.
+  tcp_user_timeout: 30,
+
+  # Attempts for a request that fails before any response byte arrives
+  # (default: 3; at least 3 attempts are always allowed). A failure is retried at
+  # once when that is known to be safe: the server refused the request before
+  # processing it (for example on an HTTP/2 GOAWAY), or the method is idempotent
+  # (GET, HEAD, PUT, DELETE, QUERY) and the connection failed, for example with
+  # EOF, a reset, a broken pipe, or the kernel giving up on unacknowledged data.
+  # A connection failure retries on a new connection. A POST or PATCH whose
+  # connection failed with an unknown outcome is not retried, and neither is a
+  # request that reached request_timeout.
   retries: 3,
 
   # Force the HTTP protocol to :http1 or :http2 (default: nil, negotiates with

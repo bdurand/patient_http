@@ -56,8 +56,21 @@ module PatientHttp
     #   will be kept alive for at one time.
     attr_reader :connection_pool_size
 
-    # @return [Numeric, nil] Connection timeout in seconds
+    # @return [Numeric, nil] Time limit in seconds for establishing a connection (TCP
+    #   connect and TLS handshake). It does not limit how long a request waits for a
+    #   response; request_timeout does that.
     attr_reader :connection_timeout
+
+    # @return [Hash, nil] TCP keepalive settings applied to each connection, with :idle
+    #   (seconds before the first probe), :interval (seconds between probes), and :count
+    #   (probes before the connection is declared dead), or nil to use the kernel defaults
+    attr_reader :tcp_keepalive
+
+    # @return [Numeric, nil] Seconds that transmitted data may stay unacknowledged before the
+    #   kernel aborts the connection (TCP_USER_TIMEOUT, Linux only). It fails a request whose
+    #   peer has silently gone away without waiting for the request timeout, and has no
+    #   effect once the request has been acknowledged and the server is working on it.
+    attr_reader :tcp_user_timeout
 
     # @return [String, nil] HTTP/HTTPS proxy URL (supports authentication)
     attr_reader :proxy_url
@@ -89,7 +102,12 @@ module PatientHttp
     #   that are always stripped from redirected requests, so sensitive headers are never
     #   sent to a redirect target
     # @param connection_pool_size [Integer] Maximum number of host clients to pool
-    # @param connection_timeout [Numeric, nil] Connection timeout in seconds
+    # @param connection_timeout [Numeric, nil] Time limit in seconds for establishing
+    #   a connection (TCP connect and TLS handshake)
+    # @param tcp_keepalive [Integer, Hash, nil] TCP keepalive idle seconds, or a Hash with
+    #   :idle, :interval, and :count; nil leaves the kernel defaults
+    # @param tcp_user_timeout [Numeric, nil] Seconds transmitted data may stay unacknowledged
+    #   before the kernel aborts the connection (Linux only); nil leaves the kernel default
     # @param proxy_url [String, nil] HTTP/HTTPS proxy URL (supports authentication)
     # @param retries [Integer] Number of retries for failed requests
     # @param protocol [Symbol, nil] HTTP protocol to use (:http1 or :http2); nil to negotiate
@@ -112,6 +130,8 @@ module PatientHttp
       redirect_strip_headers: [],
       connection_pool_size: 100,
       connection_timeout: nil,
+      tcp_keepalive: nil,
+      tcp_user_timeout: nil,
       proxy_url: nil,
       retries: 3,
       protocol: nil,
@@ -147,6 +167,8 @@ module PatientHttp
       self.redirect_strip_headers = redirect_strip_headers
       self.connection_pool_size = connection_pool_size
       self.connection_timeout = connection_timeout
+      self.tcp_keepalive = tcp_keepalive
+      self.tcp_user_timeout = tcp_user_timeout
       self.proxy_url = proxy_url
       self.retries = retries
       self.protocol = protocol
@@ -230,6 +252,46 @@ module PatientHttp
 
       validate_positive(:connection_timeout, value)
       @connection_timeout = value
+    end
+
+    # Enable TCP keepalive on pooled connections.
+    #
+    # @param value [Numeric, Hash, nil] the idle seconds before the first probe, or a
+    #   Hash with :idle and optional :interval (default 10 seconds) and :count
+    #   (default 3 probes); nil disables keepalive
+    # @return [void]
+    def tcp_keepalive=(value)
+      if value.nil?
+        @tcp_keepalive = nil
+        return
+      end
+
+      settings = value.is_a?(Hash) ? value.transform_keys(&:to_sym) : {idle: value}
+      unknown = settings.keys - [:idle, :interval, :count]
+      unless unknown.empty?
+        raise ArgumentError.new("tcp_keepalive has unknown keys: #{unknown.inspect}")
+      end
+
+      settings = {interval: 10, count: 3}.merge(settings)
+      validate_positive_integer(:tcp_keepalive_idle, settings[:idle])
+      validate_positive_integer(:tcp_keepalive_interval, settings[:interval])
+      validate_positive_integer(:tcp_keepalive_count, settings[:count])
+      @tcp_keepalive = settings.slice(:idle, :interval, :count).freeze
+    end
+
+    # Limit how long transmitted data may stay unacknowledged before the kernel aborts
+    # the connection. Applied only where the platform supports TCP_USER_TIMEOUT.
+    #
+    # @param value [Numeric, nil] seconds, or nil to use the kernel default
+    # @return [void]
+    def tcp_user_timeout=(value)
+      if value.nil?
+        @tcp_user_timeout = nil
+        return
+      end
+
+      validate_positive(:tcp_user_timeout, value)
+      @tcp_user_timeout = value
     end
 
     def proxy_url=(value)
@@ -460,6 +522,8 @@ module PatientHttp
         "redirect_strip_headers" => redirect_strip_headers,
         "connection_pool_size" => connection_pool_size,
         "connection_timeout" => connection_timeout,
+        "tcp_keepalive" => tcp_keepalive,
+        "tcp_user_timeout" => tcp_user_timeout,
         "proxy_url" => proxy_url,
         "retries" => retries,
         "protocol" => protocol,

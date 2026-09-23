@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.7.0
+
+### Fixed
+
+- `connection_timeout` now bounds only the TCP connect and TLS handshake. It was applied as the socket's IO timeout and so also capped every read and write for the life of the connection, including reads on reused keep-alive connections. A server that paused longer than the connection timeout before or between response bytes failed with `IO::TimeoutError` ("read timeout") even when `request_timeout` allowed more time. Once a connection is established the request timeout alone governs the exchange.
+- `IO::TimeoutError` is classified as a `:timeout` error. It was reported as `:connection` because it inherits from `IOError`.
+- Evicting a host's pooled client no longer stalls the processor. The eviction closed the client while holding the client pool lock, and closing waits for the host's in-flight requests to finish, so one request timing out blocked dispatch of every queued request, to any host, until the slowest in-flight request to that host completed. The client is now removed from the pool immediately and closed in a separate task once its requests finish.
+
+### Added
+
+- A request that fails before any response byte arrives is retried at once when the failure is known to be safe to retry: the server refused the request before processing it (`Protocol::HTTP::RefusedError`, raised for an HTTP/2 GOAWAY, a pooled connection that closed after it was acquired, or a refused stream), or the request method is idempotent (`Request#idempotent?`: GET, HEAD, PUT, DELETE, QUERY) and the connection failed. A connection failure evicts the host's pooled client first, so the retry uses a new connection. A request is retried up to `ImmediateRetries::IMMEDIATE_RETRY_LIMIT` times, or `retries - 1` times when the `retries` setting is higher. A POST or PATCH that fails with `EOFError`, `ECONNRESET`, `ECONNABORTED`, `EPIPE`, or `ETIMEDOUT` before a response is not retried, because the server may have processed it.
+- `Configuration#tcp_keepalive` enables TCP keepalive on pooled connections, as an idle time in seconds or a Hash with `:idle`, `:interval`, and `:count`. Keepalive probes keep NAT and firewall mappings alive while a connection is idle and let the kernel detect a dead peer, so the connection is retired before a request is sent on it.
+- `Configuration#tcp_user_timeout` sets `TCP_USER_TIMEOUT` (Linux only) on pooled connections: the seconds transmitted data may stay unacknowledged before the kernel aborts the connection with `ETIMEDOUT`. A request sent on a connection whose peer has silently gone away fails after this long instead of waiting for `request_timeout`. Acknowledged data is not affected, so a slow response is never cut short. `ETIMEDOUT` from the socket is retried at once for idempotent requests like the other connection failures; the request timeout itself is still never retried.
+
+### Changed
+
+- Retries are applied by patient_http alone. The async-http clients make a single attempt per request, so the async-http retries and the immediate retries no longer stack.
+- Requires async-http 0.99 or later and declares protocol-http 0.66 or later as a direct dependency, since its error classes are referenced directly.
+- `PatientHttp.execute_inline` and `SynchronousExecutor` make their connections through a `ClientPool` that lives for the one execution, so inline requests honor `connection_timeout`, `protocol`, `tcp_keepalive`, `tcp_user_timeout`, and the immediate retry rules exactly as processor-backed requests do. Previously the connection timeout capped inline response reads and no immediate retries applied inline.
+
 ## 1.6.1
 
 ### Fixed

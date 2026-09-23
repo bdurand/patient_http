@@ -72,11 +72,14 @@ module PatientHttp
 
       # Determine error type from exception.
       #
+      # IO::TimeoutError is matched before IOError, its superclass, so that a
+      # socket-level timeout is reported as a timeout rather than a connection error.
+      #
       # @param exception [Exception] the exception to categorize
       # @return [Symbol] the error type
       def error_type(exception)
         case exception
-        in Async::TimeoutError
+        in Async::TimeoutError | IO::TimeoutError
           :timeout
         in OpenSSL::SSL::SSLError
           :ssl
