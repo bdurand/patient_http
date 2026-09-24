@@ -1,28 +1,33 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # No-op task handler used for inline request execution.
+  # A task handler that does nothing, for inline request execution.
   #
-  # The {SynchronousExecutor} invokes the user callback directly, so the
-  # completion and error hooks here are never exercised in practice; they are
-  # defined as no-ops to satisfy the {TaskHandler} contract. Inline requests
-  # have no job queue, so retrying is not supported.
+  # {SynchronousExecutor} invokes the user callback directly, so these completion
+  # and error hooks never run. They exist only to satisfy the {TaskHandler}
+  # contract. Inline requests have no job queue, so they can't be retried.
   #
   # @api private
   class InlineTaskHandler < TaskHandler
-    # @param response [Response] the HTTP response object
-    # @param callback [String] callback class name
+    # Does nothing.
+    #
+    # @param response [Response] The HTTP response.
+    # @param callback [String] The callback class name.
     # @return [void]
     def on_complete(response, callback)
     end
 
-    # @param error [Error] the error object
-    # @param callback [String] callback class name
+    # Does nothing.
+    #
+    # @param error [Error] The error.
+    # @param callback [String] The callback class name.
     # @return [void]
     def on_error(error, callback)
     end
 
-    # @raise [NotImplementedError] inline requests cannot be retried
+    # Raises an error, because inline requests can't be retried.
+    #
+    # @raise [NotImplementedError] Always.
     def retry
       raise NotImplementedError, "Inline requests cannot be retried"
     end

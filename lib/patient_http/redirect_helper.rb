@@ -1,26 +1,25 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Shared redirect-checking logic used by both the async Processor
-  # and the SynchronousExecutor. Including classes must expose the
-  # active {Configuration} as `@config`.
+  # Redirect-checking logic shared by {Processor} and {SynchronousExecutor}.
+  # Including classes must expose the active {Configuration} as `@config`.
   #
   # @api private
   module RedirectHelper
     class << self
-      # Determine the HTTP method to use when following a redirect.
+      # Returns the HTTP method to use when following a redirect.
       #
       # The rules follow RFC 9110 and the WHATWG Fetch standard:
       #
-      # - 301 and 302 change POST to GET; every other method is preserved.
-      #   The QUERY specification states this POST exception does not apply
-      #   to QUERY, so a QUERY is re-sent as a QUERY.
-      # - 303 preserves GET and HEAD; every other method becomes GET.
+      # - 301 and 302 change `POST` to `GET`. Every other method is preserved. The
+      #   QUERY specification states that this `POST` exception doesn't apply to
+      #   `QUERY`, so a `QUERY` is re-sent as a `QUERY`.
+      # - 303 preserves `GET` and `HEAD`. Every other method becomes `GET`.
       # - 300, 307, and 308 preserve the method.
       #
-      # @param http_method [Symbol] the current request method
-      # @param status [Integer] the redirect status code
-      # @return [Symbol] the method for the redirected request
+      # @param http_method [Symbol] The current request method.
+      # @param status [Integer] The redirect status code.
+      # @return [Symbol] The method for the redirected request.
       def redirect_method(http_method, status)
         case status
         when 301, 302
@@ -32,21 +31,21 @@ module PatientHttp
         end
       end
 
-      # Check if following a redirect requires changing the request method.
+      # Returns `true` if following a redirect requires changing the request method.
       #
-      # @param http_method [Symbol] the current request method
-      # @param status [Integer] the redirect status code
-      # @return [Boolean] true if the method must change to follow the redirect
+      # @param http_method [Symbol] The current request method.
+      # @param status [Integer] The redirect status code.
+      # @return [Boolean] `true` if the method must change to follow the redirect.
       def method_change_required?(http_method, status)
         redirect_method(http_method, status) != http_method
       end
 
-      # Normalize header names used to strip headers from redirected requests.
-      # Names are downcased so they match header names case insensitively.
+      # Normalizes the names of headers to strip from redirected requests. Names are
+      # converted to lowercase so they match header names case insensitively.
       #
-      # @param names [String, Symbol, Array<String, Symbol>, nil] header names
-      # @return [Array<String>] frozen lowercase header names
-      # @raise [ArgumentError] if a name is not a string or symbol, or is empty
+      # @param names [String, Symbol, Array<String, Symbol>, nil] The header names.
+      # @return [Array<String>] The frozen lowercase header names.
+      # @raise [ArgumentError] If a name isn't a string or symbol, or is empty.
       def normalize_header_names(names)
         Array(names).map do |name|
           unless name.is_a?(String) || name.is_a?(Symbol)
@@ -62,11 +61,11 @@ module PatientHttp
 
     private
 
-    # Check if a redirect response should be followed.
+    # Returns `true` if a redirect response should be followed.
     #
-    # @param task [RequestTask] the request task
-    # @param response_data [Hash] the response data with status, headers, body
-    # @return [Boolean] true if the redirect should be followed
+    # @param task [RequestTask] The request task.
+    # @param response_data [Hash] The response data with the status, headers, and body.
+    # @return [Boolean] `true` if the redirect should be followed.
     def should_follow_redirect?(task, response_data)
       status = response_data[:status]
       return false unless FOLLOWABLE_REDIRECT_STATUSES.include?(status)
@@ -82,10 +81,10 @@ module PatientHttp
       true
     end
 
-    # Check if the request may change its method to follow a redirect.
-    # The request setting takes precedence over the configuration.
+    # Returns `true` if the request can change its method to follow a redirect. The
+    # request setting takes precedence over the configuration.
     #
-    # @param task [RequestTask] the request task
+    # @param task [RequestTask] The request task.
     # @return [Boolean]
     def follow_method_changing_redirect?(task)
       value = task.request.follow_method_changing_redirects
@@ -93,12 +92,12 @@ module PatientHttp
       value
     end
 
-    # Build the task for following a redirect, applying the configured
-    # header stripping rules.
+    # Builds the task that follows a redirect and applies the configured header
+    # stripping rules.
     #
-    # @param task [RequestTask] the request task
-    # @param response_data [Hash] the response data with status, headers, body
-    # @return [RequestTask] the redirect task
+    # @param task [RequestTask] The request task.
+    # @param response_data [Hash] The response data with the status, headers, and body.
+    # @return [RequestTask] The redirect task.
     def build_redirect_task(task, response_data)
       task.redirect_task(
         location: response_data[:headers]["location"],
@@ -107,11 +106,11 @@ module PatientHttp
       )
     end
 
-    # Check for either too-many-redirects or recursive redirect.
+    # Checks for too many redirects or a redirect loop.
     #
-    # @param task [RequestTask] the request task
-    # @param response_data [Hash] the response data with status, headers, body
-    # @return [RedirectError, nil] error if redirect should not proceed, nil otherwise
+    # @param task [RequestTask] The request task.
+    # @param response_data [Hash] The response data with the status, headers, and body.
+    # @return [RedirectError, nil] An error if the redirect shouldn't proceed, or `nil`.
     def check_redirect_error(task, response_data)
       location = response_data[:headers]["location"]
       redirect_url = resolve_redirect_url(task.request.url, location)
@@ -119,11 +118,11 @@ module PatientHttp
       check_too_many_redirects(task, location) || check_recursive_redirect(task, redirect_url)
     end
 
-    # Check if the redirect count has exceeded the maximum.
+    # Checks whether the redirect count exceeds the maximum.
     #
-    # @param task [RequestTask] the request task
-    # @param location [String] the redirect location URL
-    # @return [TooManyRedirectsError, nil] error if exceeded, nil otherwise
+    # @param task [RequestTask] The request task.
+    # @param location [String] The redirect location URL.
+    # @return [TooManyRedirectsError, nil] An error if the count exceeds the maximum, or `nil`.
     def check_too_many_redirects(task, location)
       return nil if task.redirects.size < task.max_redirects
 
@@ -137,11 +136,12 @@ module PatientHttp
       )
     end
 
-    # Check if the redirect URL has already been visited (redirect loop).
+    # Checks whether the redirect URL was already visited, which means there's a
+    # redirect loop.
     #
-    # @param task [RequestTask] the request task
-    # @param redirect_url [String] the resolved redirect URL
-    # @return [RecursiveRedirectError, nil] error if loop detected, nil otherwise
+    # @param task [RequestTask] The request task.
+    # @param redirect_url [String] The resolved redirect URL.
+    # @return [RecursiveRedirectError, nil] An error if there's a loop, or `nil`.
     def check_recursive_redirect(task, redirect_url)
       visited_urls = task.redirects + [task.request.url]
       return nil unless visited_urls.include?(redirect_url)
@@ -156,11 +156,11 @@ module PatientHttp
       )
     end
 
-    # Resolve a redirect URL, handling relative URLs.
+    # Resolves a redirect URL, including a relative URL, to an absolute URL.
     #
-    # @param base_url [String] The base URL
-    # @param location [String] The Location header value
-    # @return [String] The resolved absolute URL
+    # @param base_url [String] The base URL.
+    # @param location [String] The `Location` header value.
+    # @return [String] The resolved absolute URL.
     def resolve_redirect_url(base_url, location)
       base_uri = URI.parse(base_url)
       redirect_uri = URI.parse(location)

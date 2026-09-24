@@ -1,23 +1,25 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Handles synchronous/inline execution of HTTP requests.
+  # Executes HTTP requests synchronously, inline in the current thread.
   #
-  # Used for testing or when synchronous execution is needed.
-  # Accepts configuration and optional callback hooks so it has
-  # no dependency on any module-level singleton state.
+  # Use this class in tests or wherever you need synchronous execution. It takes a
+  # configuration and optional callback hooks, so it doesn't depend on any
+  # module-level state.
   #
-  # Connections are made through a {ClientPool} that lives for the one
-  # execution, so the connection timeout, TCP socket settings, protocol, proxy,
-  # and immediate retry rules apply exactly as they do on the async path.
+  # Connections go through a {ClientPool} that exists only for this execution. The
+  # connection timeout, TCP socket settings, protocol, proxy, and immediate retry
+  # rules apply the same way they do for asynchronous requests.
   class SynchronousExecutor
     include RedirectHelper
     include ImmediateRetries
 
-    # @param task [RequestTask] the request task to execute
-    # @param config [Configuration] the pool configuration
-    # @param on_complete [Proc, nil] hook called with response on success
-    # @param on_error [Proc, nil] hook called with error on failure
+    # Creates an executor for a request task.
+    #
+    # @param task [RequestTask] The request task to execute.
+    # @param config [Configuration] The pool configuration.
+    # @param on_complete [Proc, nil] A hook that is called with the response on success.
+    # @param on_error [Proc, nil] A hook that is called with the error on failure.
     def initialize(task, config:, on_complete: nil, on_error: nil)
       @task = task
       @config = config
@@ -28,7 +30,8 @@ module PatientHttp
       @client_pool = ClientPool.from_config(config)
     end
 
-    # Execute the request synchronously.
+    # Executes the request synchronously.
+    #
     # @return [void]
     def call
       Async do
@@ -100,13 +103,13 @@ module PatientHttp
 
     attr_reader :config
 
-    # Send the current task's request and read the whole response.
+    # Sends the current task's request and reads the whole response.
     #
-    # Response bodies are decoded by ResponseReader rather than by a
-    # Protocol::HTTP::AcceptEncoding wrapper, which would overwrite an
-    # accept-encoding header set by a caller opting out of compression.
+    # {ResponseReader} decodes response bodies. A `Protocol::HTTP::AcceptEncoding`
+    # wrapper isn't used, because it would overwrite an `accept-encoding` header
+    # that a caller sets to turn off compression.
     #
-    # @return [Hash] the response data with keys for :status, :headers, and :body
+    # @return [Hash] The response data with the keys `:status`, `:headers`, and `:body`.
     def perform_request
       outgoing = @request_preparer.prepare(@task.request, @task.id)
       timeout = @task.request.timeout || @config.request_timeout
@@ -134,10 +137,10 @@ module PatientHttp
       end
     end
 
-    # Invoke callback synchronously.
+    # Invokes the callback synchronously.
     #
-    # @param result [Response, Error] the result to pass to callback
-    # @param type [Symbol] :response or :error
+    # @param result [Response, Error] The result to pass to the callback.
+    # @param type [Symbol] Either `:response` or `:error`.
     def invoke_callback(result, type)
       callback_class = @task.callback.is_a?(Class) ? @task.callback : ClassHelper.resolve_class_name(@task.callback)
       callback = callback_class.new

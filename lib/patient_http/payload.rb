@@ -1,25 +1,25 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Handles encoding and decoding of HTTP response bodies for storage.
+  # Encodes and decodes HTTP response bodies for storage.
   #
-  # This class provides compression and encoding strategies for different content types
-  # to optimize storage and transmission of response data.
+  # This class chooses a compression and encoding strategy for each content type
+  # to reduce the size of stored and transmitted response data.
   class Payload
-    # @return [Symbol] the encoding type
+    # @return [Symbol] The encoding type.
     attr_reader :encoding
 
-    # @return [String] the encoded data
+    # @return [String] The encoded data.
     attr_reader :encoded_value
 
-    # @return [String, nil] the character set (if applicable)
+    # @return [String, nil] The character set, if there is one.
     attr_reader :charset
 
     class << self
-      # Reconstructs a Payload from a hash representation.
+      # Reconstructs a payload from a hash.
       #
-      # @param hash [Hash, nil] hash with "encoding" and "value" keys
-      # @return [Payload, nil] reconstructed payload or nil if hash is invalid
+      # @param hash [Hash, nil] A hash with the keys `"encoding"` and `"value"`.
+      # @return [Payload, nil] The reconstructed payload, or `nil` if the hash is invalid.
       def load(hash)
         return nil if hash.nil? || hash["value"].nil?
 
@@ -28,14 +28,15 @@ module PatientHttp
 
       # Encodes a value based on its MIME type.
       #
-      # For text-based content types, applies gzip compression if beneficial.
-      # For binary content, uses Base64 encoding. A value that a text MIME type
-      # claims is text but that does not hold text is encoded as binary as
-      # well, because the serialized form must survive JSON encoding.
+      # Text content is compressed with gzip if that makes it smaller. Binary
+      # content is Base64 encoded. If a value has a text MIME type but doesn't hold
+      # text, it's also encoded as binary, because the serialized form must survive
+      # JSON encoding.
       #
-      # @param value [String] the value to encode
-      # @param mimetype [String, nil] the MIME type of the content
-      # @return [Array(Symbol, String, String), nil] [encoding, encoded_value, charset] or nil if value is nil
+      # @param value [String] The value to encode.
+      # @param mimetype [String, nil] The MIME type of the content.
+      # @return [Array(Symbol, String, String), nil] An array of `[encoding, encoded_value,
+      #   charset]`, or `nil` if the value is `nil`.
       def encode(value, mimetype)
         return nil if value.nil?
 
@@ -49,10 +50,10 @@ module PatientHttp
 
       # Decodes an encoded value based on its encoding type.
       #
-      # @param encoded_value [String] the encoded data
-      # @param encoding [Symbol] the encoding type (:text, :binary, :gzipped)
-      # @param charset [String, nil] the character set (if applicable)
-      # @return [String, nil] the decoded value or nil if encoded_value is nil
+      # @param encoded_value [String] The encoded data.
+      # @param encoding [Symbol] The encoding type: `:text`, `:binary`, or `:gzipped`.
+      # @param charset [String, nil] The character set, if there is one.
+      # @return [String, nil] The decoded value, or `nil` if `encoded_value` is `nil`.
       def decode(encoded_value, encoding, charset)
         return nil if encoded_value.nil?
 
@@ -70,10 +71,10 @@ module PatientHttp
 
       private
 
-      # Encode a text value, compressing it when that makes it smaller.
+      # Encodes a text value and compresses it if that makes it smaller.
       #
-      # @param value [String] the text to encode
-      # @return [Array(Symbol, String, String)] [encoding, encoded_value, charset]
+      # @param value [String] The text to encode.
+      # @return [Array(Symbol, String, String)] An array of `[encoding, encoded_value, charset]`.
       def encode_text(value)
         return [:text, value, value.encoding.name] if value.bytesize < 4096
 
@@ -85,13 +86,13 @@ module PatientHttp
         end
       end
 
-      # Whether a value can be serialized as text. JSON encoding converts a
-      # string to UTF-8, so the value must either be valid text in its own
-      # encoding or hold bytes that are already valid UTF-8. A body still
-      # carrying a content encoding the reader could not decode holds neither,
-      # even though its MIME type names a text type.
+      # Returns `true` if a value can be serialized as text. JSON encoding converts
+      # a string to UTF-8, so the value must be valid text in its own encoding or
+      # hold bytes that are already valid UTF-8. A body that still has a content
+      # encoding that the reader couldn't decode is neither, even if its MIME type
+      # is a text type.
       #
-      # @param value [String] the value to check
+      # @param value [String] The value to check.
       # @return [Boolean]
       def text?(value)
         return value.valid_encoding? unless value.encoding == Encoding::BINARY
@@ -117,14 +118,15 @@ module PatientHttp
         end
       end
 
-      # Return the value as a UTF-8 encoded string if possible. If the value cannot
-      # be converted to UTF-8, return it in the response charset or ASCII-8BIT.
+      # Returns the value as a UTF-8 string if possible. If the value can't be
+      # converted to UTF-8, returns it in the response charset or in ASCII-8BIT.
       #
-      # Encoding strategy:
-      # 1. Force-encode to the response charset
-      # 2. Try to transcode to UTF-8 for storage efficiency
-      # 3. If transcoding fails, keep the charset encoding
-      # 4. If force-encoding itself fails, fall back to ASCII-8BIT
+      # This method uses the following steps:
+      #
+      # 1. Force the encoding to the response charset.
+      # 2. Try to transcode the value to UTF-8, which stores more efficiently.
+      # 3. If transcoding fails, keep the charset encoding.
+      # 4. If forcing the encoding fails, fall back to ASCII-8BIT.
       def text_value(value, charset)
         text = force_encoding(value, charset)
         unless text.encoding == Encoding::UTF_8
@@ -148,11 +150,11 @@ module PatientHttp
       end
     end
 
-    # Initializes a new Payload.
+    # Creates a payload.
     #
-    # @param encoding [Symbol] the encoding type
-    # @param encoded_value [String] the encoded data
-    # @param charset [String, nil] the character set (if applicable)
+    # @param encoding [Symbol] The encoding type.
+    # @param encoded_value [String] The encoded data.
+    # @param charset [String, nil] The character set, if there is one.
     def initialize(encoding, encoded_value, charset)
       @encoded_value = encoded_value
       @encoding = encoding
@@ -161,14 +163,14 @@ module PatientHttp
 
     # Returns the decoded value.
     #
-    # @return [String, nil] the decoded data
+    # @return [String, nil] The decoded data.
     def value
       self.class.decode(encoded_value, encoding, charset)
     end
 
-    # Converts to a hash representation for serialization.
+    # Converts the payload to a hash for serialization.
     #
-    # @return [Hash] hash with "encoding" and "value" keys
+    # @return [Hash] A hash with the keys `"encoding"` and `"value"`.
     def as_json
       {
         "encoding" => encoding.to_s,

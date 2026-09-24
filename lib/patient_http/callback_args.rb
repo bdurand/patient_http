@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Container for callback arguments that are passed to completion and error callbacks.
+  # A container for the arguments passed to completion and error callbacks.
   #
-  # CallbackArgs provides a structured way to access arguments passed from the original
-  # job to the callback workers. Arguments are stored with string keys internally
-  # (for JSON serialization compatibility) but can be accessed using either strings
-  # or symbols. All hash keys, including nested hashes and hashes within arrays, are
-  # deeply converted to strings.
+  # `CallbackArgs` gives callbacks structured access to the arguments from the
+  # original job. The arguments are stored with string keys so they serialize to
+  # JSON, but you can access them with either strings or symbols. All hash keys,
+  # including keys in nested hashes and in hashes within arrays, are converted to
+  # strings.
   #
   # @example Basic usage
   #   args = CallbackArgs.new(user_id: 123, action: "fetch")
@@ -24,23 +24,24 @@ module PatientHttp
   # @example From a response object
   #   response.callback_args[:user_id]
   class CallbackArgs
-    # JSON-native types that are allowed as values
+    # The JSON-native types allowed as values.
     ALLOWED_TYPES = [NilClass, TrueClass, FalseClass, String, Integer, Float].freeze
 
     class << self
-      # Reconstruct a CallbackArgs from a hash (used during deserialization).
+      # Reconstructs a `CallbackArgs` object from a hash during deserialization.
       #
-      # @param hash [Hash, nil] hash with string keys
-      # @return [CallbackArgs] reconstructed CallbackArgs
+      # @param hash [Hash, nil] A hash with string keys.
+      # @return [CallbackArgs] The reconstructed object.
       def load(hash)
         new(hash || {}, validate: false)
       end
 
-      # Validate that a value is a JSON-native type (recursively for arrays and hashes).
+      # Validates that a value is a JSON-native type. Arrays and hashes are
+      # validated recursively.
       #
-      # @param value [Object] the value to validate
-      # @param path [String] the path to the value (for error messages)
-      # @raise [ArgumentError] if the value is not a JSON-native type
+      # @param value [Object] The value to validate.
+      # @param path [String] The path to the value, used in error messages.
+      # @raise [ArgumentError] If the value is not a JSON-native type.
       # @return [void]
       def validate_value!(value, path = "value")
         case value
@@ -63,10 +64,11 @@ module PatientHttp
         end
       end
 
-      # Deep convert all hash keys to strings, including nested hashes and hashes in arrays.
+      # Converts all hash keys to strings, including keys in nested hashes and in
+      # hashes within arrays.
       #
-      # @param value [Object] the value to convert
-      # @return [Object] the converted value with all hash keys as strings
+      # @param value [Object] The value to convert.
+      # @return [Object] The converted value with all hash keys as strings.
       def deep_stringify_keys(value)
         case value
         when Hash
@@ -79,12 +81,13 @@ module PatientHttp
       end
     end
 
-    # Initialize a CallbackArgs with a hash.
+    # Creates a `CallbackArgs` object from a hash.
     #
-    # @param args [Hash, nil] arguments to store (keys will be deeply converted to strings)
-    # @param validate [Boolean] whether to validate values are JSON-native types
-    # @raise [ArgumentError] if args is not nil and doesn't respond to to_h
-    # @raise [ArgumentError] if any value is not a JSON-native type (when validate is true)
+    # @param args [Hash, nil] The arguments to store. All keys, including nested keys, are
+    #   converted to strings.
+    # @param validate [Boolean] Whether to validate that values are JSON-native types.
+    # @raise [ArgumentError] If `args` is not `nil` and doesn't respond to `to_h`.
+    # @raise [ArgumentError] If `validate` is `true` and a value is not a JSON-native type.
     def initialize(args = nil, validate: true)
       if args.nil?
         @data = {}
@@ -101,11 +104,11 @@ module PatientHttp
       end
     end
 
-    # Access an argument by key.
+    # Returns the argument for a key.
     #
-    # @param key [String, Symbol] the key to access
-    # @return [Object] the value
-    # @raise [KeyError] if the key does not exist
+    # @param key [String, Symbol] The key to access.
+    # @return [Object] The value.
+    # @raise [KeyError] If the key does not exist.
     def [](key)
       string_key = key.to_s
       unless @data.include?(string_key)
@@ -115,60 +118,60 @@ module PatientHttp
       @data[string_key]
     end
 
-    # Access an argument by key with an optional default.
+    # Returns the argument for a key, or a default value if the key doesn't exist.
     #
-    # @param key [String, Symbol] the key to access
-    # @param default [Object] the default value to return if key doesn't exist
-    # @return [Object] the value or default
+    # @param key [String, Symbol] The key to access.
+    # @param default [Object] The value to return if the key doesn't exist.
+    # @return [Object] The value or the default.
     def fetch(key, default = nil)
       @data.fetch(key.to_s, default)
     end
 
-    # Check if a key exists.
+    # Returns `true` if a key exists.
     #
-    # @param key [String, Symbol] the key to check
-    # @return [Boolean] true if the key exists
+    # @param key [String, Symbol] The key to check.
+    # @return [Boolean] `true` if the key exists.
     def include?(key)
       @data.include?(key.to_s)
     end
 
-    # Convert to a hash with symbol keys (shallow).
+    # Converts the arguments to a hash with symbol keys.
     #
-    # Only top-level keys are symbolized. Nested hash keys remain as strings.
+    # Only top-level keys are converted to symbols. Nested hash keys remain strings.
     #
-    # @return [Hash] hash with symbol keys
+    # @return [Hash] A hash with symbol keys.
     def to_h
       @data.transform_keys(&:to_sym)
     end
 
-    # Convert to hash with string keys for serialization.
+    # Converts the arguments to a hash with string keys for serialization.
     #
-    # @return [Hash] hash with string keys
+    # @return [Hash] A hash with string keys.
     def as_json
       @data.dup
     end
 
     alias_method :dump, :as_json
 
-    # Check if there are no arguments.
+    # Returns `true` if there are no arguments.
     #
-    # @return [Boolean] true if empty
+    # @return [Boolean] `true` if there are no arguments.
     def empty?
       @data.empty?
     end
 
-    # Return the number of arguments.
+    # Returns the number of arguments.
     #
-    # @return [Integer] the count
+    # @return [Integer] The number of arguments.
     def size
       @data.size
     end
 
     alias_method :length, :size
 
-    # Return the keys.
+    # Returns the argument keys.
     #
-    # @return [Array<String>] the keys
+    # @return [Array<String>] The keys.
     def keys
       @data.keys
     end

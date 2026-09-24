@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 module PatientHttp
+  # Adapters that store large payloads outside of the job queue.
   module PayloadStore
     autoload :Base, File.join(__dir__, "payload_store/base")
     autoload :ActiveRecordStore, File.join(__dir__, "payload_store/active_record_store")

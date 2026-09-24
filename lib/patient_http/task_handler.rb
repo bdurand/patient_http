@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Abstract base class for handling task lifecycle operations.
+  # The abstract base class for task lifecycle operations.
   #
-  # TaskHandler abstracts the job system integration, allowing RequestTask
-  # to work with any job system without direct dependencies. Implementations
-  # handle completion callbacks, error callbacks, and job retry operations.
+  # A task handler connects {RequestTask} to a job system, so request tasks don't
+  # depend on any specific job system. Implementations handle completion callbacks,
+  # error callbacks, and job retries.
   #
   # @abstract Subclass and implement all methods to create a concrete handler.
   #
@@ -24,30 +24,30 @@ module PatientHttp
   #     end
   #   end
   class TaskHandler
-    # Trigger the completion callback with the response.
+    # Triggers the completion callback with the response.
     #
-    # @param response [Response] the HTTP response object
-    # @param callback [String] callback class name
+    # @param response [Response] The HTTP response.
+    # @param callback [String] The callback class name.
     # @return [void]
     def on_complete(response, callback)
       raise NotImplementedError, "#{self.class}#on_complete must be implemented"
     end
 
-    # Trigger the error callback with the error.
+    # Triggers the error callback with the error.
     #
-    # @param error [Error] the error object
-    # @param callback [String] callback class name
+    # @param error [Error] The error.
+    # @param callback [String] The callback class name.
     # @return [void]
     def on_error(error, callback)
       raise NotImplementedError, "#{self.class}#on_error must be implemented"
     end
 
-    # Re-enqueue the original job for retry.
+    # Re-enqueues the original job for retry.
     #
-    # Called when a request cannot be completed (e.g., processor shutdown)
-    # and needs to be retried later.
+    # The processor calls this method when a request can't be completed, such as
+    # during processor shutdown, and must be retried later.
     #
-    # @return [String] the new job ID
+    # @return [String] The new job ID.
     def retry
       raise NotImplementedError, "#{self.class}#retry must be implemented"
     end

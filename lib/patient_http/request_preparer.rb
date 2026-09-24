@@ -1,29 +1,32 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Prepares a {Request} to be sent: resolves any secret references, sets the
-  # send-time headers (x-request-id and the default user-agent), and invokes any
-  # preprocessors attached to the request.
+  # Prepares a {Request} to be sent. The preparer resolves secret references, sets
+  # the send-time headers `x-request-id` and the default `user-agent`, and calls
+  # the preprocessors attached to the request.
   class RequestPreparer
-    # Raised when a request references a preprocessor name that is not registered.
+    # Raised when a request references a preprocessor name that isn't registered.
     class PreprocessorNotFoundError < StandardError; end
 
-    # @param config [Configuration] the configuration holding secrets and preprocessors
+    # Creates a request preparer.
+    #
+    # @param config [Configuration] The configuration with the secrets and preprocessors.
     def initialize(config)
       @config = config
     end
 
-    # Prepare a request for sending.
+    # Prepares a request for sending.
     #
-    # Secret references in the headers and query params are resolved first, then the
-    # x-request-id and default user-agent headers are set, and finally each
-    # preprocessor attached to the request is invoked in order with the outgoing
-    # request. Each preprocessor sees any changes made by the ones before it.
+    # This method resolves secret references in the headers and query parameters,
+    # and then sets the `x-request-id` and default `user-agent` headers. Finally, it
+    # calls each preprocessor attached to the request, in order, with the outgoing
+    # request. Each preprocessor sees the changes made by the ones before it.
     #
-    # @param request [Request] the request to prepare
-    # @param request_id [String] unique request identifier set as the x-request-id header
-    # @return [OutgoingRequest] the outgoing request with the final URL and headers
-    # @raise [PreprocessorNotFoundError] if the request references an unregistered preprocessor
+    # @param request [Request] The request to prepare.
+    # @param request_id [String] The unique request identifier. It's sent as the
+    #   `x-request-id` header.
+    # @return [OutgoingRequest] The outgoing request with the final URL and headers.
+    # @raise [PreprocessorNotFoundError] If the request references an unregistered preprocessor.
     def prepare(request, request_id)
       headers = @config.secret_manager.resolve_headers(request.headers.to_h)
       headers["x-request-id"] = request_id

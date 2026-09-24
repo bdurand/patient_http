@@ -1,11 +1,10 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Handles external storage of large payloads.
+  # Stores, fetches, and deletes large payloads in external storage.
   #
-  # This class provides methods for storing, fetching, and deleting
-  # payloads from external storage. It is decoupled from the models
-  # being stored (Request, Response, Error).
+  # This class doesn't depend on the models it stores, such as {Request},
+  # {Response}, and {Error}.
   #
   # @example Storing a large payload
   #   external_storage = ExternalStorage.new(config)
@@ -20,59 +19,63 @@ module PatientHttp
   #     external_storage.delete(data)
   #   end
   class ExternalStorage
-    # Key used in serialized JSON to indicate an external storage reference
+    # The key that marks an external storage reference in serialized JSON.
     REFERENCE_KEY = "$ref"
 
+    # Raised when no payload store is configured, or a reference names a store that
+    # isn't registered.
     class PayloadStoreNotFoundError < StandardError; end
+
+    # Raised when a stored payload isn't found.
     class PayloadNotFoundError < StandardError; end
 
     class << self
-      # Check if a hash is a storage reference.
+      # Returns `true` if a hash is a storage reference.
       #
-      # @param data [Hash, Object] Data to check
-      # @return [Boolean] true if this is a reference to external storage
+      # @param data [Hash, Object] The data to check.
+      # @return [Boolean] `true` if this is a reference to external storage.
       def storage_ref?(data)
         data.is_a?(Hash) && data.key?(REFERENCE_KEY)
       end
     end
 
-    # @return [Configuration] the pool configuration
+    # @return [Configuration] The pool configuration.
     attr_reader :config
 
-    # Create a new ExternalStorage instance.
+    # Creates an external storage object.
     #
-    # @param config [Configuration] the pool configuration
+    # @param config [Configuration] The pool configuration.
     def initialize(config)
       @config = config
     end
 
-    # Check if a hash is a storage reference.
+    # Returns `true` if a hash is a storage reference.
     #
-    # @param data [Hash, Object] Data to check
-    # @return [Boolean] true if this is a reference to external storage
+    # @param data [Hash, Object] The data to check.
+    # @return [Boolean] `true` if this is a reference to external storage.
     def storage_ref?(data)
       self.class.storage_ref?(data)
     end
 
-    # Check if external storage is enabled (i.e. a payload store is configured).
+    # Returns `true` if external storage is enabled, which means a payload store is
+    # configured.
     #
-    # @return [Boolean] true if external storage is configured
+    # @return [Boolean] `true` if external storage is configured.
     def enabled?
       !!config.payload_store
     end
 
-    # Store a hash externally if it exceeds the configured threshold.
+    # Stores a hash externally if it exceeds the size threshold.
     #
-    # If no payload store is configured, or if the hash is below the
-    # threshold, the original hash is returned unchanged.
+    # If the hash is below the threshold, this method returns the original hash
+    # unchanged.
     #
-    # @param data [Hash] Hash to potentially store
-    # @param max_size [Integer, nil] Optional payload size threshold in bytes.
-    #   The JSON payload will only be stored externally if it exceeds this size.
-    #   If the JSON payload does not exceed the threshold, the original hash is returned.
-    #   When nil (the default), the payload is always stored externally.
-    # @return [Hash] Reference hash if stored, original hash if not
-    # @raise [PayloadStoreNotFoundError] If no payload store is configured
+    # @param data [Hash] The hash to store.
+    # @param max_size [Integer, nil] The size threshold, in bytes. The payload is stored
+    #   externally only if its JSON exceeds this size. Otherwise, the original hash is
+    #   returned. If `nil`, the payload is always stored externally. Defaults to `nil`.
+    # @return [Hash] A reference hash if the payload was stored, or the original hash.
+    # @raise [PayloadStoreNotFoundError] If no payload store is configured.
     def store(data, max_size: nil)
       store = config.payload_store
       raise PayloadStoreNotFoundError.new("No payload store configured") unless store
@@ -91,12 +94,12 @@ module PatientHttp
       }
     end
 
-    # Fetch a hash from external storage.
+    # Fetches a hash from external storage.
     #
-    # @param data [Hash] Reference hash containing storage location
-    # @return [Hash] Original hash from storage
-    # @raise [PayloadStoreNotFoundError] If the store is not registered
-    # @raise [PayloadNotFoundError] If the stored payload is not found
+    # @param data [Hash] The reference hash with the storage location.
+    # @return [Hash] The original hash from storage.
+    # @raise [PayloadStoreNotFoundError] If the store is not registered.
+    # @raise [PayloadNotFoundError] If the stored payload is not found.
     def fetch(data)
       raise ArgumentError.new("Not a storage reference") unless self.class.storage_ref?(data)
 
@@ -113,12 +116,12 @@ module PatientHttp
       stored_data
     end
 
-    # Delete payload from external storage.
+    # Deletes a payload from external storage.
     #
-    # This method is idempotent - it's safe to call on non-reference hashes,
-    # already-deleted payloads, or nil values.
+    # This method is idempotent. You can call it on hashes that aren't references,
+    # on payloads that are already deleted, and on `nil`.
     #
-    # @param data [Hash, nil] Reference hash (or regular hash, which is ignored)
+    # @param data [Hash, nil] The reference hash. Other hashes are ignored.
     # @return [void]
     def delete(data)
       return unless data && self.class.storage_ref?(data)

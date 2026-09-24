@@ -1,22 +1,21 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Fixed pool of worker threads that deliver completed request results.
+  # A fixed pool of worker threads that deliver the results of completed requests.
   #
-  # The processor's reactor thread hands each finished HTTP exchange to this
-  # pool so response decoding, serialization, and callback delivery never
-  # block the event loop. Jobs are arbitrary callables consumed from a single
-  # queue.
+  # The processor's reactor thread hands each finished HTTP exchange to this pool,
+  # so response decoding, serialization, and callback delivery never block the
+  # event loop. Jobs are callables that the workers take from a single queue.
   #
   # @api private
   class CompletionExecutor
-    # Initialize the executor and start its worker threads.
+    # Creates the executor and starts its worker threads.
     #
-    # @param threads [Integer] number of worker threads
-    # @param logger [Logger, nil] logger for unexpected job errors
-    # @param thread_name_prefix [String] prefix for worker thread names
-    # @param on_finished [#call, nil] invoked after each job completes, outside
-    #   any executor lock, so the owner can re-check idle conditions
+    # @param threads [Integer] The number of worker threads.
+    # @param logger [Logger, nil] The logger for unexpected job errors.
+    # @param thread_name_prefix [String] The prefix for worker thread names.
+    # @param on_finished [#call, nil] A callable that runs after each job completes,
+    #   outside any executor lock, so the owner can check idle conditions again.
     def initialize(threads:, logger: nil, thread_name_prefix: "patient-http-completion", on_finished: nil)
       @queue = Thread::Queue.new
       @logger = logger
@@ -34,10 +33,10 @@ module PatientHttp
       end
     end
 
-    # Enqueue a job for execution.
+    # Enqueues a job.
     #
-    # @param job [#call] the job to run
-    # @raise [ClosedQueueError] if the executor has been shut down
+    # @param job [#call] The job to run.
+    # @raise [ClosedQueueError] If the executor has been shut down.
     # @return [void]
     def enqueue(job)
       @mutex.synchronize { @outstanding += 1 }
@@ -50,30 +49,30 @@ module PatientHttp
       nil
     end
 
-    # Check whether the executor has no queued or running jobs.
+    # Returns `true` if the executor has no queued or running jobs.
     #
     # @return [Boolean]
     def idle?
       @mutex.synchronize { @outstanding == 0 }
     end
 
-    # Check whether the given thread is one of this executor's workers.
+    # Returns `true` if the given thread is one of this executor's workers.
     #
-    # @param thread [Thread] the thread to check
+    # @param thread [Thread] The thread to check.
     # @return [Boolean]
     def worker_thread?(thread = Thread.current)
       @threads.include?(thread)
     end
 
-    # Shut down the executor: close the queue so workers drain remaining jobs
-    # and exit, then join them within the timeout. Workers still alive after
-    # the deadline are killed; their tasks remain durably tracked and are
-    # recovered by the owner's re-enqueue logic.
+    # Shuts down the executor. This method closes the queue so workers finish the
+    # remaining jobs and exit, and then joins the workers within the timeout. It
+    # kills any worker still alive after the deadline. The tasks of killed workers
+    # stay tracked, and the owner's re-enqueue logic recovers them.
     #
-    # Safe to call more than once and from a worker thread itself (the
-    # current thread is never joined or killed).
+    # You can call this method more than once, and from a worker thread. It never
+    # joins or kills the current thread.
     #
-    # @param timeout [Numeric] seconds to wait for workers to drain
+    # @param timeout [Numeric] The number of seconds to wait for workers to finish.
     # @return [void]
     def shutdown(timeout: 5)
       @queue.close
@@ -96,10 +95,9 @@ module PatientHttp
 
     private
 
-    # Drop jobs left in the closed queue by workers that were killed at the
-    # shutdown deadline. Those jobs can never run, so they must stop counting
-    # against the outstanding total or the executor would never report itself
-    # idle again.
+    # Drops jobs left in the closed queue by workers that were killed at the
+    # shutdown deadline. Those jobs can never run. If they still counted toward
+    # the outstanding total, the executor would never report itself as idle.
     #
     # @return [void]
     def discard_undrained_jobs

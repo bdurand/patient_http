@@ -1,9 +1,15 @@
 # frozen_string_literal: true
 
 module PatientHttp
+  # Sends HTTP requests for a {Processor} through a pool of HTTP clients.
+  #
+  # @api private
   class Client
     include ImmediateRetries
 
+    # Creates a client for a processor.
+    #
+    # @param processor [Processor] The processor that owns the client.
     def initialize(processor)
       @processor = processor
       @client_pool = ClientPool.from_config(config)
@@ -11,15 +17,15 @@ module PatientHttp
       @request_preparer = RequestPreparer.new(config)
     end
 
-    # Make an asynchronous HTTP request.
+    # Makes an asynchronous HTTP request.
     #
-    # The returned body is the array of raw (possibly compressed) body chunks;
-    # use {#decode_response} to produce the final body string. Splitting the
-    # decode out keeps CPU-bound work off the reactor thread.
+    # The returned body is an array of raw body chunks, which might be compressed.
+    # Use {#decode_response} to produce the final body string. Decoding in a
+    # separate step keeps CPU-bound work off the reactor thread.
     #
-    # @param request [Request] the request to make
-    # @param request_id [String] unique request identifier
-    # @return [Hash] the response data with keys for :status, :headers, and :body
+    # @param request [Request] The request to make.
+    # @param request_id [String] A unique request identifier.
+    # @return [Hash] The response data with the keys `:status`, `:headers`, and `:body`.
     def make_request(request, request_id)
       async_response = nil
       client = nil
@@ -59,18 +65,18 @@ module PatientHttp
       end
     end
 
-    # Decode raw response data into deliverable response data.
+    # Decodes raw response data into response data that is ready to deliver.
     #
-    # Joins and inflates the raw body chunks, applies the charset, and rewrites
-    # the content-encoding header to name only the encodings still applied to
-    # the body. The header is removed when nothing is left, and kept when the
-    # server used an encoding the reader cannot decode, so the delivered
-    # response always describes the body it carries. This is CPU-bound work
-    # intended to run on a completion worker thread.
+    # This method joins and inflates the raw body chunks, applies the charset, and
+    # rewrites the `content-encoding` header to name only the encodings still
+    # applied to the body. If no encodings remain, the header is removed. If the
+    # server used an encoding that the reader can't decode, the header is kept.
+    # The delivered response always describes the body it carries. This work is
+    # CPU-bound and runs on a completion worker thread.
     #
-    # @param response_data [Hash] raw response data from {#make_request}
-    # @return [Hash] response data with the decoded body string
-    # @raise [ResponseTooLargeError] if the inflated body exceeds max_response_size
+    # @param response_data [Hash] The raw response data from {#make_request}.
+    # @return [Hash] The response data with the decoded body string.
+    # @raise [ResponseTooLargeError] If the inflated body exceeds `max_response_size`.
     def decode_response(response_data)
       headers = response_data[:headers]
       body = @response_reader.decode_body(response_data[:body], headers)
@@ -79,7 +85,7 @@ module PatientHttp
       response_data.merge(headers: headers, body: body)
     end
 
-    # Close all clients and release resources.
+    # Closes all clients and releases their resources.
     #
     # @return [void]
     def close

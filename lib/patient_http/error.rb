@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Base error class for async HTTP errors. This is an abstract class that
-  # defines the common error interface.
+  # The abstract base class for PatientHttp request errors. It defines the common
+  # error interface.
   class Error < StandardError
     class << self
-      # Load an error from a hash, dispatching to the appropriate subclass.
+      # Loads an error from a hash and returns an instance of the matching subclass.
       #
-      # @param hash [Hash] hash representation of the error
-      # @return [Error] the reconstructed error
+      # @param hash [Hash] The hash representation of the error.
+      # @return [Error] The reconstructed error.
       def load(hash)
         # Dispatch based on hash structure
         if hash.key?("response")
@@ -21,54 +21,56 @@ module PatientHttp
       end
     end
 
-    # Returns the error type symbol. Provided for compatibility with RequestError.
+    # Returns the error type. This method provides compatibility with {RequestError}.
     #
-    # @return [Symbol] the error type
+    # @return [Symbol] The error type.
     def error_type
       :unknown
     end
 
-    # @return [String] Request URL
+    # @return [String] The request URL.
     def url
       raise NotImplementedError, "Subclasses must implement #url"
     end
 
-    # @return [Symbol] HTTP method
+    # @return [Symbol] The HTTP method.
     def http_method
       raise NotImplementedError, "Subclasses must implement #http_method"
     end
 
-    # @return [Float] Request duration in seconds
+    # @return [Float] The request duration, in seconds.
     def duration
       raise NotImplementedError, "Subclasses must implement #duration"
     end
 
-    # @return [String] Unique request identifier
+    # @return [String] The unique request identifier.
     def request_id
       raise NotImplementedError, "Subclasses must implement #request_id"
     end
 
-    # @return [Class] the class of the exception that caused the error
+    # @return [Class] The class of the exception that caused the error.
     def error_class
       raise NotImplementedError, "Subclasses must implement #error_class"
     end
 
-    # @return [CallbackArgs] the callback arguments
+    # @return [CallbackArgs] The callback arguments.
     def callback_args
       raise NotImplementedError, "Subclasses must implement #callback_args"
     end
 
-    # Serialize to a hash for JSON encoding. Subclasses must implement this.
+    # Serializes the error to a hash for JSON encoding. Subclasses must implement
+    # this method.
     #
-    # @return [Hash] hash representation of the error
+    # @return [Hash] The hash representation of the error.
     def as_json
       raise NotImplementedError, "Subclasses must implement #as_json"
     end
 
-    # Serialize to JSON string.
+    # Serializes the error to a JSON string.
     #
-    # @param options [Hash] options to pass to JSON.generate (for ActiveSupport compatibility)
-    # @return [String] JSON representation
+    # @param options [Hash] Options to pass to `JSON.generate`. This parameter provides
+    #   compatibility with ActiveSupport.
+    # @return [String] The JSON representation.
     def to_json(options = nil)
       JSON.generate(as_json, options)
     end

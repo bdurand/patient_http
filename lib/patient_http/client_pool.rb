@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Pool of HTTP clients with LRU eviction.
+  # A pool of HTTP clients with least recently used (LRU) eviction.
   #
-  # Maintains a pool of clients lazily instantiated for each host. The pool
-  # is capped with an LRU algorithm - when a new client is needed and the
-  # pool is at capacity, the least recently used client is closed and removed.
+  # The pool creates a client for each host on first use. The pool has a size
+  # limit. When it needs a new client and is full, it closes and removes the
+  # least recently used client.
   class ClientPool
-    # Supported protocol names mapped to their async-http implementations. Forcing
-    # :http1 also limits the TLS ALPN advertisement to http/1.1, which avoids
+    # Maps supported protocol names to their async-http implementations. Forcing
+    # `:http1` also limits the TLS ALPN advertisement to `http/1.1`, which avoids
     # HTTP/2 negotiation with servers and middleboxes that mishandle it.
     PROTOCOLS = {
       http1: Async::HTTP::Protocol::HTTP11,
@@ -16,10 +16,10 @@ module PatientHttp
     }.freeze
 
     class << self
-      # Build a pool with the connection settings from a configuration.
+      # Builds a pool with the connection settings from a configuration.
       #
-      # @param config [Configuration] the configuration to read settings from
-      # @return [ClientPool] the new pool
+      # @param config [Configuration] The configuration to read settings from.
+      # @return [ClientPool] The new pool.
       def from_config(config)
         new(
           max_size: config.connection_pool_size,
@@ -58,10 +58,10 @@ module PatientHttp
     attr_reader :max_size, :connection_timeout, :proxy_url, :retries, :protocol, :connection_limit,
       :tcp_keepalive, :tcp_user_timeout
 
-    # Get or create a client for the given endpoint.
+    # Returns the client for the given endpoint, creating it if needed.
     #
-    # @param endpoint [Async::HTTP::Endpoint] the target endpoint
-    # @return [Async::HTTP::Client] the client for the endpoint's host
+    # @param endpoint [Async::HTTP::Endpoint] The target endpoint.
+    # @return [Async::HTTP::Client] The client for the endpoint's host.
     def client_for(endpoint)
       key = host_key(endpoint)
 
@@ -78,17 +78,18 @@ module PatientHttp
       end
     end
 
-    # Make a request.
+    # Makes a request.
     #
-    # @param http_method [String, Symbol] HTTP method
-    # @param url [String, Async::HTTP::Endpoint] request URL, or the endpoint
-    #   already parsed from it
-    # @param headers [Hash] request headers
-    # @param body [String, nil] request body
-    # @param client [Async::HTTP::Client, nil] the pooled client to send through,
-    #   normally the one {#client_for} returned for the URL; nil looks it up
-    # @param block [Proc] optional block to process the response
-    # @return [Protocol::HTTP::Response] the response
+    # @param http_method [String, Symbol] The HTTP method.
+    # @param url [String, Async::HTTP::Endpoint] The request URL, or the endpoint
+    #   already parsed from it.
+    # @param headers [Hash] The request headers.
+    # @param body [String, nil] The request body.
+    # @param client [Async::HTTP::Client, nil] The pooled client to send the request
+    #   through, which is usually the client that {#client_for} returned for the URL.
+    #   If `nil`, the pool looks up the client.
+    # @param block [Proc] An optional block that processes the response.
+    # @return [Protocol::HTTP::Response] The response.
     def request(http_method, url, headers, body, client: nil, &block)
       endpoint = url.is_a?(Async::HTTP::Endpoint) ? url : Async::HTTP::Endpoint.parse(url)
       client ||= client_for(endpoint)
@@ -114,10 +115,11 @@ module PatientHttp
       end
     end
 
-    # Close all clients and release resources.
+    # Closes all clients and releases their resources.
     #
-    # Clients evicted earlier whose close is still waiting for their in-flight
-    # requests are waited on as well, so no connection outlives the pool.
+    # This method also waits for clients that were evicted earlier and are still
+    # waiting for in-flight requests before they close. No connection outlives the
+    # pool.
     #
     # @return [void]
     def close
@@ -145,16 +147,16 @@ module PatientHttp
       end
     end
 
-    # Evict and close the client for the given URL.
+    # Evicts and closes the client for the given URL.
     #
-    # This forces a new connection to be established on the next request to this host.
-    # When the client that failed is given, only that client is evicted: a
-    # replacement installed for the host after an earlier eviction is left alone,
-    # so a late failure on the old client cannot discard a healthy new one.
+    # The next request to the host opens a new connection. If you pass the client
+    # that failed, only that client is evicted. A replacement client for the host
+    # from an earlier eviction stays in the pool, so a late failure on the old
+    # client can't discard a healthy new one.
     #
-    # @param url [String] the request URL whose host client should be evicted
-    # @param client [Async::HTTP::Client, nil] the client that failed, or nil to
-    #   evict whichever client the pool currently holds for the host
+    # @param url [String] The request URL. The pool evicts the client for its host.
+    # @param client [Async::HTTP::Client, nil] The client that failed, or `nil` to
+    #   evict whichever client the pool currently holds for the host.
     # @return [void]
     def evict(url, client = nil)
       endpoint = Async::HTTP::Endpoint.parse(url)
@@ -168,7 +170,7 @@ module PatientHttp
       close_later(evicted) if evicted
     end
 
-    # @return [Integer] number of clients in the pool
+    # @return [Integer] The number of clients in the pool.
     def size
       @mutex.synchronize { @clients.size }
     end
@@ -183,15 +185,15 @@ module PatientHttp
       close_later(lru_client)
     end
 
-    # Closing a client waits for its in-flight requests to finish before closing
-    # their connections. Evictions run on a request task while other requests are
-    # waiting to be dispatched, so the close runs in its own task and neither the
-    # evicting request nor the pool mutex waits for it. Outside a reactor the
+    # Closing a client waits for its in-flight requests to finish before it closes
+    # their connections. Evictions run on a request task while other requests wait
+    # to be dispatched. The close therefore runs in its own task, and neither the
+    # evicting request nor the pool mutex waits for it. Outside a reactor, the
     # block runs inline.
     #
-    # The task is transient so it does not hold the evicting request's task
-    # open, and it is tracked so {#close} can wait for it. The tracking list has
-    # its own mutex because evictions spawn the task while holding the pool mutex.
+    # The task is transient, so it doesn't keep the evicting request's task open.
+    # The pool tracks the task so {#close} can wait for it. The tracking list has
+    # its own mutex because evictions start the task while they hold the pool mutex.
     def close_later(client)
       task = Async(transient: true) do |current|
         client.close
@@ -250,11 +252,10 @@ module PatientHttp
       Async::HTTP::Client.new(connectable_endpoint(proxy_endpoint))
     end
 
-    # The connection timeout is enforced by the wrapper around establishing the
-    # connection rather than passed to the endpoint, which would set it as an IO
-    # timeout on every read and write for the life of the connection. The
-    # wrapper also applies the TCP keepalive and user timeout settings to each
-    # new socket.
+    # The wrapper around connection setup enforces the connection timeout. Passing
+    # the timeout to the endpoint instead would set it as an I/O timeout on every
+    # read and write for the life of the connection. The wrapper also applies the
+    # TCP keepalive and user timeout settings to each new socket.
     def connectable_endpoint(endpoint)
       unless @connection_timeout || @tcp_keepalive || @tcp_user_timeout
         return endpoint
