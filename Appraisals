@@ -23,3 +23,13 @@ end
 appraise "redis_5" do
   gem "redis", "~> 5.0.0"
 end
+
+appraise "async_gems_minimum" do
+  gem "async-http", "~> 0.99.0"
+  gem "protocol-http", "~> 0.66.0"
+  gem "concurrent-ruby", "~> 1.2.0"
+  remove_gem "activerecord"
+  remove_gem "sqlite3"
+  remove_gem "aws-sdk-s3"
+  remove_gem "redis"
+end

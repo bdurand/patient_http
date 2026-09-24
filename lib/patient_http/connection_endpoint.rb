@@ -26,23 +26,23 @@ module PatientHttp
   #
   # @api private
   class ConnectionEndpoint < SimpleDelegator
-    # @return [Numeric, nil] seconds allowed to establish a connection
+    # @return [Numeric, nil] Seconds allowed to establish a connection.
     attr_reader :connection_timeout
 
-    # @return [Hash, nil] the keepalive settings with :idle, :interval, and :count
+    # @return [Hash, nil] The keepalive settings with :idle, :interval, and :count.
     attr_reader :tcp_keepalive
 
-    # @return [Numeric, nil] seconds transmitted data may stay unacknowledged
+    # @return [Numeric, nil] Seconds transmitted data may stay unacknowledged.
     attr_reader :tcp_user_timeout
 
-    # @param endpoint [Async::HTTP::Endpoint] the endpoint to wrap
-    # @param connection_timeout [Numeric, nil] seconds allowed to establish a
-    #   connection, or nil for no limit beyond the endpoint's own
-    # @param tcp_keepalive [Hash, nil] keepalive settings with :idle, :interval, and
+    # @param endpoint [Async::HTTP::Endpoint] The endpoint to wrap.
+    # @param connection_timeout [Numeric, nil] Seconds allowed to establish a
+    #   connection, or nil for no limit beyond the endpoint's own.
+    # @param tcp_keepalive [Hash, nil] Keepalive settings with :idle, :interval, and
     #   :count in seconds and probes (:interval and :count optional), or nil to leave
-    #   the kernel defaults
-    # @param tcp_user_timeout [Numeric, nil] seconds transmitted data may stay
-    #   unacknowledged, or nil to leave the kernel default
+    #   the kernel defaults.
+    # @param tcp_user_timeout [Numeric, nil] Seconds transmitted data may stay
+    #   unacknowledged, or nil to leave the kernel default.
     def initialize(endpoint, connection_timeout: nil, tcp_keepalive: nil, tcp_user_timeout: nil)
       super(endpoint)
       @connection_timeout = connection_timeout
@@ -50,10 +50,10 @@ module PatientHttp
       @tcp_user_timeout = tcp_user_timeout
     end
 
-    # Connect to the wrapped endpoint and configure the socket.
+    # Connects to the wrapped endpoint and configures the socket.
     #
-    # @yield [socket] the connected socket, closed when the block returns
-    # @return [IO] the connected socket when no block is given
+    # @yield [socket] The connected socket, closed when the block returns.
+    # @return [IO] The connected socket when no block is given.
     def connect
       socket = connect_within_timeout
       begin

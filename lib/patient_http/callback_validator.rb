@@ -1,13 +1,17 @@
 # frozen_string_literal: true
 
 module PatientHttp
+  # Validates callback service classes and callback arguments.
+  #
+  # @api private
   module CallbackValidator
     class << self
-      # Validate that the callback class defines the required methods.
+      # Validates that the callback class defines the required methods.
       #
-      # @param callback [Class, String] the callback class or its name
+      # @param callback [Class, String] The callback service class, or its name.
       # @return [void]
-      # @raise [ArgumentError] if the callback class is invalid
+      # @raise [ArgumentError] If the class doesn't define `on_complete` and
+      #   `on_error` instance methods that take one argument.
       def validate!(callback)
         callback_class = callback.is_a?(Class) ? callback : ClassHelper.resolve_class_name(callback)
 
@@ -15,11 +19,11 @@ module PatientHttp
         validate_callback_method!(callback_class, :on_error)
       end
 
-      # Validate callback_args and convert to a hash with string keys.
+      # Validates the callback arguments and converts them to a hash with string keys.
       #
-      # @param callback_args [#to_h, nil] the callback arguments
-      # @return [Hash, nil] validated hash with string keys, or nil
-      # @raise [ArgumentError] if callback_args is invalid
+      # @param callback_args [#to_h, nil] The callback arguments.
+      # @return [Hash, nil] Validated hash with string keys, or nil.
+      # @raise [ArgumentError] If callback_args is invalid.
       def validate_callback_args(callback_args)
         return nil if callback_args.nil?
 

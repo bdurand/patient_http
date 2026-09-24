@@ -1,41 +1,45 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # The RequestTemplate is used to build HTTP requests with shared configuration.
+  # Builds requests that share settings, such as a base URL, headers, and a
+  # timeout. Use a template to make many requests to the same API.
   #
-  # Use RequestTemplate when you need to make multiple requests to the same API with shared
-  # configuration (base URL, headers, timeout).
+  # The template joins each path with the base URL, and merges the headers and
+  # query parameters of each request with its own.
   #
-  # @example Basic usage
+  # @example Build a request
   #   template = PatientHttp::RequestTemplate.new(
   #     base_url: "https://api.example.com",
   #     headers: {"Authorization" => "Bearer token"},
   #     timeout: 60
   #   )
   #   request = template.get("/users/123")
-  #
-  # The RequestTemplate handles building HTTP requests with proper URL joining, header merging,
-  # and parameter encoding.
+  #   PatientHttp.execute(request: request, callback: FetchUserCallback)
   class RequestTemplate
-    # @return [String, URI::HTTP, nil] Base URL for relative URIs
+    # @return [String, URI::HTTP, nil] The base URL that relative paths are
+    #   joined with.
     attr_accessor :base_url
 
-    # @return [HttpHeaders] Default headers for all requests
+    # @return [HttpHeaders] The default headers for all requests.
     attr_accessor :headers
 
-    # @return [Float] Default request timeout in seconds
+    # @return [Numeric, nil] The default request timeout in seconds. If `nil`,
+    #   the configured `request_timeout` applies.
     attr_accessor :timeout
 
-    # Initializes a new RequestTemplate.
+    # Creates a template.
     #
-    # @param base_url [String, URI::HTTP, nil] Base URL for relative URIs
-    # @param headers [Hash] Default headers for all requests
-    # @param params [Hash, nil] Default query parameters to add to all requests
-    # @param timeout [Float] Default request timeout in seconds
-    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] Default preprocessors
-    #   to apply to all requests
-    # @param processor [String, Symbol, nil] Default processor name for all requests
-    def initialize(base_url: nil, headers: {}, params: nil, timeout: 30, preprocessors: nil, processor: nil)
+    # @param base_url [String, URI::HTTP, nil] The base URL that relative paths
+    #   are joined with.
+    # @param headers [Hash] The default headers for all requests.
+    # @param params [Hash, nil] The default query parameters for all requests.
+    # @param timeout [Numeric, nil] The default request timeout in seconds. If
+    #   `nil`, the configured `request_timeout` applies.
+    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] The names
+    #   of the default preprocessors for all requests.
+    # @param processor [String, Symbol, nil] The name of the default processor for
+    #   all requests.
+    def initialize(base_url: nil, headers: {}, params: nil, timeout: nil, preprocessors: nil, processor: nil)
       @base_url = base_url
       @headers = HttpHeaders.new(headers)
       @params = params
@@ -44,24 +48,34 @@ module PatientHttp
       @processor = processor
     end
 
-    # Build an async HTTP request. Returns a Request object.
+    # Builds a request.
     #
-    # @param method [Symbol] HTTP method (:get, :head, :post, :put, :patch, :delete, :query)
-    # @param uri [String, URI::HTTP] URI path to request (joined with base_url if relative)
-    # @param body [String, nil] request body
-    # @param json [Object, nil] JSON object to serialize (cannot use with body)
-    # @param headers [Hash] additional headers to merge with client headers
-    # @param params [Hash, nil] query parameters to add to URL
-    # @param timeout [Numeric, nil] request timeout in seconds (overrides the template default)
-    # @param follow_method_changing_redirects [Boolean, nil] whether to follow a redirect that changes the
-    #   HTTP method (nil uses the configuration default)
-    # @param redirect_strip_headers [String, Array<String>, nil] header names (case insensitive)
-    #   to strip from redirected requests, in addition to the configured names
-    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] preprocessors to apply
-    #   to the request (overrides the template default)
-    # @param processor [String, Symbol, nil] processor name for the request (overrides the
-    #   template default)
-    # @return [Request] request object
+    # @param method [Symbol] The HTTP method: `:get`, `:head`, `:post`, `:put`,
+    #   `:patch`, `:delete`, or `:query`.
+    # @param uri [String, URI::HTTP] The URL. A relative path is joined with the
+    #   base URL.
+    # @param body [String, nil] The request body.
+    # @param json [Object, nil] An object to send as a JSON body. Can't be combined
+    #   with `body`.
+    # @param headers [Hash, nil] The headers to merge with the template headers.
+    # @param params [Hash, nil] The query parameters to merge with the template
+    #   parameters.
+    # @param timeout [Numeric, nil] The request timeout in seconds. Overrides the
+    #   template timeout.
+    # @param max_redirects [Integer, nil] The maximum number of redirects to
+    #   follow. If `0`, redirects aren't followed. If `nil`, the configuration
+    #   value applies.
+    # @param follow_method_changing_redirects [Boolean, nil] Whether to follow a
+    #   redirect that changes the HTTP method. If `nil`, the configuration value
+    #   applies.
+    # @param redirect_strip_headers [String, Array<String>, nil] The names of headers
+    #   to remove from redirected requests, in addition to the configured names.
+    #   Names are case insensitive.
+    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] The names of
+    #   the preprocessors for the request. Overrides the template preprocessors.
+    # @param processor [String, Symbol, nil] The name of the processor for the
+    #   request. Overrides the template processor.
+    # @return [Request] The request.
     def request(
       method,
       uri,
@@ -70,6 +84,7 @@ module PatientHttp
       headers: nil,
       params: nil,
       timeout: nil,
+      max_redirects: nil,
       follow_method_changing_redirects: nil,
       redirect_strip_headers: nil,
       preprocessors: nil,
@@ -89,6 +104,7 @@ module PatientHttp
         json: json,
         params: merged_params,
         timeout: timeout || @timeout,
+        max_redirects: max_redirects,
         follow_method_changing_redirects: follow_method_changing_redirects,
         redirect_strip_headers: redirect_strip_headers,
         preprocessors: preprocessors || @preprocessors,
@@ -96,65 +112,72 @@ module PatientHttp
       )
     end
 
-    # Convenience method for GET requests.
+    # Builds a GET request.
     #
-    # @param uri [String, URI::HTTP] URI path to request
-    # @param kwargs [Hash] additional options (see #request)
-    # @return [Request] request object
+    # @param uri [String, URI::HTTP] The URL. A relative path is joined with the
+    #   base URL.
+    # @param kwargs [Hash] The request options. See {#request}.
+    # @return [Request] The request.
     def get(uri, **kwargs)
       request(:get, uri, **kwargs)
     end
 
-    # Convenience method for HEAD requests.
+    # Builds a HEAD request.
     #
-    # @param uri [String, URI::HTTP] URI path to request
-    # @param kwargs [Hash] additional options (see #request)
-    # @return [Request] request object
+    # @param uri [String, URI::HTTP] The URL. A relative path is joined with the
+    #   base URL.
+    # @param kwargs [Hash] The request options. See {#request}.
+    # @return [Request] The request.
     def head(uri, **kwargs)
       request(:head, uri, **kwargs)
     end
 
-    # Convenience method for POST requests.
+    # Builds a POST request.
     #
-    # @param uri [String, URI::HTTP] URI path to request
-    # @param kwargs [Hash] additional options (see #request)
-    # @return [Request] request object
+    # @param uri [String, URI::HTTP] The URL. A relative path is joined with the
+    #   base URL.
+    # @param kwargs [Hash] The request options. See {#request}.
+    # @return [Request] The request.
     def post(uri, **kwargs)
       request(:post, uri, **kwargs)
     end
 
-    # Convenience method for PUT requests.
+    # Builds a PUT request.
     #
-    # @param uri [String, URI::HTTP] URI path to request
-    # @param kwargs [Hash] additional options (see #request)
-    # @return [Request] request object
+    # @param uri [String, URI::HTTP] The URL. A relative path is joined with the
+    #   base URL.
+    # @param kwargs [Hash] The request options. See {#request}.
+    # @return [Request] The request.
     def put(uri, **kwargs)
       request(:put, uri, **kwargs)
     end
 
-    # Convenience method for PATCH requests.
+    # Builds a PATCH request.
     #
-    # @param uri [String, URI::HTTP] URI path to request
-    # @param kwargs [Hash] additional options (see #request)
-    # @return [Request] request object
+    # @param uri [String, URI::HTTP] The URL. A relative path is joined with the
+    #   base URL.
+    # @param kwargs [Hash] The request options. See {#request}.
+    # @return [Request] The request.
     def patch(uri, **kwargs)
       request(:patch, uri, **kwargs)
     end
 
-    # Convenience method for DELETE requests.
+    # Builds a DELETE request.
     #
-    # @param uri [String, URI::HTTP] URI path to request
-    # @param kwargs [Hash] additional options (see #request)
-    # @return [Request] request object
+    # @param uri [String, URI::HTTP] The URL. A relative path is joined with the
+    #   base URL.
+    # @param kwargs [Hash] The request options. See {#request}.
+    # @return [Request] The request.
     def delete(uri, **kwargs)
       request(:delete, uri, **kwargs)
     end
 
-    # Convenience method for QUERY requests.
+    # Builds a QUERY request.
     #
-    # @param uri [String, URI::HTTP] URI path to request
-    # @param kwargs [Hash] additional options (see #request)
-    # @return [Request] request object
+    # @param uri [String, URI::HTTP] The URL. A relative path is joined with the
+    #   base URL.
+    # @param kwargs [Hash] The request options. See {#request}.
+    # @return [Request] The request.
     def query(uri, **kwargs)
       request(:query, uri, **kwargs)
     end

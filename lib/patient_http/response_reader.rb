@@ -3,11 +3,12 @@
 module PatientHttp
   # Reads and decodes HTTP response bodies.
   #
-  # Reading happens on the reactor thread and collects the raw (possibly
-  # compressed) body chunks with size validation. Decoding — joining the
-  # chunks, inflating compressed content, and applying the charset — is a
-  # separate step so it can run on a completion worker thread instead of
-  # blocking the event loop.
+  # The reactor thread reads the raw body chunks, which can be compressed, and
+  # checks their size. Decoding is a separate step that runs on a completion
+  # worker thread, so it doesn't block the reactor. Decoding joins the chunks,
+  # decompresses them, and applies the charset.
+  #
+  # @api private
   class ResponseReader
     # Raised when a body read is aborted because the processor was stopped
     # past its shutdown deadline. The shutdown sequence re-enqueues the task,
@@ -34,7 +35,7 @@ module PatientHttp
     IDENTITY_ENCODING = "identity"
 
     class << self
-      # Split the encodings named in the content-encoding header into the ones
+      # Splits the encodings named in the content-encoding header into the ones
       # that stay applied to the body and the ones that can be decoded.
       #
       # A body can carry more than one encoding. They are listed in the order
@@ -42,9 +43,9 @@ module PatientHttp
       # stops at the first name it does not recognize. Everything before that
       # point stays applied to the body.
       #
-      # @param headers_hash [Hash] the response headers
-      # @return [Array(Array<String>, Array<String>)] the encodings that remain
-      #   applied and the encodings that can be decoded, both in applied order
+      # @param headers_hash [Hash] The response headers.
+      # @return [Array(Array<String>, Array<String>)] The encodings that remain
+      #   applied and the encodings that can be decoded, both in applied order.
       def split_encodings(headers_hash)
         encodings = content_encodings(headers_hash)
         boundary = encodings.rindex { |name| !decodable?(name) }
@@ -53,10 +54,10 @@ module PatientHttp
         [encodings[0..boundary], encodings[(boundary + 1)..]]
       end
 
-      # Parse the content-encoding header into encoding names.
+      # Parses the content-encoding header into encoding names.
       #
-      # @param headers_hash [Hash] the response headers
-      # @return [Array<String>] the lowercased encoding names in applied order
+      # @param headers_hash [Hash] The response headers.
+      # @return [Array<String>] The lowercased encoding names in applied order.
       def content_encodings(headers_hash)
         headers_hash["content-encoding"].to_s.split(",").filter_map do |name|
           name = name.strip.downcase
@@ -64,19 +65,19 @@ module PatientHttp
         end
       end
 
-      # @param name [String] a lowercased content encoding name
-      # @return [Boolean] true if the reader can remove this encoding
+      # @param name [String] A lowercased content encoding name.
+      # @return [Boolean] `true` if the reader can remove this encoding.
       def decodable?(name)
         name == IDENTITY_ENCODING || INFLATE_WINDOW_BITS.key?(name)
       end
 
-      # Restate the content-encoding header for a decoded body. The header is
+      # Restates the content-encoding header for a decoded body. The header is
       # removed when nothing is left applied, and narrowed to the encodings the
       # reader could not remove otherwise, so the header always describes the
       # body delivered with it.
       #
-      # @param headers_hash [Hash] the response headers
-      # @return [Hash] the headers with content-encoding updated or removed
+      # @param headers_hash [Hash] The response headers.
+      # @return [Hash] The headers with content-encoding updated or removed.
       def rewrite_content_encoding(headers_hash)
         return headers_hash unless headers_hash.key?("content-encoding")
 
@@ -90,21 +91,21 @@ module PatientHttp
       end
     end
 
-    # Initialize the reader.
+    # Creates the reader.
     #
     # Reading needs a processor so it can abort once the processor is past its
     # shutdown deadline. Decoding needs only the configuration, so a caller
     # that does its own reading can supply the configuration on its own.
     #
-    # @param processor [Processor, nil] the processor object
-    # @param config [Configuration, nil] the configuration; defaults to the
-    #   processor's configuration
+    # @param processor [Processor, nil] The processor object.
+    # @param config [Configuration, nil] The configuration; defaults to the
+    #   processor's configuration.
     def initialize(processor, config: nil)
       @processor = processor
       @config = config || processor.config
     end
 
-    # Read the raw response body chunks with size validation.
+    # Reads the raw response body chunks with size validation.
     #
     # Reads the async HTTP response body asynchronously to completion, which allows
     # the connection to be reused. The async-http client handles connection pooling
@@ -118,11 +119,11 @@ module PatientHttp
     # the Content-Length of the resource, so the header check is skipped when
     # the body reports itself as empty.
     #
-    # @param async_response [Async::HTTP::Protocol::Response] the async HTTP response
-    # @param headers_hash [Hash] the response headers
-    # @return [Array<String>, nil] the raw body chunks or nil if no body present
-    # @raise [ResponseTooLargeError] if the body exceeds max_response_size
-    # @raise [ReadAbortedError] if the processor stopped past its shutdown deadline mid-read
+    # @param async_response [Async::HTTP::Protocol::Response] The async HTTP response.
+    # @param headers_hash [Hash] The response headers.
+    # @return [Array<String>, nil] The raw body chunks or nil if no body present.
+    # @raise [ResponseTooLargeError] If the body exceeds max_response_size.
+    # @raise [ReadAbortedError] If the processor stopped past its shutdown deadline mid-read.
     def read_raw_body(async_response, headers_hash)
       body = async_response.body
       return nil unless body
@@ -131,7 +132,7 @@ module PatientHttp
       read_body_chunks(async_response)
     end
 
-    # Decode raw body chunks into the final body string.
+    # Decodes raw body chunks into the final body string.
     #
     # Joins the chunks, inflates gzip/deflate content (enforcing
     # max_response_size on the inflated bytes), and applies the charset from
@@ -144,10 +145,10 @@ module PatientHttp
     # so the content-encoding header delivered with the response describes the
     # body it carries.
     #
-    # @param chunks [Array<String>, nil] the raw body chunks
-    # @param headers_hash [Hash] the response headers
-    # @return [String, nil] the decoded body or nil if there was no body
-    # @raise [ResponseTooLargeError] if the inflated body exceeds max_response_size
+    # @param chunks [Array<String>, nil] The raw body chunks.
+    # @param headers_hash [Hash] The response headers.
+    # @return [String, nil] The decoded body or nil if there was no body.
+    # @raise [ResponseTooLargeError] If the inflated body exceeds max_response_size.
     def decode_body(chunks, headers_hash)
       return nil if chunks.nil?
 
@@ -165,13 +166,13 @@ module PatientHttp
 
     private
 
-    # Remove the given encodings from the body, starting with the one applied
+    # Removes the given encodings from the body, starting with the one applied
     # last. Identity needs no work; every other name here inflates.
     #
-    # @param chunks [Array<String>] the encoded body chunks
-    # @param encodings [Array<String>] decodable encoding names in applied order
-    # @return [Array<String>] the decoded chunks
-    # @raise [ResponseTooLargeError] if the inflated body exceeds max_response_size
+    # @param chunks [Array<String>] The encoded body chunks.
+    # @param encodings [Array<String>] Decodable encoding names in applied order.
+    # @return [Array<String>] The decoded chunks.
+    # @raise [ResponseTooLargeError] If the inflated body exceeds max_response_size.
     def inflate_encodings(chunks, encodings)
       encodings.reverse_each do |name|
         chunks = [inflate_encoding(chunks, name)] if INFLATE_WINDOW_BITS.key?(name)
@@ -180,15 +181,15 @@ module PatientHttp
       chunks
     end
 
-    # Inflate one encoding, trying each wire format the encoding can use. The
+    # Inflates one encoding, trying each wire format the encoding can use. The
     # chunks are all in memory, so a format that turns out to be wrong can be
     # abandoned and the next one started from the beginning of the body.
     #
-    # @param chunks [Array<String>] the encoded body chunks
-    # @param name [String] a lowercased content encoding name
-    # @return [String] the inflated body
-    # @raise [Zlib::Error] if no format could inflate the body
-    # @raise [ResponseTooLargeError] if the inflated body exceeds max_response_size
+    # @param chunks [Array<String>] The encoded body chunks.
+    # @param name [String] A lowercased content encoding name.
+    # @return [String] The inflated body.
+    # @raise [Zlib::Error] If no format could inflate the body.
+    # @raise [ResponseTooLargeError] If the inflated body exceeds max_response_size.
     def inflate_encoding(chunks, name)
       formats = INFLATE_WINDOW_BITS.fetch(name)
       last_index = formats.size - 1
@@ -200,11 +201,11 @@ module PatientHttp
       end
     end
 
-    # Report an encoding that could not be removed. The body is still delivered
+    # Reports an encoding that could not be removed. The body is still delivered
     # with its content-encoding header, so the caller can decode it, but the
     # server ignored the accept-encoding header and that is worth recording.
     #
-    # @param remaining [Array<String>] the encodings left on the body
+    # @param remaining [Array<String>] The encodings left on the body.
     # @return [void]
     def warn_undecodable(remaining)
       logger&.warn(
@@ -222,10 +223,10 @@ module PatientHttp
       @config.logger
     end
 
-    # Validate content-length header doesn't exceed max size.
+    # Validates content-length header doesn't exceed max size.
     #
-    # @param headers_hash [Hash] the response headers
-    # @raise [ResponseTooLargeError] if content-length exceeds max_response_size
+    # @param headers_hash [Hash] The response headers.
+    # @raise [ResponseTooLargeError] If content-length exceeds max_response_size.
     def validate_content_length(headers_hash)
       content_length = headers_hash["content-length"]&.to_i
       if content_length && content_length > max_response_size
@@ -235,12 +236,12 @@ module PatientHttp
       end
     end
 
-    # Read body chunks while checking size.
+    # Reads body chunks while checking size.
     #
-    # @param async_response [Async::HTTP::Protocol::Response] the async HTTP response
-    # @return [Array<String>] the raw body chunks
-    # @raise [ResponseTooLargeError] if body size exceeds max_response_size during read
-    # @raise [ReadAbortedError] if the processor stopped past its shutdown deadline mid-read
+    # @param async_response [Async::HTTP::Protocol::Response] The async HTTP response.
+    # @return [Array<String>] The raw body chunks.
+    # @raise [ResponseTooLargeError] If body size exceeds max_response_size during read.
+    # @raise [ReadAbortedError] If the processor stopped past its shutdown deadline mid-read.
     def read_body_chunks(async_response)
       chunks = []
       total_size = 0
@@ -277,13 +278,13 @@ module PatientHttp
       end
     end
 
-    # Inflate compressed body chunks with streaming size enforcement, so a
+    # Inflates compressed body chunks with streaming size enforcement, so a
     # small compressed body cannot expand past max_response_size.
     #
-    # @param chunks [Array<String>] the raw compressed chunks
-    # @param window_bits [Integer] Zlib window bits for the content encoding
-    # @return [String] the inflated body
-    # @raise [ResponseTooLargeError] if the inflated size exceeds max_response_size
+    # @param chunks [Array<String>] The raw compressed chunks.
+    # @param window_bits [Integer] Zlib window bits for the content encoding.
+    # @return [String] The inflated body.
+    # @raise [ResponseTooLargeError] If the inflated size exceeds max_response_size.
     def inflate_chunks(chunks, window_bits)
       # A response can declare a content encoding and still carry no body.
       # There is nothing to inflate, and finishing an empty stream would
@@ -320,10 +321,10 @@ module PatientHttp
       end
     end
 
-    # Extract charset from Content-Type header.
+    # Extracts charset from Content-Type header.
     #
-    # @param headers_hash [Hash] the response headers
-    # @return [String, nil] the charset name or nil if not specified
+    # @param headers_hash [Hash] The response headers.
+    # @return [String, nil] The charset name or nil if not specified.
     def extract_charset(headers_hash)
       content_type = headers_hash["content-type"]
       return nil unless content_type
@@ -335,14 +336,14 @@ module PatientHttp
       charset.gsub(/\A["']|["']\z/, "")
     end
 
-    # Apply charset encoding to response body.
+    # Applies charset encoding to response body.
     #
     # Sets the string encoding based on the charset specified in the Content-Type header.
     # Falls back to ASCII-8BIT if charset is invalid or not recognized.
     #
-    # @param body [String] the response body
-    # @param headers_hash [Hash] the response headers
-    # @return [String] the body with proper encoding set
+    # @param body [String] The response body.
+    # @param headers_hash [Hash] The response headers.
+    # @return [String] The body with proper encoding set.
     def apply_charset_encoding(body, headers_hash)
       return body unless body
 

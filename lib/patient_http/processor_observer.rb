@@ -1,114 +1,120 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Interface for observing request processing. A process observer can be registered with
-  # a Processor and receive events as requests are processed. Observers should be
-  # lightweight and not do processing other than recording metrics or similar.
+  # The base class for objects that receive processor events. Register an
+  # observer with {Processor#observe}. Subclass it and override the methods for
+  # the events that you need.
   #
-  # Hooks run on different threads depending on where the event originates:
-  # - request_enqueued, request_rejected: the thread calling Processor#enqueue
-  #   (usually an application thread), and the reactor thread for each task
-  #   created to follow a redirect. Work done in these hooks blocks the reactor
-  #   for redirected requests, so keep it off the critical path or accept the
-  #   delay it adds to every other in-flight request
-  # - capacity_exceeded: the thread calling Processor#enqueue (usually an
-  #   application thread)
-  # - request_start: the reactor thread
-  # - request_end, request_error, completion_failed: a completion worker
-  #   thread (request_end also fires on the reactor thread for followed
-  #   redirects, and on the stopping thread for shutdown re-enqueues)
-  # - request_requeued: the stopping thread or the reactor thread
-  # - start, stop: the thread calling Processor#start / Processor#stop
+  # Keep observers lightweight. Use them to record metrics or to track
+  # requests, not to do other work.
   #
-  # Observers must be thread-safe. Hooks are called from several threads, and
-  # the completion-time hooks run on any of the completion worker threads, so
-  # two of them can run at the same time and in an order unrelated to the
-  # order the requests completed. Guard any counter or buffer an observer
-  # shares between calls. Setting completion_threads to 1 serializes the
-  # completion-time hooks but does not serialize them against the hooks that
-  # fire on other threads.
+  # Each method runs on the thread where its event occurs:
+  #
+  # - {#request_enqueued} and {#request_rejected}: The thread that calls
+  #   {Processor#enqueue}, usually an application thread. For a redirect, the
+  #   reactor thread. Slow work in these methods delays every in-flight request
+  #   when a redirect is followed.
+  # - {#capacity_exceeded}: The thread that calls {Processor#enqueue}.
+  # - {#request_start}: The reactor thread.
+  # - {#request_end}, {#request_error}, and {#completion_failed}: A completion
+  #   worker thread. {#request_end} also runs on the reactor thread for a
+  #   followed redirect, and on the stopping thread for a request that's
+  #   re-enqueued at shutdown.
+  # - {#request_requeued}: The stopping thread or the reactor thread.
+  # - {#start} and {#stop}: The thread that calls {Processor#start} or
+  #   {Processor#stop}.
+  #
+  # Observers must be thread-safe. Methods run on several threads, and two
+  # completion worker threads can call methods at the same time, in any order.
+  # Protect any counter or buffer that calls share. If `completion_threads` is
+  # 1, the completion worker calls run one at a time, but they can still run at
+  # the same time as calls on other threads.
   class ProcessorObserver
-    # Called when the processor starts.
+    # Runs when the processor starts.
     #
     # @return [void]
     def start
     end
 
-    # Called when the processor stops.
+    # Runs when the processor stops.
     #
     # @return [void]
     def stop
     end
 
-    # Called when a request cannot be enqueued because the processor is at capacity.
+    # Runs when a request can't be enqueued because the processor is at
+    # `max_connections`.
     #
     # @return [void]
     def capacity_exceeded
     end
 
-    # Called when a request task is handed to the processor, before the task is
-    # visible to the reactor. The notification is guaranteed to arrive before
-    # request_start for the task, so observers can set up durable tracking
-    # (e.g. a crash-recovery registry entry) with no risk that the task
-    # completes first. If the processor does not accept the task,
-    # request_rejected is sent afterward. Unlike other notifications, an error
-    # raised here propagates from Processor#enqueue and rejects the task, so a
-    # failed tracking setup does not let the task be accepted as if it were
-    # durable.
+    # Runs when a task is given to the processor, before the reactor can see
+    # the task.
     #
-    # @param request_task [RequestTask] the request task that was enqueued
+    # This method always runs before {#request_start} for the task. As a
+    # result, an observer can set up durable tracking, such as a crash-recovery
+    # registry entry, before the task can finish. If the processor doesn't
+    # accept the task, {#request_rejected} runs next.
+    #
+    # Unlike the other methods, an error raised here isn't caught.
+    # {Processor#enqueue} raises the error and rejects the task. As a result,
+    # the processor never accepts a task whose tracking failed.
+    #
+    # @param request_task [RequestTask] The task.
     # @return [void]
     def request_enqueued(request_task)
     end
 
-    # Called when a request task announced with request_enqueued was not
-    # accepted by the processor (not running or at capacity). Observers should
-    # tear down anything they set up in request_enqueued; the caller owns the
-    # request again once this is sent.
+    # Runs when the processor doesn't accept a task after {#request_enqueued},
+    # because the processor isn't running or is at capacity. Remove anything
+    # that {#request_enqueued} set up. After this call, the caller owns the
+    # request again.
     #
-    # @param request_task [RequestTask] the request task that was rejected
+    # @param request_task [RequestTask] The task.
     # @return [void]
     def request_rejected(request_task)
     end
 
-    # Called when an incomplete request task was re-enqueued through its task
-    # handler (processor shutdown or reactor failure). The task handler's job
-    # system owns the request again once this is sent, so observers should
-    # tear down any durable tracking for the task.
+    # Runs when a task that didn't finish is re-enqueued through its task
+    # handler, because the processor stopped or the reactor failed. After this
+    # call, the job system owns the request again, so remove any durable
+    # tracking for the task.
     #
-    # @param request_task [RequestTask] the request task that was re-enqueued
+    # @param request_task [RequestTask] The task.
     # @return [void]
     def request_requeued(request_task)
     end
 
-    # Called when a request starts processing.
+    # Runs when a request starts.
     #
-    # @param request_task [RequestTask] the request task that started
+    # @param request_task [RequestTask] The task.
     # @return [void]
     def request_start(request_task)
     end
 
-    # Called when a request finishes processing.
+    # Runs when a request finishes and its result is delivered.
     #
-    # @param request_task [RequestTask] the request task that ended
+    # @param request_task [RequestTask] The task.
     # @return [void]
     def request_end(request_task)
     end
 
-    # Called when a request encounters an error.
+    # Runs when a request fails with an error.
     #
-    # @param error [StandardError] the error that occurred
+    # @param error [StandardError] The error.
     # @return [void]
     def request_error(error)
     end
 
-    # Called when a finished result could not be delivered to the task handler
-    # after all retries. request_end is NOT sent for the task, so durable
-    # tracking set up in request_enqueued stays in place and an external
-    # recovery process (e.g. an orphan collector) can re-enqueue the request.
+    # Runs when the task handler can't take a result after all retries.
     #
-    # @param request_task [RequestTask] the request task whose result was not delivered
-    # @param error [StandardError] the delivery failure
+    # {#request_end} doesn't run for the task. As a result, durable tracking
+    # from {#request_enqueued} stays in place, and a recovery process, such as
+    # an orphan collector, can re-enqueue the request.
+    #
+    # @param request_task [RequestTask] The task.
+    # @param error [StandardError] The error from the last delivery attempt.
     # @return [void]
     def completion_failed(request_task, error)
     end

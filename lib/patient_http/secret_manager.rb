@@ -1,41 +1,38 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Resolves {SecretReference} values into their actual secret values when a request
-  # is sent by the processor.
+  # Replaces {SecretReference} values with the secret values when the processor
+  # sends a request.
   #
-  # A SecretManager is built from the secrets registered on the {Configuration}.
+  # The manager holds the secrets registered in the {Configuration}.
   #
   # @see Configuration#secret_manager
   class SecretManager
-    # Raised when a referenced secret cannot be resolved.
+    # Raised when a referenced secret isn't registered.
     class SecretNotFoundError < StandardError; end
 
-    # Initialize a new SecretManager.
+    # Creates a secret manager.
     #
-    # @param secrets [Hash{String => Object}] static registry mapping names to values
-    #   (a value may be a callable, which is invoked with the name to produce the value)
-    #   secret not found in the static registry
+    # @param secrets [Hash{String => Object}] The secret values, keyed by name. A
+    #   value can be a callable, which is called with the name to get the value.
     def initialize(secrets: {})
       @secrets = secrets || {}
     end
 
-    # Check if a secret name is registered in the static registry.
+    # Returns whether a secret is registered.
     #
-    # @param name [String, Symbol] the secret name
-    # @return [Boolean] true if the name is registered, false otherwise
+    # @param name [String, Symbol] The secret name.
+    # @return [Boolean] `true` if the secret is registered.
     def include?(name)
       @secrets.include?(name.to_s)
     end
 
-    # Resolve a secret by name.
+    # Returns the value of a secret. If the registered value responds to `call`,
+    # it's called with the name.
     #
-    # The static registry is checked first; if the registered value responds to #call
-    # it is invoked with the name. If the name is not in the registry, an error is raised.
-    #
-    # @param name [String, Symbol] the secret name
-    # @return [String] the resolved secret value
-    # @raise [SecretNotFoundError] if the secret cannot be resolved
+    # @param name [String, Symbol] The secret name.
+    # @return [String, nil] The secret value.
+    # @raise [SecretNotFoundError] If the secret isn't registered.
     def resolve(name)
       name = name.to_s
 
@@ -48,27 +45,34 @@ module PatientHttp
       value&.to_s
     end
 
-    # Resolve any secret references in a headers hash, returning a new hash.
+    # Returns a copy of the headers with the secret references replaced by the
+    # secret values.
     #
-    # @param headers [Hash, nil] header name/value pairs
-    # @return [Hash, nil] a new hash with secret references replaced by resolved values
+    # @param headers [Hash, nil] The headers.
+    # @return [Hash, nil] The resolved headers.
+    # @raise [SecretNotFoundError] If a referenced secret isn't registered.
     def resolve_headers(headers)
       resolve_values(headers)
     end
 
-    # Resolve any secret references in a params hash, returning a new hash.
+    # Returns a copy of the query parameters with the secret references
+    # replaced by the secret values.
     #
-    # @param params [Hash, nil] param name/value pairs
-    # @return [Hash, nil] a new hash with secret references replaced by resolved values
+    # @param params [Hash, nil] The query parameters.
+    # @return [Hash, nil] The resolved query parameters.
+    # @raise [SecretNotFoundError] If a referenced secret isn't registered.
     def resolve_params(params)
       resolve_values(params)
     end
 
-    # Append resolved secret params to a URL's query string.
+    # Adds the resolved secret query parameters to a URL.
     #
-    # @param url [String] the request URL
-    # @param secret_params [Hash, nil] secret param name/value (SecretReference) pairs
-    # @return [String] the URL with resolved secret params appended (unchanged if none)
+    # @param url [String] The request URL.
+    # @param secret_params [Hash, nil] The query parameters whose values are
+    #   secret references.
+    # @return [String] The URL with the parameters added. If there are no
+    #   parameters, the URL is unchanged.
+    # @raise [SecretNotFoundError] If a referenced secret isn't registered.
     def resolve_url(url, secret_params)
       return url if secret_params.nil? || secret_params.empty?
 
@@ -80,8 +84,8 @@ module PatientHttp
 
     private
 
-    # Return a new hash with any secret-reference values replaced by their resolved
-    # values. Non-secret values are passed through unchanged.
+    # Returns a copy of a hash with the secret references replaced by the
+    # secret values. Other values are unchanged.
     def resolve_values(hash)
       return hash if hash.nil?
 
