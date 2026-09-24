@@ -20,13 +20,13 @@ The heart of the system - runs in a dedicated thread with its own Fiber reactor.
 Abstract base class that defines the integration point between the pool and your application. Implementations handle completion callbacks, error callbacks, and job retry operations. Concrete implementations (such as those in the `patient_http-sidekiq` or `patient_http-solid_queue` gems) are responsible for using `Configuration#encryptor` to encrypt serialized `Response`/`Error` data before passing it to the job queue. The base class itself does not call encrypt or decrypt; that responsibility belongs to the implementation. This abstraction allows the pool to work with any job system (Sidekiq, SolidQueue, custom queues, etc.).
 
 ### Request/RequestTemplate
-`Request` is an immutable value object representing an HTTP request. `RequestTemplate` provides a builder for creating requests with shared configuration (base URL, headers, timeout).
+`Request` is a value object representing an HTTP request. `RequestTemplate` provides a builder for creating requests with shared configuration (base URL, headers, timeout).
 
 ### RequestTask
 Wraps a `Request` with execution context: the `TaskHandler`, callback class name, and callback arguments. This is what gets enqueued to the processor.
 
 ### Response
-Immutable value object representing an HTTP response. Includes status, headers, body, and callback arguments. Designed to be serializable for passing through job queues.
+Value object representing an HTTP response. Includes status, headers, body, and callback arguments. Designed to be serializable for passing through job queues.
 
 ### Error Classes
 Typed error classes (`HttpError`, `RequestError`, `RedirectError`) that are also serializable. Include context about the failed request and callback arguments.
@@ -44,7 +44,7 @@ Manages processor state transitions (stopped → starting → running → draini
 Handles encryption and decryption of serialized payloads at the job queue boundary. Wraps user-provided encryption/decryption callables (which operate on raw bytes) with JSON serialization and Base64 encoding. Instantiated from `Configuration#encryptor`. The `Encryptor` is a helper: concrete `TaskHandler` implementations are responsible for calling `encryptor.encrypt`/`encryptor.decrypt` at every serialization boundary. Encrypted data is enveloped as `{"__encrypted__" => true, "value" => "<base64>"}` to allow transparent no-op pass-through when no encryption is configured.
 
 ### ExternalStorage/PayloadStore
-Optional external storage for large request/response payloads. Supports file, Redis, S3, and custom adapters.
+Optional external storage for large request/response payloads. Supports file, Redis, S3, ActiveRecord, and custom adapters.
 
 ## TaskHandler Pattern
 
@@ -110,12 +110,13 @@ Example:
 PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
   task = PatientHttp::RequestTask.new(
     request: request,
-    task_handler: MyTaskHandler.new,
+    task_handler: MyTaskHandler.new(MyJobSystem.current_job_id),
     callback: callback,
     callback_args: callback_args,
     raise_error_responses: raise_error_responses
   )
   processor.enqueue(task)
+  task.id
 end
 
 # Use in your application code
@@ -296,8 +297,8 @@ The processor maintains state through its lifecycle:
 
 When the processor is stopped with in-flight requests:
 
-1. The processor stops accepting new requests (drain state)
-2. In-flight requests are given time to complete (configurable timeout)
+1. The processor stops accepting new requests (stopping state). Call `drain` first to stop accepting requests before the stop begins.
+2. In-flight requests are given time to complete (`shutdown_timeout`, or the `timeout` passed to `stop`)
 3. Any requests still pending when the timeout expires trigger `TaskHandler#retry`
 4. The application's job system can re-enqueue these requests for later processing
 
@@ -327,7 +328,7 @@ For large request/response payloads, the `ExternalStorage` class provides option
 - **Thread-safe queues**: `Thread::Queue` for request enqueueing
 - **Atomic operations**: `Concurrent::AtomicReference` for state
 - **Synchronized access**: Mutexes protect shared data structures
-- **Immutable values**: Request/Response are immutable once created
+- **Value objects**: Request and Response have no setters for their attributes
 
 ## Further Reading
 
