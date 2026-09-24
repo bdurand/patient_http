@@ -18,9 +18,9 @@ RSpec.describe PatientHttp::RequestTemplate do
       expect(client.headers["Authorization"]).to eq("Bearer token123")
     end
 
-    it "sets default timeout to 30 seconds" do
+    it "has no default timeout so the configured request_timeout applies" do
       client = described_class.new
-      expect(client.timeout).to eq(30)
+      expect(client.timeout).to be_nil
     end
 
     it "allows custom timeout" do
@@ -48,13 +48,24 @@ RSpec.describe PatientHttp::RequestTemplate do
       expect(result.url).to eq("https://api.example.com/users")
       expect(result.headers.to_h).to include("authorization" => "Bearer token123")
       expect(result.body).to eq("data")
-      expect(result.timeout).to eq(30)
+      expect(result.timeout).to be_nil
+    end
+
+    it "uses the template timeout when the request doesn't set one" do
+      template = described_class.new(base_url: base_url, timeout: 45)
+      expect(template.request(:get, "/users").timeout).to eq(45)
+      expect(template.request(:get, "/users", timeout: 5).timeout).to eq(5)
     end
 
     it "passes redirect options to the Request" do
       result = template.request(:post, "/users", follow_method_changing_redirects: false, redirect_strip_headers: "X-Api-Key")
       expect(result.follow_method_changing_redirects).to be false
       expect(result.redirect_strip_headers).to eq(["x-api-key"])
+    end
+
+    it "passes max_redirects to the Request" do
+      expect(template.request(:get, "/users", max_redirects: 0).max_redirects).to eq(0)
+      expect(template.get("/users").max_redirects).to be_nil
     end
 
     context "with URI joining" do

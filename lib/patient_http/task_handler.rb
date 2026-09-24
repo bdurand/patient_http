@@ -1,53 +1,57 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Abstract base class for handling task lifecycle operations.
+  # The abstract base class that connects a {RequestTask} to a job system.
   #
-  # TaskHandler abstracts the job system integration, allowing RequestTask
-  # to work with any job system without direct dependencies. Implementations
-  # handle completion callbacks, error callbacks, and job retry operations.
+  # The processor calls the task handler to deliver a result and to re-enqueue
+  # a request that didn't finish. Because of this class, {RequestTask} doesn't
+  # depend on a job system.
   #
-  # @abstract Subclass and implement all methods to create a concrete handler.
+  # The processor calls {#on_complete} and {#on_error} on its completion worker
+  # threads. The methods must be thread-safe and idempotent, and they should
+  # return quickly, for example after they enqueue a job.
   #
-  # @example Creating a custom handler
+  # @abstract Subclass it and implement all methods.
+  #
+  # @example Create a task handler
   #   class MyTaskHandler < PatientHttp::TaskHandler
   #     def on_complete(response, callback)
-  #       # Trigger completion callback
+  #       MyJobSystem.enqueue(callback, :on_complete, response.as_json)
   #     end
   #
   #     def on_error(error, callback)
-  #       # Trigger error callback
+  #       MyJobSystem.enqueue(callback, :on_error, error.as_json)
   #     end
   #
   #     def retry
-  #       # Re-enqueue the job
+  #       MyJobSystem.enqueue_job(@job_id)
   #     end
   #   end
   class TaskHandler
-    # Trigger the completion callback with the response.
+    # Delivers a response to the callback service's `on_complete` method.
     #
-    # @param response [Response] the HTTP response object
-    # @param callback [String] callback class name
+    # @param response [Response] The HTTP response.
+    # @param callback [String] The callback service class name.
     # @return [void]
     def on_complete(response, callback)
       raise NotImplementedError, "#{self.class}#on_complete must be implemented"
     end
 
-    # Trigger the error callback with the error.
+    # Delivers an error to the callback service's `on_error` method.
     #
-    # @param error [Error] the error object
-    # @param callback [String] callback class name
+    # @param error [Error] The error.
+    # @param callback [String] The callback service class name.
     # @return [void]
     def on_error(error, callback)
       raise NotImplementedError, "#{self.class}#on_error must be implemented"
     end
 
-    # Re-enqueue the original job for retry.
+    # Re-enqueues the original job, so the request runs again later.
     #
-    # Called when a request cannot be completed (e.g., processor shutdown)
-    # and needs to be retried later.
+    # The processor calls this method for a request that didn't finish, for
+    # example when the processor shuts down.
     #
-    # @return [String] the new job ID
+    # @return [String] The new job ID.
     def retry
       raise NotImplementedError, "#{self.class}#retry must be implemented"
     end

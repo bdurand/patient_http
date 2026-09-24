@@ -38,15 +38,15 @@ module PatientHttp
 
     private
 
-    # Send the request through the pool, retrying safe failures at once.
+    # Sends the request through the pool, retrying safe failures at once.
     #
-    # @param client_pool [ClientPool] the pool to send through
-    # @param request [Request] the request being sent, used for its method and URL
-    # @param endpoint [Async::HTTP::Endpoint] the endpoint parsed from the prepared URL
-    # @param headers [Hash] the prepared request headers
-    # @param body [Protocol::HTTP::Body::Buffered, nil] the request body
-    # @yield [client] each pooled client before a request is sent through it
-    # @return [Protocol::HTTP::Response] the response with its headers read
+    # @param client_pool [ClientPool] The pool to send through.
+    # @param request [Request] The request being sent, used for its method and URL.
+    # @param endpoint [Async::HTTP::Endpoint] The endpoint parsed from the prepared URL.
+    # @param headers [Hash] The prepared request headers.
+    # @param body [Protocol::HTTP::Body::Buffered, nil] The request body.
+    # @yield [client] Each pooled client before a request is sent through it.
+    # @return [Protocol::HTTP::Response] The response with its headers read.
     def request_with_immediate_retries(client_pool, request, endpoint, headers, body)
       limit = [client_pool.retries - 1, IMMEDIATE_RETRY_LIMIT].max
       attempt = 1

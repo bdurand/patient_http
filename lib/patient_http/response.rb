@@ -1,43 +1,45 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Represents an HTTP response from an async request.
+  # The HTTP response to an async request.
   #
-  # This class encapsulates the response data including status, headers, body,
-  # and metadata about the request that generated it.
+  # A response holds the status, headers, and body, and details about the
+  # request that returned it. Responses can be serialized to JSON, so they can
+  # go through a job queue.
   class Response
     UNDEFINED = Object.new.freeze
     private_constant :UNDEFINED
 
-    # @return [Integer] HTTP status code
+    # @return [Integer] The HTTP status code.
     attr_reader :status
 
-    # Response headers. Headers that appeared multiple times in the response
-    # (such as set-cookie) are flattened into a single joined string value.
+    # The response headers. A header that occurs more than one time in the
+    # response, such as `set-cookie`, becomes one string with the values joined.
     #
-    # @return [HttpHeaders] response headers
+    # @return [HttpHeaders] The response headers.
     attr_reader :headers
 
-    # @return [Float] request duration in seconds
+    # @return [Float] The request duration in seconds.
     attr_reader :duration
 
-    # @return [String] request ID
+    # @return [String] The request ID.
     attr_reader :request_id
 
-    # @return [String] request URL
+    # @return [String] The request URL.
     attr_reader :url
 
-    # @return [Symbol] HTTP method
+    # @return [Symbol] The HTTP method.
     attr_reader :http_method
 
-    # @return [Array<String>] URLs visited during redirect chain (empty if no redirects)
+    # @return [Array<String>] The URLs of the redirects that were followed, in
+    #   order. Empty if no redirects were followed.
     attr_reader :redirects
 
     class << self
-      # Reconstruct a Response from a hash
+      # Creates a response from its serialized form.
       #
-      # @param hash [Hash] hash representation
-      # @return [Response] reconstructed response
+      # @param hash [Hash] The hash from {#as_json}.
+      # @return [Response] The response.
       def load(hash)
         new(
           status: hash["status"],
@@ -53,17 +55,18 @@ module PatientHttp
       end
     end
 
-    # Initialize a Response from an Async::HTTP::Response
+    # Creates a response.
     #
-    # @param status [Integer] HTTP status code
-    # @param headers [Hash, HttpHeaders] response headers
-    # @param body [String, nil] response body
-    # @param duration [Float] request duration in seconds
-    # @param request_id [String] the request ID
-    # @param url [String] the request URL
-    # @param http_method [Symbol] the HTTP method
-    # @param callback_args [Hash, nil] callback arguments (string keys)
-    # @param redirects [Array<String>, nil] URLs visited during redirect chain
+    # @param status [Integer] The HTTP status code.
+    # @param headers [Hash, HttpHeaders] The response headers.
+    # @param body [String, nil] The response body.
+    # @param duration [Float] The request duration in seconds.
+    # @param request_id [String] The request ID.
+    # @param url [String] The request URL.
+    # @param http_method [Symbol] The HTTP method.
+    # @param callback_args [Hash, nil] The callback arguments, with string keys.
+    # @param redirects [Array<String>, nil] The URLs of the redirects that were
+    #   followed.
     def initialize(status:, headers:, body:, duration:, request_id:, url:, http_method:, callback_args: nil, redirects: nil)
       @status = status
       @headers = HttpHeaders.new(headers)
@@ -80,76 +83,78 @@ module PatientHttp
       @redirects = redirects || []
     end
 
-    # Returns the callback arguments as a CallbackArgs object.
+    # Returns the callback arguments that were passed with the request.
     #
-    # @return [CallbackArgs] the callback arguments
+    # @return [CallbackArgs] The callback arguments.
     def callback_args
       @callback_args ||= CallbackArgs.load(@callback_args_data)
     end
 
-    # Returns the response body, decoding it from the payload if necessary.
+    # Returns the response body. The body is decoded on first access.
     #
-    # @return [String, nil] The decoded response body or nil if there was no body.
+    # @return [String, nil] The response body, or `nil` if the response has no
+    #   body.
     def body
       @body = @payload&.value if @body.equal?(UNDEFINED)
       @body
     end
 
-    # Check if response is successful (2xx status)
+    # Returns whether the status is 2xx.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the request succeeded.
     def success?
       status >= 200 && status < 300
     end
 
-    # Check if response is a redirect (3xx status)
+    # Returns whether the status is 3xx.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the response is a redirect.
     def redirect?
       status >= 300 && status < 400
     end
 
-    # Check if response is a client error (4xx status)
+    # Returns whether the status is 4xx.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the response is a client error.
     def client_error?
       status >= 400 && status < 500
     end
 
-    # Check if response is a server error (5xx status)
+    # Returns whether the status is 5xx.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the response is a server error.
     def server_error?
       status >= 500 && status < 600
     end
 
-    # Check if response is any error (4xx or 5xx status)
+    # Returns whether the status is 4xx or 5xx.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the response is an error.
     def error?
       status >= 400 && status < 600
     end
 
-    # Get the Content-Type header
+    # Returns the value of the `content-type` header.
     #
-    # @return [String, nil]
+    # @return [String, nil] The content type, or `nil` if the header isn't set.
     def content_type
       headers["content-type"]
     end
 
-    # Return true if Content-Type indicates JSON.
+    # Returns whether the `content-type` header identifies a JSON body.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the body is JSON.
     def json?
       type = content_type.to_s.downcase
       type.match?(%r{\Aapplication/[^ ]*json\b}) || type == "text/json"
     end
 
-    # Parse response body as JSON
+    # Parses the response body as JSON.
     #
-    # @return [Hash, Array] parsed JSON
-    # @raise [RuntimeError] if Content-Type is not application/json
-    # @raise [JSON::ParserError] if body is not valid JSON
+    # @return [Hash, Array] The parsed body.
+    # @raise [RuntimeError] If the `content-type` header doesn't identify a JSON
+    #   body.
+    # @raise [JSON::ParserError] If the body isn't valid JSON.
     def json
       unless json?
         raise "Response Content-Type is not application/json (got: #{content_type.inspect})"
@@ -158,9 +163,9 @@ module PatientHttp
       JSON.parse(body)
     end
 
-    # Serialize to JSON hash.
+    # Returns the response as a JSON-compatible hash.
     #
-    # @return [Hash]
+    # @return [Hash] The serialized response.
     def as_json
       {
         "status" => status,
@@ -175,10 +180,11 @@ module PatientHttp
       }
     end
 
-    # Serialize to JSON string.
+    # Returns the response as a JSON string.
     #
-    # @param options [Hash] options to pass to JSON.generate (for ActiveSupport compatibility)
-    # @return [String] JSON representation
+    # @param options [Hash, nil] The options for `JSON.generate`. This parameter
+    #   makes the method compatible with Active Support.
+    # @return [String] The JSON string.
     def to_json(options = nil)
       JSON.generate(as_json, options)
     end

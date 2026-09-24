@@ -1,40 +1,56 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Core processor that handles async HTTP requests in a dedicated thread
+  # Runs HTTP requests in a dedicated reactor thread.
+  #
+  # The reactor thread uses Ruby's fiber scheduler, so it can run hundreds of
+  # requests at the same time. Completion worker threads decode the responses
+  # and deliver the results through each task's {TaskHandler}.
+  #
+  # The processor moves through these states:
+  #
+  #     stopped -> starting -> running -> draining -> stopping -> stopped
+  #
+  # @example Run a processor
+  #   config = PatientHttp::Configuration.new(max_connections: 256)
+  #   processor = PatientHttp::Processor.new(config)
+  #   processor.start
+  #   processor.enqueue(task)
+  #   processor.stop(timeout: 25)
   class Processor
     include TimeHelper
     include RedirectHelper
 
-    # Timing constants for the reactor loop
-    DEQUEUE_TIMEOUT = 1.0 # Seconds to wait when dequeueing requests
+    # The seconds that the reactor waits for a task before it checks for
+    # shutdown.
+    DEQUEUE_TIMEOUT = 1.0
 
-    # Base delay between attempts when delivering a completed result fails.
-    # The delay grows linearly with each attempt.
+    # The base delay in seconds between result delivery attempts. The delay
+    # increases linearly with each attempt.
     COMPLETION_RETRY_DELAY = 0.5
 
-    # Seconds allowed for the completion executor to drain during shutdown.
-    # The reactor's teardown and stop() share this budget so the reactor can
-    # never spend longer draining than stop() is willing to wait for it.
+    # The seconds that the completion workers have to finish at shutdown. The
+    # reactor teardown and {#stop} share this time, so the reactor never waits
+    # longer than {#stop}.
     COMPLETION_SHUTDOWN_TIMEOUT = 5
 
-    # @return [Configuration] the configuration object for the processor
+    # @return [Configuration] The processor configuration.
     attr_reader :config
 
-    # @return [String] the processor's name; used in thread names so multiple
-    #   named processors in one process are distinguishable
+    # @return [String] The processor name. Thread names include it, so you can
+    #   identify the threads of each processor in a process.
     attr_reader :name
 
-    # Callback to invoke after each request. Only available in testing mode.
+    # A callback that runs after each request. Available only in test mode.
+    #
     # @api private
     attr_accessor :testing_callback
 
-    # Initialize the processor.
+    # Creates a processor.
     #
-    # @param config [Configuration] the configuration object
-    # @param name [String, Symbol] optional name to distinguish this processor
-    #   when a process runs more than one
-    # @return [void]
+    # @param config [Configuration] The processor configuration.
+    # @param name [String, Symbol] The processor name. Use a different name for
+    #   each processor in a process.
     def initialize(config, name: "default")
       @config = config
       @name = name.to_s
@@ -61,7 +77,7 @@ module PatientHttp
       @completion_executor = nil
     end
 
-    # Start the processor.
+    # Starts the processor. This method returns when the reactor is ready.
     #
     # @return [void]
     def start
@@ -156,9 +172,14 @@ module PatientHttp
       observers_to_notify&.each { |observer| notify_observer(observer) { |o| o.start } }
     end
 
-    # Stop the processor.
+    # Stops the processor.
     #
-    # @param timeout [Numeric, nil] how long to wait for in-flight requests (seconds)
+    # The processor waits for in-flight requests to finish. When the timeout
+    # ends, it calls {TaskHandler#retry} for each request that didn't finish,
+    # so the job system can run it again.
+    #
+    # @param timeout [Numeric, nil] The seconds to wait for in-flight requests.
+    #   If `nil`, the configured `shutdown_timeout` applies.
     # @return [void]
     def stop(timeout: nil)
       timeout ||= @config.shutdown_timeout
@@ -243,7 +264,7 @@ module PatientHttp
       notify_observers { |observer| observer.stop } if should_notify_stop
     end
 
-    # Drain the processor (stop accepting new requests).
+    # Stops accepting new requests. In-flight requests continue to run.
     #
     # @return [void]
     def drain
@@ -254,11 +275,14 @@ module PatientHttp
       @config.logger&.info("[PatientHttp] Processor draining (no longer accepting new requests)")
     end
 
-    # Enqueue a request task for processing.
+    # Adds a task to the processor queue.
     #
-    # @param task [RequestTask] the request task to enqueue
-    # @raise [NotRunningError] if processor is not running
-    # @raise [MaxCapacityError] if at max capacity
+    # Observers receive `request_enqueued` before the task is queued. If the
+    # processor doesn't accept the task, they receive `request_rejected`.
+    #
+    # @param task [RequestTask] The task.
+    # @raise [NotRunningError] If the processor isn't running.
+    # @raise [MaxCapacityError] If the processor is at `max_connections`.
     # @return [void]
     def enqueue(task)
       raise NotRunningError.new("Cannot enqueue request: processor is #{state}") unless running?
@@ -278,59 +302,61 @@ module PatientHttp
       end
     end
 
-    # Get the current processor state.
+    # Returns the processor state.
     #
-    # @return [Symbol] the current state
+    # @return [Symbol] `:stopped`, `:starting`, `:running`, `:draining`, or
+    #   `:stopping`.
     def state
       @lifecycle.state
     end
 
-    # Check if processor is starting.
+    # Returns whether the processor is starting.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the state is `:starting`.
     def starting?
       @lifecycle.starting?
     end
 
-    # Check if processor is running.
+    # Returns whether the processor is running and accepts requests.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the state is `:running`.
     def running?
       @lifecycle.running?
     end
 
-    # Check if processor is stopped.
+    # Returns whether the processor is stopped.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the state is `:stopped`.
     def stopped?
       @lifecycle.stopped?
     end
 
-    # Check if processor is draining.
+    # Returns whether the processor is draining. A draining processor doesn't
+    # accept new requests but continues to run in-flight requests.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the state is `:draining`.
     def draining?
       @lifecycle.draining?
     end
 
-    # Check if processor is drained (draining and idle).
+    # Returns whether the processor is draining and idle.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the processor is draining and has no requests.
     def drained?
       @lifecycle.draining? && idle?
     end
 
-    # Check if processor is stopping.
+    # Returns whether the processor is stopping.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the state is `:stopping`.
     def stopping?
       @lifecycle.stopping?
     end
 
-    # Check if processor is idle (no queued or in-flight requests, and no
-    # results still being delivered by the completion executor).
+    # Returns whether the processor is idle. An idle processor has no queued
+    # or in-flight requests, and no results that wait for delivery.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the processor is idle.
     def idle?
       executor = @completion_executor
       tracking_empty = @tasks_lock.synchronize do
@@ -340,13 +366,14 @@ module PatientHttp
       tracking_empty && (executor.nil? || executor.idle?)
     end
 
-    # Check how many more requests the processor can accept before reaching
-    # max capacity. This is an advisory value: the authoritative check happens
-    # inside {#enqueue}, so a concurrent enqueue can still hit
-    # {MaxCapacityError}. It performs no observer notifications and no durable
-    # registration, so it is cheap to call before paying enqueue costs.
+    # Returns the number of requests that the processor can accept before it
+    # reaches `max_connections`.
     #
-    # @return [Integer] remaining capacity (never negative)
+    # The value is advisory. {#enqueue} makes the final check, so a concurrent
+    # enqueue can still raise {MaxCapacityError}. This method doesn't notify
+    # observers, so it's a fast check before a costly enqueue.
+    #
+    # @return [Integer] The remaining capacity. Never negative.
     def remaining_capacity
       @tasks_lock.synchronize do
         remaining = @config.max_connections - (@queue.size + @pending_tasks.size + @inflight_requests.size)
@@ -354,58 +381,58 @@ module PatientHttp
       end
     end
 
-    # Check if the processor can accept at least one more request. Advisory
-    # only; see {#remaining_capacity}.
+    # Returns whether the processor can accept one more request. The value is
+    # advisory. See {#remaining_capacity}.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the processor has capacity.
     def capacity_available?
       remaining_capacity > 0
     end
 
-    # Get the number of in-flight requests (actively executing HTTP calls).
+    # Returns the number of requests that are running.
     #
-    # This does not include queued or pending tasks. For the total pipeline
-    # count used by the capacity check, see {#total_count}.
+    # The count doesn't include queued or pending tasks. For the count that the
+    # capacity check uses, see {#total_count}.
     #
-    # @return [Integer]
+    # @return [Integer] The number of in-flight requests.
     def inflight_count
       @inflight_requests.size
     end
 
-    # Get the total number of tasks in the pipeline (queued + pending + in-flight).
+    # Returns the number of queued, pending, and in-flight tasks. {#enqueue}
+    # compares this count with `max_connections`.
     #
-    # This is the count used by {#enqueue} for capacity enforcement.
-    #
-    # @return [Integer]
+    # @return [Integer] The number of tasks.
     def total_count
       @tasks_lock.synchronize do
         @queue.size + @pending_tasks.size + @inflight_requests.size
       end
     end
 
-    # Get the IDs of in-flight requests.
+    # Returns the IDs of the requests that are running.
     #
-    # @return [Array<String>]
+    # @return [Array<String>] The task IDs.
     def inflight_request_ids
       @tasks_lock.synchronize do
         @inflight_requests.keys
       end
     end
 
-    # Get the IDs of all tasks in the pipeline (queued, pending, and in-flight).
-    # Use this to keep durable tracking (e.g. heartbeats) alive for tasks the
-    # processor has accepted but not yet started.
+    # Returns the IDs of all queued, pending, and in-flight tasks. Use it to
+    # keep durable tracking, such as heartbeats, current for tasks that the
+    # processor accepted but didn't start yet.
     #
-    # @return [Array<String>]
+    # @return [Array<String>] The task IDs.
     def tracked_request_ids
       @tasks_lock.synchronize do
         (@queued_tasks.keys + @pending_tasks.keys + @inflight_requests.keys).uniq
       end
     end
 
-    # Add an observer for processor events.
+    # Adds an observer that receives processor events. If the processor is
+    # running, the observer receives `start` immediately.
     #
-    # @param observer [ProcessorObserver] the observer to add
+    # @param observer [ProcessorObserver] The observer.
     # @return [void]
     def observe(observer)
       notify_start = false
@@ -423,30 +450,33 @@ module PatientHttp
       notify_observer(observer) { |o| o.start } if notify_start
     end
 
-    # Wait for the processor to start.
+    # Waits for the processor to start.
     #
-    # @param timeout [Numeric] maximum time to wait in seconds (default: 5)
-    # @return [Boolean] true if started, false if timeout reached
+    # @param timeout [Numeric] The maximum seconds to wait.
+    # @return [Boolean] `true` if the processor started, or `false` if the
+    #   timeout ended first.
     # @api private
     def wait_for_running(timeout: 5)
       start
       @lifecycle.wait_for_running(timeout: timeout)
     end
 
-    # Wait for the queue to be empty and all in-flight requests to complete.
-    # This is mainly for use in tests.
+    # Waits for the queue to be empty and all in-flight requests to finish.
+    # Intended for tests.
     #
-    # @param timeout [Numeric] maximum time to wait in seconds (default: 5)
-    # @return [Boolean] true if processing completed, false if timeout reached
+    # @param timeout [Numeric] The maximum seconds to wait.
+    # @return [Boolean] `true` if the processor is idle, or `false` if the
+    #   timeout ended first.
     # @api private
     def wait_for_idle(timeout: 1)
       @lifecycle.wait_for_condition(timeout: timeout) { idle? }
     end
 
-    # Wait for at least one request to start processing. This is mainly for use in tests.
+    # Waits for a request to start. Intended for tests.
     #
-    # @param timeout [Numeric] maximum time to wait in seconds (default: 5)
-    # @return [Boolean] true if a request started processing, false if timeout reached
+    # @param timeout [Numeric] The maximum seconds to wait.
+    # @return [Boolean] `true` if a request started, or `false` if the timeout
+    #   ended first.
     # @api private
     def wait_for_processing(timeout: 1)
       @lifecycle.wait_for_condition(timeout: timeout) do
@@ -454,9 +484,11 @@ module PatientHttp
       end
     end
 
-    # Run the processor in a block. This is intended for use in tests to
-    # ensure the processor is started and stopped properly.
+    # Starts the processor, yields to a block, and then stops the processor.
+    # Intended for tests.
     #
+    # @yield The block to run while the processor runs.
+    # @return [void]
     # @api private
     def run
       start

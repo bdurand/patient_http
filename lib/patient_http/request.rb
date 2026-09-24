@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Represents an async HTTP request that will be processed by the async processor.
+  # An HTTP request that a processor runs asynchronously.
   #
-  # @example Creating a request
+  # @example Create a GET request
   #   request = PatientHttp::Request.new(:get, "https://api.example.com/users/123")
   #
-  # @example Creating a POST request with JSON body
+  # @example Create a POST request with a JSON body
   #   request = PatientHttp::Request.new(
   #     :post,
   #     "https://api.example.com/users",
@@ -16,57 +16,61 @@ module PatientHttp
     UNDEFINED = Object.new.freeze
     private_constant :UNDEFINED
 
-    # Valid HTTP methods
+    # The supported HTTP methods.
     VALID_METHODS = %i[get head post put patch delete query].freeze
 
-    # HTTP methods that must not carry a request body
+    # The HTTP methods that can't have a request body.
     BODYLESS_METHODS = %i[get head delete].freeze
 
-    # HTTP methods whose requests can be sent again without changing the outcome.
-    # POST and PATCH are excluded, as they are by RFC 9110.
+    # The HTTP methods that can be sent again without changing the result. As in
+    # RFC 9110, POST and PATCH aren't included.
     IDEMPOTENT_METHODS = [:get, :head, :put, :delete, :query].freeze
 
-    # @return [Symbol] HTTP method (:get, :head, :post, :put, :patch, :delete, :query)
+    # @return [Symbol] The HTTP method: `:get`, `:head`, `:post`, `:put`, `:patch`,
+    #   `:delete`, or `:query`.
     attr_reader :http_method
 
-    # @return [String] The request URL
+    # @return [String] The request URL.
     attr_reader :url
 
-    # @return [HttpHeaders] Request headers
+    # @return [HttpHeaders] The request headers.
     attr_reader :headers
 
-    # @return [Numeric, nil] Overall timeout in seconds
+    # @return [Numeric, nil] The timeout in seconds for the full request.
     attr_reader :timeout
 
-    # @return [Integer, nil] Maximum number of redirects to follow (nil uses config default, 0 disables)
+    # @return [Integer, nil] The maximum number of redirects to follow. If `0`,
+    #   redirects aren't followed. If `nil`, the configuration value applies.
     attr_reader :max_redirects
 
-    # @return [Boolean, nil] Whether a redirect that requires changing the HTTP method
-    #   (for example POST to GET on a 302) may be followed (nil uses config default)
+    # @return [Boolean, nil] Whether to follow a redirect that changes the HTTP
+    #   method, such as POST to GET on a 302. If `nil`, the configuration value
+    #   applies.
     attr_reader :follow_method_changing_redirects
 
-    # @return [Array<String>] Lowercase header names stripped from redirected requests,
-    #   in addition to those configured on the {Configuration}
+    # @return [Array<String>] The lowercase names of headers to remove from
+    #   redirected requests, in addition to the names set in the {Configuration}.
     attr_reader :redirect_strip_headers
 
-    # @return [Hash{String, Symbol => SecretReference}] Query parameters whose values are
-    #   secret references, kept out of the serialized URL and resolved at send time
+    # @return [Hash{String, Symbol => SecretReference}] The query parameters whose
+    #   values are secret references. They aren't in the serialized URL. The
+    #   processor resolves them when it sends the request.
     attr_reader :secret_params
 
-    # @return [Array<String>] Names of preprocessors registered on the configuration
-    #   to apply to the request when it is sent
+    # @return [Array<String>] The names of the registered preprocessors that run
+    #   on the request before it's sent.
     attr_reader :preprocessors
 
-    # @return [String, nil] Name of the processor that should execute the request.
-    #   Integrations use this to route the request to a named processor; nil
-    #   uses the default processor.
+    # @return [String, nil] The name of the processor that runs the request.
+    #   Integrations use this value to send the request to a named processor. If
+    #   `nil`, the default processor runs the request.
     attr_reader :processor
 
     class << self
-      # Reconstruct a Request from a hash
+      # Creates a request from its serialized form.
       #
-      # @param hash [Hash] hash representation
-      # @return [Request] reconstructed request
+      # @param hash [Hash] The hash from {#as_json}.
+      # @return [Request] The request.
       def load(hash)
         new(
           hash["http_method"].to_sym,
@@ -102,26 +106,34 @@ module PatientHttp
       end
     end
 
-    # Initializes a new Request.
+    # Creates a request.
     #
-    # @param http_method [Symbol, String] HTTP method (:get, :head, :post, :put, :patch, :delete, :query).
+    # @param http_method [Symbol, String] The HTTP method: `:get`, `:head`, `:post`,
+    #   `:put`, `:patch`, `:delete`, or `:query`.
     # @param url [String, URI::Generic] The request URL.
-    # @param headers [Hash, HttpHeaders] Request headers.
-    # @param body [String, nil] Request body.
-    # @param json [Object, nil] JSON body to be serialized (alternative to body).
-    # @param params [Hash, nil] Query parameters to append to the URL.
-    # @param timeout [Numeric, nil] Overall timeout in seconds.
-    # @param max_redirects [Integer, nil] Maximum redirects to follow (nil uses config, 0 disables).
-    # @param follow_method_changing_redirects [Boolean, nil] Whether to follow a redirect that requires changing
-    #   the HTTP method (nil uses config). When false, such a redirect response is returned as the
-    #   result instead of being followed.
-    # @param redirect_strip_headers [String, Array<String>, nil] Header names (case insensitive)
-    #   to strip from redirected requests, in addition to those configured on the
-    #   {Configuration}.
-    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] Names of preprocessors
-    #   registered on the configuration to apply to the request when it is sent.
-    # @param processor [String, Symbol, nil] Name of the processor that should execute the
-    #   request. Integrations use this to route the request to a named processor.
+    # @param headers [Hash, HttpHeaders] The request headers.
+    # @param body [String, nil] The request body. GET, HEAD, and DELETE requests
+    #   can't have a body.
+    # @param json [Object, nil] An object to send as a JSON body. Can't be combined
+    #   with `body`.
+    # @param params [Hash, nil] The query parameters to add to the URL.
+    # @param timeout [Numeric, nil] The timeout in seconds for the full request.
+    # @param max_redirects [Integer, nil] The maximum number of redirects to
+    #   follow. If `0`, redirects aren't followed. If `nil`, the configuration
+    #   value applies.
+    # @param follow_method_changing_redirects [Boolean, nil] Whether to follow a
+    #   redirect that changes the HTTP method. If `false`, the redirect response is
+    #   the result. If `nil`, the configuration value applies.
+    # @param redirect_strip_headers [String, Array<String>, nil] The names of headers
+    #   to remove from redirected requests, in addition to the names set in the
+    #   {Configuration}. Names are case insensitive.
+    # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] The names of
+    #   the registered preprocessors that run on the request before it's sent.
+    # @param processor [String, Symbol, nil] The name of the processor that runs
+    #   the request. Integrations use this value to send the request to a named
+    #   processor.
+    # @raise [ArgumentError] If the HTTP method, URL, or body isn't valid, or if
+    #   both `body` and `json` are given.
     def initialize(
       http_method,
       url,
@@ -169,25 +181,25 @@ module PatientHttp
       @body = UNDEFINED
     end
 
-    # Returns the request body, decoding it from the payload if necessary.
+    # Returns the request body. The body is decoded on first access.
     #
-    # @return [String, nil] The decoded request body or nil if there was no body.
+    # @return [String, nil] The request body, or `nil` if the request has no body.
     def body
       @body = @payload&.value if @body.equal?(UNDEFINED)
       @body
     end
 
-    # Whether the request can be sent again without changing the outcome, based
-    # on its HTTP method.
+    # Returns whether the request can be sent again without changing the result.
+    # The HTTP method determines the value.
     #
-    # @return [Boolean]
+    # @return [Boolean] `true` if the HTTP method is idempotent.
     def idempotent?
       IDEMPOTENT_METHODS.include?(@http_method)
     end
 
-    # Serialize to JSON hash.
+    # Returns the request as a JSON-compatible hash.
     #
-    # @return [Hash]
+    # @return [Hash] The serialized request.
     def as_json
       hash = {
         "http_method" => @http_method.to_s,

@@ -8,30 +8,28 @@ end
 
 module PatientHttp
   module PayloadStore
-    # S3-based payload store for production deployments.
+    # A payload store that keeps payloads as JSON objects in Amazon S3. Use it
+    # in production when payloads need durable storage that several processes
+    # and hosts share.
     #
-    # Stores payloads as JSON objects in S3. This store is recommended
-    # for production environments where payloads need durable storage
-    # and can be shared across multiple processes/instances.
+    # Requires the `aws-sdk-s3` gem. The S3 client is responsible for thread
+    # safety.
     #
-    # Thread-safe: S3 clients handle their own thread safety.
-    #
-    # @example Configuration with S3 bucket
+    # @example Register an S3 store
     #   s3 = Aws::S3::Resource.new
     #   bucket = s3.bucket("my-payloads-bucket")
     #   config.register_payload_store(:s3, adapter: :s3, bucket: bucket)
     class S3Store < Base
       Base.register :s3, self
 
-      # @return [String] The key prefix used for all stored payloads
+      # @return [String] The prefix for the keys of all stored payloads.
       attr_reader :key_prefix
 
-      # Initialize a new S3 store.
+      # Creates an S3 store.
       #
-      # @param bucket [Aws::S3::Bucket] S3 Bucket object. Required.
-      # @param key_prefix [String] Prefix for all S3 object keys.
-      #   Defaults to "patient_http/payloads/"
-      # @raise [ArgumentError] If bucket is not provided
+      # @param bucket [Aws::S3::Bucket] The S3 bucket.
+      # @param key_prefix [String] The prefix for all S3 object keys.
+      # @raise [ArgumentError] If the bucket is missing.
       def initialize(bucket:, key_prefix: nil)
         raise ArgumentError, "S3 bucket is required" unless bucket
 
@@ -39,21 +37,22 @@ module PatientHttp
         @key_prefix = key_prefix || "patient_http/payloads/"
       end
 
-      # Store pre-serialized JSON string directly in S3.
+      # Stores a JSON string in S3.
       #
-      # @param key [String] Unique key (appended to key_prefix)
-      # @param json [String] Pre-serialized JSON string
-      # @return [String] The key
+      # @param key [String] The unique key. The object key is the key prefix
+      #   and this key.
+      # @param json [String] The serialized JSON.
+      # @return [String] The key.
       def store_json(key, json)
         full_key = key_with_prefix(key)
         @bucket.object(full_key).put(body: json, content_type: "application/json")
         key
       end
 
-      # Fetch data from S3.
+      # Fetches stored data.
       #
-      # @param key [String] The key to fetch
-      # @return [Hash, nil] The stored data or nil if not found
+      # @param key [String] The key.
+      # @return [Hash, nil] The parsed data, or `nil` if the key isn't found.
       def fetch(key)
         full_key = key_with_prefix(key)
         response = @bucket.object(full_key).get
@@ -63,22 +62,20 @@ module PatientHttp
         nil
       end
 
-      # Delete a payload from S3.
+      # Deletes stored data. Doesn't raise an error if the key doesn't exist.
       #
-      # Idempotent - does not raise if object doesn't exist.
-      #
-      # @param key [String] The key to delete
-      # @return [Boolean] true
+      # @param key [String] The key.
+      # @return [Boolean] `true`.
       def delete(key)
         full_key = key_with_prefix(key)
         @bucket.object(full_key).delete
         true
       end
 
-      # Check if a payload exists.
+      # Returns whether a payload exists.
       #
-      # @param key [String] The key to check
-      # @return [Boolean] true if the payload exists
+      # @param key [String] The key.
+      # @return [Boolean] `true` if the payload exists.
       def exists?(key)
         full_key = key_with_prefix(key)
         @bucket.object(full_key).exists?

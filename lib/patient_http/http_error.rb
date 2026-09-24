@@ -1,23 +1,22 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Error raised when an HTTP request receives a non-2xx response status code
-  # and the raise_error_responses option is enabled.
+  # The error for a non-2xx response when the `raise_error_responses` option is
+  # set.
   #
-  # This error includes the full Response object so you can access the status code,
-  # headers, body, and other response data.
+  # The error holds the full {Response}, so you can read the status, headers,
+  # and body.
   class HttpError < Error
-    # @return [Response] The HTTP response that triggered the error
+    # @return [Response] The HTTP response that caused the error.
     attr_reader :response
 
     class << self
-      # Create a new HttpError (or subclass) from a response.
+      # Creates an error for a response. The status determines the class: a
+      # {ClientError} for 4xx, a {ServerError} for 5xx, and an `HttpError` for
+      # other non-2xx statuses.
       #
-      # Returns ClientError for 4xx responses, ServerError for 5xx responses,
-      # or HttpError for other non-2xx responses.
-      #
-      # @param response [Response] The HTTP response with non-2xx status code
-      # @return [HttpError, ClientError, ServerError] The appropriate error instance
+      # @param response [Response] The HTTP response with a non-2xx status.
+      # @return [HttpError, ClientError, ServerError] The error.
       def new(response)
         if response.client_error?
           ClientError.allocate.tap { |error| error.send(:initialize, response) }
@@ -28,65 +27,72 @@ module PatientHttp
         end
       end
 
-      # Reconstruct an HttpError from a hash
+      # Creates an error from its serialized form.
       #
-      # @param hash [Hash] hash representation
-      # @return [HttpError] reconstructed error
+      # @param hash [Hash] The hash from {#as_json}.
+      # @return [HttpError] The error.
       def load(hash)
         response = Response.load(hash["response"])
         new(response)
       end
     end
 
-    # Initializes a new HttpError.
+    # Creates an error.
     #
-    # @param response [Response] The HTTP response with non-2xx status code
+    # @param response [Response] The HTTP response with a non-2xx status.
     def initialize(response)
       super("HTTP #{response.status} response from #{response.http_method.to_s.upcase} #{response.url}")
       @response = response
     end
 
-    # Delegate common response methods for convenience.
+    # Returns the HTTP status of the response.
     #
-    # @return [Integer] HTTP status code
+    # @return [Integer] The HTTP status code.
     def status
       @response.status
     end
 
-    # Returns the error type symbol. Provided for compatibility with RequestError.
+    # Returns the error type.
     #
-    # @return [Symbol] the error type
+    # @return [Symbol] Always `:http_error`.
     def error_type
       :http_error
     end
 
+    # @return [String] The request URL.
     def url
       response.url
     end
 
+    # @return [Symbol] The HTTP method.
     def http_method
       response.http_method
     end
 
+    # @return [Float] The request duration in seconds.
     def duration
       response.duration
     end
 
+    # @return [String] The unique request ID.
     def request_id
       response.request_id
     end
 
+    # @return [Class] The class of this error.
     def error_class
       self.class
     end
 
+    # @return [CallbackArgs] The callback arguments that were passed with the
+    #   request.
     def callback_args
       response.callback_args
     end
 
-    # Convert to hash with string keys for serialization
+    # Returns the error as a JSON-compatible hash.
     #
-    # @return [Hash] hash representation
+    # @return [Hash] The serialized error.
     def as_json
       {
         "response" => @response.as_json
@@ -94,13 +100,11 @@ module PatientHttp
     end
   end
 
-  # Error raised when an HTTP request receives a 4xx (client error) response status code
-  # and the raise_error_responses option is enabled.
+  # The error for a 4xx response when the `raise_error_responses` option is set.
   class ClientError < HttpError
   end
 
-  # Error raised when an HTTP request receives a 5xx (server error) response status code
-  # and the raise_error_responses option is enabled.
+  # The error for a 5xx response when the `raise_error_responses` option is set.
   class ServerError < HttpError
   end
 end

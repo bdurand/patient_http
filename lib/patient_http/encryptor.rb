@@ -1,27 +1,36 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Handles encryption and decryption of payloads for secure storage.
+  # Encrypts payloads before they're stored in a job queue, and decrypts them
+  # after they're read.
   #
-  # This class provides a simple interface for encrypting data before storage and
-  # decrypting it after retrieval. It supports pluggable encryption and decryption
-  # logic, allowing you to use any encryption library or method that fits your needs.
+  # The encryptor serializes a hash to JSON, passes the bytes to the encryption
+  # callable, and stores the Base64-encoded result as
+  # `{"__encrypted__" => true, "value" => "<base64>"}`. You can use any
+  # encryption library.
+  #
+  # @see Configuration#encryptor
   class Encryptor
-    # Initialize a new Encryptor with optional encryption and decryption callables.
+    # Creates an encryptor. Without callables, the encryptor returns data
+    # unchanged.
     #
-    # @param encryption [#call, nil] A callable object that takes data and returns encrypted data
-    # @param decryption [#call, nil] A callable object that takes encrypted data and returns decrypted data
+    # @param encryption [#call, nil] An object that takes the bytes as a String
+    #   and returns the encrypted bytes.
+    # @param decryption [#call, nil] An object that takes the encrypted bytes and
+    #   returns the decrypted bytes.
     def initialize(encryption: nil, decryption: nil)
       @encryption = encryption
       @decryption = decryption
     end
 
-    # Encrypt data using the provided encryption callable. If no encryption callable is set,
-    # returns the original data.
+    # Encrypts a hash. If no encryption callable is set, the hash is returned
+    # unchanged.
     #
-    # @param data [Hash] The data to be encrypted
-    # @return [Hash, nil] The encrypted data as a hash or the original data if no encryption callable is set
-    # @raise [JSON::GeneratorError] If the data cannot be serialized to JSON
+    # @param data [Hash, nil] The data to encrypt.
+    # @return [Hash, nil] The encrypted data, or the original data if no
+    #   encryption callable is set.
+    # @raise [ArgumentError] If the data isn't a Hash or `nil`.
+    # @raise [JSON::GeneratorError] If the data can't be serialized to JSON.
     def encrypt(data)
       return nil if data.nil?
 
@@ -37,13 +46,14 @@ module PatientHttp
       }
     end
 
-    # Decrypt data using the provided decryption callable. If no decryption callable is set,
-    # or if the data is not marked as encrypted, returns the original data.
+    # Decrypts a hash. If no decryption callable is set, or if the hash isn't
+    # encrypted, the hash is returned unchanged. As a result, data written
+    # before encryption was turned on can still be read.
     #
-    # @param data [Hash] The data to be decrypted
-    # @return [Hash, nil] The decrypted data as a hash or the original data if no decryption callable
-    #   is set or if data is not encrypted
-    # @raise [JSON::ParserError] If the decrypted data cannot be parsed as JSON
+    # @param data [Hash, nil] The data to decrypt.
+    # @return [Hash, nil] The decrypted data, or the original data.
+    # @raise [ArgumentError] If the data isn't a Hash or `nil`.
+    # @raise [JSON::ParserError] If the decrypted data isn't valid JSON.
     def decrypt(data)
       return nil if data.nil?
 

@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
 module PatientHttp
-  # Pool of HTTP clients with LRU eviction.
+  # A pool of HTTP clients, one for each host.
   #
-  # Maintains a pool of clients lazily instantiated for each host. The pool
-  # is capped with an LRU algorithm - when a new client is needed and the
-  # pool is at capacity, the least recently used client is closed and removed.
+  # A client is created when a host first needs one. When the pool is full and
+  # a new client is needed, the least recently used client is closed and
+  # removed.
+  #
+  # @api private
   class ClientPool
     # Supported protocol names mapped to their async-http implementations. Forcing
     # :http1 also limits the TLS ALPN advertisement to http/1.1, which avoids
@@ -16,10 +18,10 @@ module PatientHttp
     }.freeze
 
     class << self
-      # Build a pool with the connection settings from a configuration.
+      # Builds a pool with the connection settings from a configuration.
       #
-      # @param config [Configuration] the configuration to read settings from
-      # @return [ClientPool] the new pool
+      # @param config [Configuration] The configuration to read settings from.
+      # @return [ClientPool] The new pool.
       def from_config(config)
         new(
           max_size: config.connection_pool_size,
@@ -34,6 +36,19 @@ module PatientHttp
       end
     end
 
+    # Creates a client pool.
+    #
+    # @param max_size [Integer] The maximum number of host clients in the pool.
+    # @param connection_timeout [Numeric, nil] The timeout in seconds to open a
+    #   connection.
+    # @param proxy_url [String, nil] The HTTP or HTTPS proxy URL.
+    # @param retries [Integer] The number of retries for failed requests.
+    # @param protocol [Symbol, nil] The HTTP protocol: `:http1` or `:http2`.
+    # @param connection_limit [Integer, nil] The maximum number of connections
+    #   to each host.
+    # @param tcp_keepalive [Integer, Hash, nil] The TCP keepalive settings.
+    # @param tcp_user_timeout [Numeric, nil] The TCP user timeout in seconds.
+    # @raise [ArgumentError] If the protocol isn't supported.
     def initialize(max_size:, connection_timeout: nil, proxy_url: nil, retries: 3, protocol: nil,
       connection_limit: nil, tcp_keepalive: nil, tcp_user_timeout: nil)
       if protocol && !PROTOCOLS.include?(protocol)
@@ -55,13 +70,14 @@ module PatientHttp
       @closing_mutex = Mutex.new
     end
 
+    # @return [Object] The connection settings that the pool was created with.
     attr_reader :max_size, :connection_timeout, :proxy_url, :retries, :protocol, :connection_limit,
       :tcp_keepalive, :tcp_user_timeout
 
-    # Get or create a client for the given endpoint.
+    # Returns or creates a client for the given endpoint.
     #
-    # @param endpoint [Async::HTTP::Endpoint] the target endpoint
-    # @return [Async::HTTP::Client] the client for the endpoint's host
+    # @param endpoint [Async::HTTP::Endpoint] The target endpoint.
+    # @return [Async::HTTP::Client] The client for the endpoint's host.
     def client_for(endpoint)
       key = host_key(endpoint)
 
@@ -78,17 +94,17 @@ module PatientHttp
       end
     end
 
-    # Make a request.
+    # Makes a request.
     #
-    # @param http_method [String, Symbol] HTTP method
-    # @param url [String, Async::HTTP::Endpoint] request URL, or the endpoint
-    #   already parsed from it
-    # @param headers [Hash] request headers
-    # @param body [String, nil] request body
-    # @param client [Async::HTTP::Client, nil] the pooled client to send through,
-    #   normally the one {#client_for} returned for the URL; nil looks it up
-    # @param block [Proc] optional block to process the response
-    # @return [Protocol::HTTP::Response] the response
+    # @param http_method [String, Symbol] HTTP method.
+    # @param url [String, Async::HTTP::Endpoint] Request URL, or the endpoint
+    #   already parsed from it.
+    # @param headers [Hash] Request headers.
+    # @param body [String, nil] Request body.
+    # @param client [Async::HTTP::Client, nil] The pooled client to send through,
+    #   normally the one {#client_for} returned for the URL; nil looks it up.
+    # @param block [Proc] Optional block to process the response.
+    # @return [Protocol::HTTP::Response] The response.
     def request(http_method, url, headers, body, client: nil, &block)
       endpoint = url.is_a?(Async::HTTP::Endpoint) ? url : Async::HTTP::Endpoint.parse(url)
       client ||= client_for(endpoint)
@@ -114,7 +130,7 @@ module PatientHttp
       end
     end
 
-    # Close all clients and release resources.
+    # Closes all clients and releases their resources.
     #
     # Clients evicted earlier whose close is still waiting for their in-flight
     # requests are waited on as well, so no connection outlives the pool.
@@ -145,16 +161,16 @@ module PatientHttp
       end
     end
 
-    # Evict and close the client for the given URL.
+    # Evicts and closes the client for the host of a URL.
     #
     # This forces a new connection to be established on the next request to this host.
     # When the client that failed is given, only that client is evicted: a
     # replacement installed for the host after an earlier eviction is left alone,
     # so a late failure on the old client cannot discard a healthy new one.
     #
-    # @param url [String] the request URL whose host client should be evicted
-    # @param client [Async::HTTP::Client, nil] the client that failed, or nil to
-    #   evict whichever client the pool currently holds for the host
+    # @param url [String] The request URL whose host client should be evicted.
+    # @param client [Async::HTTP::Client, nil] The client that failed, or nil to
+    #   evict whichever client the pool currently holds for the host.
     # @return [void]
     def evict(url, client = nil)
       endpoint = Async::HTTP::Endpoint.parse(url)
@@ -168,7 +184,7 @@ module PatientHttp
       close_later(evicted) if evicted
     end
 
-    # @return [Integer] number of clients in the pool
+    # @return [Integer] Number of clients in the pool.
     def size
       @mutex.synchronize { @clients.size }
     end

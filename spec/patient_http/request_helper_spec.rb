@@ -39,7 +39,7 @@ RSpec.describe PatientHttp::RequestHelper do
       expect(captured_request.http_method).to eq(:get)
       expect(captured_request.url).to eq("https://api.example.com/users/42?expand=posts")
       expect(captured_request.headers.to_h).to include("authorization" => "Bearer token")
-      expect(captured_request.timeout).to eq(30)
+      expect(captured_request.timeout).to be_nil
     end
 
     it "merges template headers with per-request headers" do
@@ -264,11 +264,33 @@ RSpec.describe PatientHttp::RequestHelper do
       expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
     end
 
+    it "passes max_redirects through async_request" do
+      TestService.async_get("/path", callback: TestCallback, max_redirects: 0)
+
+      expect(@captured_request.max_redirects).to eq(0)
+    end
+
     it "passes redirect options through instance-level async_request" do
       TestService.new.async_post("/path", callback: TestCallback, follow_method_changing_redirects: false, redirect_strip_headers: ["X-Api-Key"])
 
       expect(@captured_request.follow_method_changing_redirects).to be false
       expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
+    end
+
+    it "passes max_redirects through instance-level async_request" do
+      TestService.new.async_get("/path", callback: TestCallback, max_redirects: 2)
+
+      expect(@captured_request.max_redirects).to eq(2)
+    end
+
+    it "passes max_redirects without a request template" do
+      service_class = Class.new do
+        include PatientHttp::RequestHelper
+      end
+
+      service_class.async_get("https://api.example.com/path", callback: TestCallback, max_redirects: 1)
+
+      expect(@captured_request.max_redirects).to eq(1)
     end
 
     it "passes redirect options without a request template" do
