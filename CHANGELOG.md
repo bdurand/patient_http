@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Requires async-http 0.99 or later and declares protocol-http 0.66 or later as a direct dependency, since its error classes are referenced directly.
 - **`RequestTemplate` no longer defaults to a 30 second timeout.** A template without a `timeout` leaves the request timeout unset, so the configured `request_timeout` applies. The same is true for `request_template` in `RequestHelper`. Templates that need 30 seconds must now set `timeout: 30`.
 - `PatientHttp.execute_inline` and `SynchronousExecutor` make their connections through a `ClientPool` that lives for the one execution, so inline requests honor `connection_timeout`, `protocol`, `tcp_keepalive`, `tcp_user_timeout`, and the immediate retry rules exactly as processor-backed requests do. Previously the connection timeout capped inline response reads and no immediate retries applied inline.
+- Minimum Ruby version is 3.3.
 
 ### Fixed
 
