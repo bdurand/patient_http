@@ -287,7 +287,7 @@ The processor uses Ruby's Fiber scheduler (`async` gem) for non-blocking I/O:
 
 ## Timeouts and Response Size
 
-A request can have two timeouts. The request timeout limits the full exchange. The read timeout limits each wait for data: the wait for the response headers, and then the wait for each body chunk. Each wait has its own timer, so a slow but steady stream continues until the request timeout stops it. The read timeout raises `ReadTimeoutError`, a subclass of `Async::TimeoutError`. The immediate retries never retry either timeout.
+A request can have two timeouts. The request timeout limits the full exchange. The read timeout limits each wait for data: the wait for the response headers, and then the wait for each body chunk. The first timer starts before the connection opens, so it also covers opening the connection, sending the request, and the immediate retries of a refused connection. Each wait has its own timer, so a slow but steady stream continues until the request timeout stops it. The read timeout raises `ReadTimeoutError`, a subclass of `Async::TimeoutError`. The immediate retries never retry either timeout.
 
 The response size limit comes from the request, or from the configuration if the request doesn't set one. The reactor applies the limit to the declared body length before the read starts and to the raw bytes as they arrive. The raw response data that goes to the completion worker includes the limit, so the worker applies the same limit to the inflated body.
 

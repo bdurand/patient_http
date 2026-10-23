@@ -303,11 +303,17 @@ module PatientHttp
     end
 
     # Sets the default read timeout. This is the maximum number of seconds to
-    # wait for data from the server. The timer starts when the request is sent
-    # and covers the wait for the response headers. It starts again each time a
-    # body chunk arrives. A response that sends data at regular intervals can
-    # thus continue for longer than the read timeout. The request timeout
-    # continues to limit the full request.
+    # wait for data from the server. The timer starts again each time a body
+    # chunk arrives. A response that sends data at regular intervals can thus
+    # continue for longer than the read timeout. The request timeout continues
+    # to limit the full request.
+    #
+    # The first timer starts before the connection opens. It covers the time to
+    # get a connection, send the request, and wait for the response headers.
+    # Immediate retries of a refused connection use the same timer. This is
+    # different from clients such as Net::HTTP, which use a separate open
+    # timeout and write timeout. The connection timeout continues to limit the
+    # time to open a connection.
     #
     # Use it for streamed responses, such as server-sent events. Do not use it
     # for requests where the server does all of its work before it sends the

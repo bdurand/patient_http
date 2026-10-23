@@ -251,7 +251,7 @@ The `async_*` methods take the same options as the `PatientHttp` module methods.
 
 The `timeout` option limits the full request, from the time it is sent until the last byte of the body arrives. A streamed response, such as server-sent events from an LLM API, can continue for many minutes. A large `timeout` lets the stream finish, but it cannot find a stream that stops.
 
-To find a stream that stops, set `read_timeout`. This is the maximum number of seconds to wait for data from the server. The timer starts when the request is sent and covers the wait for the response headers. It starts again each time a body chunk arrives. A stream that sends data at regular intervals can continue for longer than `read_timeout`, until `timeout` stops it.
+To find a stream that stops, set `read_timeout`. This is the maximum number of seconds to wait for data from the server. The first timer starts before the connection opens. It covers the time to get a connection, send the request, and wait for the response headers. The timer starts again each time a body chunk arrives. A stream that sends data at regular intervals can continue for longer than `read_timeout`, until `timeout` stops it.
 
 ```ruby
 PatientHttp.post(
