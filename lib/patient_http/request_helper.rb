@@ -137,16 +137,32 @@ module PatientHttp
       # @param params [Hash, nil] The default query parameters.
       # @param timeout [Numeric, nil] The default request timeout in seconds. If
       #   `nil`, the configured `request_timeout` applies.
+      # @param read_timeout [Numeric, nil] The default maximum number of seconds to
+      #   wait for data from the server. If `nil`, the configured `read_timeout`
+      #   applies.
+      # @param max_response_size [Integer, nil] The default maximum response body
+      #   size in bytes. If `nil`, the configured `max_response_size` applies.
       # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] The names
       #   of the default preprocessors.
       # @param processor [String, Symbol, nil] The name of the default processor.
       # @return [void]
-      def request_template(base_url: nil, headers: {}, params: nil, timeout: nil, preprocessors: nil, processor: nil)
+      def request_template(
+        base_url: nil,
+        headers: {},
+        params: nil,
+        timeout: nil,
+        read_timeout: nil,
+        max_response_size: nil,
+        preprocessors: nil,
+        processor: nil
+      )
         @patient_http_request_template = RequestTemplate.new(
           base_url: base_url,
           headers: headers,
           params: params,
           timeout: timeout,
+          read_timeout: read_timeout,
+          max_response_size: max_response_size,
           preprocessors: preprocessors,
           processor: processor
         )
@@ -167,6 +183,12 @@ module PatientHttp
       #   combined with `body`.
       # @param params [Hash, nil] The query parameters to add to the URL.
       # @param timeout [Numeric, nil] The request timeout in seconds.
+      # @param read_timeout [Numeric, nil] The maximum number of seconds to wait
+      #   for data from the server. The timer covers the wait for the response
+      #   headers and starts again each time a body chunk arrives. If `nil`, the
+      #   configuration value applies.
+      # @param max_response_size [Integer, nil] The maximum response body size in
+      #   bytes. If `nil`, the configuration value applies.
       # @param raise_error_responses [Boolean, nil] If `true`, non-2xx responses go
       #   to the `on_error` callback as an {HttpError}.
       # @param callback_args [Hash, nil] The JSON-compatible arguments to pass to the
@@ -194,6 +216,8 @@ module PatientHttp
         json: nil,
         params: nil,
         timeout: nil,
+        read_timeout: nil,
+        max_response_size: nil,
         raise_error_responses: nil,
         callback_args: nil,
         max_redirects: nil,
@@ -209,6 +233,8 @@ module PatientHttp
           headers: headers,
           params: params,
           timeout: timeout,
+          read_timeout: read_timeout,
+          max_response_size: max_response_size,
           max_redirects: max_redirects,
           follow_method_changing_redirects: follow_method_changing_redirects,
           redirect_strip_headers: redirect_strip_headers,
@@ -257,6 +283,12 @@ module PatientHttp
     #   combined with `body`.
     # @param params [Hash, nil] The query parameters to add to the URL.
     # @param timeout [Numeric, nil] The request timeout in seconds.
+    # @param read_timeout [Numeric, nil] The maximum number of seconds to wait for
+    #   data from the server. The timer covers the wait for the response headers
+    #   and starts again each time a body chunk arrives. If `nil`, the
+    #   configuration value applies.
+    # @param max_response_size [Integer, nil] The maximum response body size in
+    #   bytes. If `nil`, the configuration value applies.
     # @param raise_error_responses [Boolean, nil] If `true`, non-2xx responses go
     #   to the `on_error` callback as an {HttpError}.
     # @param callback_args [Hash, nil] The JSON-compatible arguments to pass to the
@@ -284,6 +316,8 @@ module PatientHttp
       json: nil,
       params: nil,
       timeout: nil,
+      read_timeout: nil,
+      max_response_size: nil,
       raise_error_responses: nil,
       callback_args: nil,
       max_redirects: nil,
@@ -301,6 +335,8 @@ module PatientHttp
         json: json,
         params: params,
         timeout: timeout,
+        read_timeout: read_timeout,
+        max_response_size: max_response_size,
         raise_error_responses: raise_error_responses,
         callback_args: callback_args,
         max_redirects: max_redirects,

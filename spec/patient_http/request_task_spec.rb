@@ -311,6 +311,18 @@ RSpec.describe PatientHttp::RequestTask do
       expect(redirect_task.redirects).to eq(["https://example.com/first", "https://api.example.com/users"])
     end
 
+    it "preserves read_timeout and max_response_size" do
+      streaming_request = PatientHttp::Request.new(
+        :get, "https://api.example.com/users", read_timeout: 15, max_response_size: 4_000_000
+      )
+      task = described_class.new(request: streaming_request, task_handler: task_handler, callback: callback)
+
+      redirect_task = task.redirect_task(location: "https://other.example.com/new-location", status: 302)
+
+      expect(redirect_task.request.read_timeout).to eq(15)
+      expect(redirect_task.request.max_response_size).to eq(4_000_000)
+    end
+
     it "preserves the processor name" do
       named_request = PatientHttp::Request.new(:get, "https://api.example.com/users", processor: :llm)
       task = described_class.new(

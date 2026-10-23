@@ -57,6 +57,18 @@ RSpec.describe PatientHttp::RequestTemplate do
       expect(template.request(:get, "/users", timeout: 5).timeout).to eq(5)
     end
 
+    it "uses the template read_timeout and max_response_size when the request doesn't set them" do
+      template = described_class.new(base_url: base_url, read_timeout: 20, max_response_size: 5_000_000)
+
+      request = template.post("/users")
+      expect(request.read_timeout).to eq(20)
+      expect(request.max_response_size).to eq(5_000_000)
+
+      request = template.post("/users", read_timeout: 3, max_response_size: 1000)
+      expect(request.read_timeout).to eq(3)
+      expect(request.max_response_size).to eq(1000)
+    end
+
     it "passes redirect options to the Request" do
       result = template.request(:post, "/users", follow_method_changing_redirects: false, redirect_strip_headers: "X-Api-Key")
       expect(result.follow_method_changing_redirects).to be false

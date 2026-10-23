@@ -89,6 +89,28 @@ module PatientHttp
           headers_hash.merge("content-encoding" => remaining.join(", "))
         end
       end
+
+      # Runs a block that waits for data from the server, and stops it if no
+      # data arrives in time. Each call starts a new timer, so call it once for
+      # each wait: once for the response headers and once for each body chunk.
+      #
+      # The block must run in an Async task.
+      #
+      # @param read_timeout [Numeric, nil] The maximum number of seconds to wait.
+      #   If `nil`, the block runs without a limit.
+      # @yield Waits for data from the server.
+      # @return [Object] The value of the block.
+      # @raise [ReadTimeoutError] If the block doesn't finish in time.
+      def with_read_timeout(read_timeout, &block)
+        return yield if read_timeout.nil?
+
+        Async::Task.current.with_timeout(
+          read_timeout,
+          ReadTimeoutError,
+          "No data received from the server for #{read_timeout} seconds",
+          &block
+        )
+      end
     end
 
     # Creates the reader.
@@ -115,21 +137,44 @@ module PatientHttp
     # bytes and {#decode_body} applies the same limit to the inflated bytes.
     #
     # The Content-Length header is checked against the size limit before the
-    # read starts. A response to a HEAD request has an empty body but reports
-    # the Content-Length of the resource, so the header check is skipped when
-    # the body reports itself as empty.
+    # read starts. The HTTP/1 parser moves that header into the body, so the
+    # length of the body is used when the header is not present. A response to
+    # a HEAD request has an empty body but reports the Content-Length of the
+    # resource, so the check is skipped when the body reports itself as empty.
+    #
+    # A read timeout limits the wait for each chunk. The timer starts again
+    # each time a chunk arrives, so a body that arrives slowly but steadily is
+    # read to the end.
     #
     # @param async_response [Async::HTTP::Protocol::Response] The async HTTP response.
     # @param headers_hash [Hash] The response headers.
+    # @param max_response_size [Integer, nil] The size limit in bytes. If `nil`,
+    #   the configuration value applies.
+    # @param read_timeout [Numeric, nil] The maximum number of seconds to wait for
+    #   each chunk. If `nil`, there is no limit.
     # @return [Array<String>, nil] The raw body chunks or nil if no body present.
     # @raise [ResponseTooLargeError] If the body exceeds max_response_size.
+    # @raise [ReadTimeoutError] If no chunk arrives within the read timeout.
     # @raise [ReadAbortedError] If the processor stopped past its shutdown deadline mid-read.
-    def read_raw_body(async_response, headers_hash)
+    def read_raw_body(async_response, headers_hash, max_response_size: nil, read_timeout: nil)
       body = async_response.body
       return nil unless body
 
-      validate_content_length(headers_hash) unless body.empty?
-      read_body_chunks(async_response)
+      limit = max_response_size || @config.max_response_size
+      error = nil
+
+      begin
+        validate_content_length(headers_hash, body, limit) unless body.empty?
+        read_body_chunks(body, limit, read_timeout)
+      rescue => e
+        error = e
+        raise
+      ensure
+        # Always close the body. A body that is closed with an error discards
+        # its connection, so a connection that is not fully read is not
+        # returned to the pool.
+        body.close(error)
+      end
     end
 
     # Decodes raw body chunks into the final body string.
@@ -147,15 +192,18 @@ module PatientHttp
     #
     # @param chunks [Array<String>, nil] The raw body chunks.
     # @param headers_hash [Hash] The response headers.
+    # @param max_response_size [Integer, nil] The size limit in bytes for the
+    #   inflated body. If `nil`, the configuration value applies.
     # @return [String, nil] The decoded body or nil if there was no body.
     # @raise [ResponseTooLargeError] If the inflated body exceeds max_response_size.
-    def decode_body(chunks, headers_hash)
+    def decode_body(chunks, headers_hash, max_response_size: nil)
       return nil if chunks.nil?
 
       remaining, decodable = self.class.split_encodings(headers_hash)
       warn_undecodable(remaining) unless remaining.empty?
 
-      body = inflate_encodings(chunks, decodable).join
+      limit = max_response_size || @config.max_response_size
+      body = inflate_encodings(chunks, decodable, limit).join
       body.force_encoding(Encoding::ASCII_8BIT)
       # A body that is still encoded is not text yet, so the charset does not
       # describe its bytes. Leave it binary for the caller to decode.
@@ -171,11 +219,12 @@ module PatientHttp
     #
     # @param chunks [Array<String>] The encoded body chunks.
     # @param encodings [Array<String>] Decodable encoding names in applied order.
+    # @param limit [Integer] The size limit in bytes for the inflated body.
     # @return [Array<String>] The decoded chunks.
-    # @raise [ResponseTooLargeError] If the inflated body exceeds max_response_size.
-    def inflate_encodings(chunks, encodings)
+    # @raise [ResponseTooLargeError] If the inflated body exceeds the limit.
+    def inflate_encodings(chunks, encodings, limit)
       encodings.reverse_each do |name|
-        chunks = [inflate_encoding(chunks, name)] if INFLATE_WINDOW_BITS.key?(name)
+        chunks = [inflate_encoding(chunks, name, limit)] if INFLATE_WINDOW_BITS.key?(name)
       end
 
       chunks
@@ -187,15 +236,16 @@ module PatientHttp
     #
     # @param chunks [Array<String>] The encoded body chunks.
     # @param name [String] A lowercased content encoding name.
+    # @param limit [Integer] The size limit in bytes for the inflated body.
     # @return [String] The inflated body.
     # @raise [Zlib::Error] If no format could inflate the body.
-    # @raise [ResponseTooLargeError] If the inflated body exceeds max_response_size.
-    def inflate_encoding(chunks, name)
+    # @raise [ResponseTooLargeError] If the inflated body exceeds the limit.
+    def inflate_encoding(chunks, name, limit)
       formats = INFLATE_WINDOW_BITS.fetch(name)
       last_index = formats.size - 1
 
       formats.each_with_index do |window_bits, index|
-        return inflate_chunks(chunks, window_bits)
+        return inflate_chunks(chunks, window_bits, limit)
       rescue Zlib::DataError, Zlib::BufError
         raise if index == last_index
       end
@@ -215,77 +265,74 @@ module PatientHttp
       nil
     end
 
-    def max_response_size
-      @config.max_response_size
-    end
-
     def logger
       @config.logger
     end
 
-    # Validates content-length header doesn't exceed max size.
+    # Validates the declared body length doesn't exceed max size.
     #
     # @param headers_hash [Hash] The response headers.
-    # @raise [ResponseTooLargeError] If content-length exceeds max_response_size.
-    def validate_content_length(headers_hash)
-      content_length = headers_hash["content-length"]&.to_i
-      if content_length && content_length > max_response_size
+    # @param body [Protocol::HTTP::Body::Readable] The response body.
+    # @param limit [Integer] The size limit in bytes.
+    # @raise [ResponseTooLargeError] If the declared length exceeds the limit.
+    def validate_content_length(headers_hash, body, limit)
+      content_length = headers_hash["content-length"]&.to_i || body.length
+      if content_length && content_length > limit
         raise ResponseTooLargeError.new(
-          "Response body size (#{content_length} bytes) exceeds maximum allowed size (#{max_response_size} bytes)"
+          "Response body size (#{content_length} bytes) exceeds maximum allowed size (#{limit} bytes)"
         )
       end
     end
 
     # Reads body chunks while checking size.
     #
-    # @param async_response [Async::HTTP::Protocol::Response] The async HTTP response.
+    # Each chunk is read with its own read timeout, so the timer starts again
+    # after every chunk.
+    #
+    # @param body [Protocol::HTTP::Body::Readable] The response body.
+    # @param limit [Integer] The size limit in bytes.
+    # @param read_timeout [Numeric, nil] The maximum number of seconds to wait for
+    #   each chunk.
     # @return [Array<String>] The raw body chunks.
-    # @raise [ResponseTooLargeError] If body size exceeds max_response_size during read.
+    # @raise [ResponseTooLargeError] If body size exceeds the limit during read.
+    # @raise [ReadTimeoutError] If no chunk arrives within the read timeout.
     # @raise [ReadAbortedError] If the processor stopped past its shutdown deadline mid-read.
-    def read_body_chunks(async_response)
+    def read_body_chunks(body, limit, read_timeout)
       chunks = []
       total_size = 0
-      finished = false
 
-      begin
-        async_response.body.each do |chunk|
-          # Abort the read once the processor has passed its shutdown deadline.
-          # Reads are allowed to finish while the processor is merely stopping
-          # (the graceful shutdown window) so in-flight responses can still be
-          # delivered.
-          if @processor&.stopped?
-            raise ReadAbortedError.new("Processor stopped while reading response body")
-          end
-
-          total_size += chunk.bytesize
-
-          if total_size > max_response_size
-            raise ResponseTooLargeError.new(
-              "Response body size exceeded maximum allowed size (#{max_response_size} bytes)"
-            )
-          end
-
-          chunks << chunk
+      while (chunk = self.class.with_read_timeout(read_timeout) { body.read })
+        # Abort the read once the processor has passed its shutdown deadline.
+        # Reads are allowed to finish while the processor is merely stopping
+        # (the graceful shutdown window) so in-flight responses can still be
+        # delivered.
+        if @processor&.stopped?
+          raise ReadAbortedError.new("Processor stopped while reading response body")
         end
 
-        finished = true
+        total_size += chunk.bytesize
 
-        chunks
-      ensure
-        # Always close the body if we were interrupted or if an error occurred
-        # This ensures the connection is properly released back to the pool
-        async_response.body.close unless finished
+        if total_size > limit
+          raise ResponseTooLargeError.new(
+            "Response body size exceeded maximum allowed size (#{limit} bytes)"
+          )
+        end
+
+        chunks << chunk
       end
+
+      chunks
     end
 
     # Inflates compressed body chunks with streaming size enforcement, so a
-    # small compressed body cannot expand past max_response_size.
+    # small compressed body cannot expand past the size limit.
     #
     # @param chunks [Array<String>] The raw compressed chunks.
     # @param window_bits [Integer] Zlib window bits for the content encoding.
+    # @param limit [Integer] The size limit in bytes for the inflated body.
     # @return [String] The inflated body.
-    # @raise [ResponseTooLargeError] If the inflated size exceeds max_response_size.
-    def inflate_chunks(chunks, window_bits)
+    # @raise [ResponseTooLargeError] If the inflated size exceeds the limit.
+    def inflate_chunks(chunks, window_bits, limit)
       # A response can declare a content encoding and still carry no body.
       # There is nothing to inflate, and finishing an empty stream would
       # raise a buffer error.
@@ -301,7 +348,7 @@ module PatientHttp
         # before any check runs.
         appender = ->(output) do
           body << output
-          validate_inflated_size(body)
+          validate_inflated_size(body, limit)
         end
 
         chunks.each { |chunk| inflater.inflate(chunk, &appender) }
@@ -313,10 +360,10 @@ module PatientHttp
       body
     end
 
-    def validate_inflated_size(body)
-      if body.bytesize > max_response_size
+    def validate_inflated_size(body, limit)
+      if body.bytesize > limit
         raise ResponseTooLargeError.new(
-          "Response body size exceeded maximum allowed size (#{max_response_size} bytes)"
+          "Response body size exceeded maximum allowed size (#{limit} bytes)"
         )
       end
     end

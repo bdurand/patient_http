@@ -16,7 +16,8 @@ RSpec.describe PatientHttp::ResponseReader do
   end
 
   describe "#read_raw_body" do
-    let(:body_double) { instance_double(Protocol::HTTP::Body::Buffered, empty?: false) }
+    let(:body_chunks) { ["Hello, ", "World!"] }
+    let(:body_double) { Protocol::HTTP::Body::Buffered.new(body_chunks.dup) }
     let(:async_response) { instance_double("Async::HTTP::Protocol::Response", body: body_double) }
     let(:headers_hash) { {} }
 
@@ -42,10 +43,6 @@ RSpec.describe PatientHttp::ResponseReader do
     end
 
     context "when response has a body" do
-      before do
-        allow(body_double).to receive(:each).and_yield("Hello, ").and_yield("World!")
-      end
-
       it "returns the raw chunks" do
         result = response_reader.read_raw_body(async_response, headers_hash)
         expect(result).to eq(["Hello, ", "World!"])
@@ -71,7 +68,6 @@ RSpec.describe PatientHttp::ResponseReader do
 
       before do
         config.max_response_size = 10_000_000
-        allow(body_double).to receive(:each).and_yield("Hello, World!")
       end
 
       it "reads the body" do
@@ -83,8 +79,8 @@ RSpec.describe PatientHttp::ResponseReader do
     context "when body exceeds max_response_size during reading" do
       before do
         config.max_response_size = 10
-        allow(body_double).to receive(:each).and_yield("Hello, ").and_yield("World!")
-        allow(body_double).to receive(:close)
+        # A chunked body does not declare its length.
+        allow(body_double).to receive(:length).and_return(nil)
       end
 
       it "raises ResponseTooLargeError" do
@@ -94,7 +90,7 @@ RSpec.describe PatientHttp::ResponseReader do
       end
 
       it "closes the body on error" do
-        expect(body_double).to receive(:close)
+        expect(body_double).to receive(:close).with(kind_of(PatientHttp::ResponseTooLargeError))
         expect {
           response_reader.read_raw_body(async_response, headers_hash)
         }.to raise_error(PatientHttp::ResponseTooLargeError)
@@ -104,12 +100,98 @@ RSpec.describe PatientHttp::ResponseReader do
     context "when body is exactly at max_response_size" do
       before do
         config.max_response_size = 13
-        allow(body_double).to receive(:each).and_yield("Hello, World!")
       end
 
       it "reads the body successfully" do
         result = read_and_decode(async_response, headers_hash)
         expect(result).to eq("Hello, World!")
+      end
+    end
+
+    context "when the body declares its length without a content-length header" do
+      before do
+        config.max_response_size = 10
+      end
+
+      it "applies the size limit before the read starts" do
+        expect(body_double).not_to receive(:read)
+        expect {
+          response_reader.read_raw_body(async_response, headers_hash)
+        }.to raise_error(PatientHttp::ResponseTooLargeError, /\(13 bytes\) exceeds maximum/)
+      end
+
+      it "closes the body" do
+        expect(body_double).to receive(:close).with(kind_of(PatientHttp::ResponseTooLargeError))
+        expect {
+          response_reader.read_raw_body(async_response, headers_hash)
+        }.to raise_error(PatientHttp::ResponseTooLargeError)
+      end
+    end
+
+    context "with a max_response_size for the request" do
+      it "uses the request limit instead of the configured limit" do
+        config.max_response_size = 1_000_000
+
+        expect {
+          response_reader.read_raw_body(async_response, headers_hash, max_response_size: 10)
+        }.to raise_error(PatientHttp::ResponseTooLargeError, /\(10 bytes\)/)
+      end
+
+      it "allows a body larger than the configured limit" do
+        config.max_response_size = 10
+
+        result = response_reader.read_raw_body(async_response, headers_hash, max_response_size: 100)
+        expect(result).to eq(["Hello, ", "World!"])
+      end
+
+      it "applies the request limit while reading a body of unknown length" do
+        config.max_response_size = 1_000_000
+        allow(body_double).to receive(:length).and_return(nil)
+
+        expect {
+          response_reader.read_raw_body(async_response, headers_hash, max_response_size: 10)
+        }.to raise_error(PatientHttp::ResponseTooLargeError, /exceeded maximum allowed size \(10 bytes\)/)
+      end
+    end
+
+    context "with a read timeout" do
+      it "reads chunks that arrive within the read timeout" do
+        result = Async do
+          response_reader.read_raw_body(async_response, headers_hash, read_timeout: 1)
+        end.wait
+
+        expect(result).to eq(["Hello, ", "World!"])
+      end
+
+      it "raises ReadTimeoutError when the next chunk does not arrive in time" do
+        Async do
+          body = Protocol::HTTP::Body::Writable.new
+          body.write("first")
+          response = instance_double("Async::HTTP::Protocol::Response", body: body)
+
+          expect {
+            response_reader.read_raw_body(response, headers_hash, read_timeout: 0.05)
+          }.to raise_error(PatientHttp::ReadTimeoutError)
+        end.wait
+      end
+
+      it "starts the timer again for each chunk" do
+        Async do |task|
+          body = Protocol::HTTP::Body::Writable.new
+          writer = task.async do
+            4.times do |i|
+              sleep(0.04)
+              body.write("chunk#{i}")
+            end
+            body.close_write
+          end
+          response = instance_double("Async::HTTP::Protocol::Response", body: body)
+
+          result = response_reader.read_raw_body(response, headers_hash, read_timeout: 0.1)
+
+          expect(result).to eq(["chunk0", "chunk1", "chunk2", "chunk3"])
+          writer.wait
+        end.wait
       end
     end
 
@@ -121,8 +203,6 @@ RSpec.describe PatientHttp::ResponseReader do
       before do
         allow(processor).to receive(:config).and_return(config)
         allow(processor).to receive(:stopped?).and_return(false)
-        allow(body_double).to receive(:each).and_yield("Hello, ").and_yield("World!")
-        allow(body_double).to receive(:close)
       end
 
       it "finishes reading the body so in-flight responses can be delivered" do
@@ -139,8 +219,6 @@ RSpec.describe PatientHttp::ResponseReader do
       before do
         allow(processor).to receive(:config).and_return(config)
         allow(processor).to receive(:stopped?).and_return(true)
-        allow(body_double).to receive(:each).and_yield("Hello, ").and_yield("World!")
-        allow(body_double).to receive(:close)
       end
 
       it "aborts the read" do
@@ -150,7 +228,7 @@ RSpec.describe PatientHttp::ResponseReader do
       end
 
       it "closes the body" do
-        expect(body_double).to receive(:close)
+        expect(body_double).to receive(:close).with(kind_of(described_class::ReadAbortedError))
         expect do
           response_reader.read_raw_body(async_response, headers_hash)
         end.to raise_error(described_class::ReadAbortedError)
@@ -206,6 +284,25 @@ RSpec.describe PatientHttp::ResponseReader do
         expect {
           response_reader.decode_body([gzipped], headers_hash)
         }.to raise_error(PatientHttp::ResponseTooLargeError, /exceeded maximum allowed size/)
+      end
+
+      it "uses the max_response_size for the request instead of the configured limit" do
+        config.max_response_size = 1_000_000
+        gzipped = Zlib.gzip("a" * 100_000)
+        headers_hash = {"content-encoding" => "gzip"}
+
+        expect {
+          response_reader.decode_body([gzipped], headers_hash, max_response_size: 1024)
+        }.to raise_error(PatientHttp::ResponseTooLargeError, /\(1024 bytes\)/)
+      end
+
+      it "inflates past the configured limit when the request limit allows it" do
+        config.max_response_size = 1024
+        gzipped = Zlib.gzip("a" * 100_000)
+        headers_hash = {"content-encoding" => "gzip"}
+
+        body = response_reader.decode_body([gzipped], headers_hash, max_response_size: 200_000)
+        expect(body.bytesize).to eq(100_000)
       end
 
       it "checks the size as the body inflates rather than after it" do
@@ -434,6 +531,37 @@ RSpec.describe PatientHttp::ResponseReader do
 
         expect(result.encoding).to eq(Encoding::UTF_8)
       end
+    end
+  end
+
+  describe ".with_read_timeout" do
+    it "returns the value of the block" do
+      result = Async { described_class.with_read_timeout(1) { :done } }.wait
+      expect(result).to eq(:done)
+    end
+
+    it "runs the block without a timer when the read timeout is nil" do
+      expect(described_class.with_read_timeout(nil) { :done }).to eq(:done)
+    end
+
+    it "raises ReadTimeoutError when the block takes too long" do
+      expect {
+        Async { described_class.with_read_timeout(0.01) { sleep(1) } }.wait
+      }.to raise_error(PatientHttp::ReadTimeoutError, /No data received/)
+    end
+
+    it "raises an error that is an Async::TimeoutError" do
+      expect(PatientHttp::ReadTimeoutError.ancestors).to include(Async::TimeoutError)
+    end
+
+    it "does not fire after the block finishes" do
+      result = Async do
+        described_class.with_read_timeout(0.02) { :done }
+        sleep(0.05)
+        :still_running
+      end.wait
+
+      expect(result).to eq(:still_running)
     end
   end
 

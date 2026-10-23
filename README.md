@@ -109,6 +109,8 @@ The methods take these options:
 | `json:` | An object to send as a JSON body. Can't be combined with `body:`. |
 | `params:` | Query parameters to add to the URL. |
 | `timeout:` | The request timeout in seconds. |
+| `read_timeout:` | The maximum number of seconds to wait for data from the server. See [Streamed and long-running responses](#streamed-and-long-running-responses). |
+| `max_response_size:` | The maximum response body size in bytes for this request. Overrides the configured `max_response_size`. |
 | `raise_error_responses:` | Whether to treat non-2xx responses as errors. See [Handle HTTP error responses](#handle-http-error-responses). |
 | `max_redirects:` | The maximum number of redirects to follow for this request. `0` turns off redirects. |
 | `follow_method_changing_redirects:` | Whether to follow redirects that change the HTTP method. See [Redirects](#redirects). |
@@ -217,7 +219,7 @@ request = template.get("/users/123")
 PatientHttp.execute(request: request, callback: FetchUserCallback)
 ```
 
-A template has a method for each HTTP method. The template joins each path with the base URL, and merges the headers and query parameters of each request with its own. If the template doesn't set a `timeout`, the configured `request_timeout` applies.
+A template has a method for each HTTP method. The template joins each path with the base URL, and merges the headers and query parameters of each request with its own. If the template doesn't set a `timeout`, the configured `request_timeout` applies. A template can also set defaults for `read_timeout` and `max_response_size`. A value given to a request overrides the template value.
 
 ### Use the RequestHelper module
 
@@ -245,6 +247,29 @@ end
 
 The `async_*` methods take the same options as the `PatientHttp` module methods. Paths are relative to the template's `base_url`. A subclass uses the template of its superclass unless it declares its own.
 
+### Streamed and long-running responses
+
+The `timeout` option limits the full request, from the time it is sent until the last byte of the body arrives. A streamed response, such as server-sent events from an LLM API, can continue for many minutes. A large `timeout` lets the stream finish, but it cannot find a stream that stops.
+
+To find a stream that stops, set `read_timeout`. This is the maximum number of seconds to wait for data from the server. The first timer starts before the connection opens. It covers the time to get a connection, send the request, and wait for the response headers. The timer starts again each time a body chunk arrives. A stream that sends data at regular intervals can continue for longer than `read_timeout`, until `timeout` stops it.
+
+```ruby
+PatientHttp.post(
+  "https://api.example.com/v1/generate",
+  json: {prompt: "...", stream: true},
+  callback: GenerateCallback,
+  timeout: 30 * 60,              # Limit for the full stream.
+  read_timeout: 60,              # Limit for each wait for data.
+  max_response_size: 8 * 1024 * 1024
+)
+```
+
+When the read timeout stops a request, the `on_error` callback receives a `RequestError` with an `error_type` of `:timeout` and an `error_class` of `PatientHttp::ReadTimeoutError`. When `timeout` stops a request, the `error_class` is `Async::TimeoutError`. A request stopped by either timeout isn't retried, because the server may have processed it.
+
+Do not set `read_timeout` for a request where the server does all of its work before it sends the response headers. For that request, the wait for the headers can be longer than the read timeout, and the request fails.
+
+The callback receives the full body when the stream ends. A streamed body is usually larger than the equivalent JSON body, so set `max_response_size` on the request to increase the limit for these requests only.
+
 ## Configuration
 
 All configuration is optional. To set options, call `PatientHttp.configure` in an initializer. If an integration gem is loaded, the method yields that gem's configuration, which adds the options for the job system to the options below.
@@ -262,11 +287,17 @@ PatientHttp.configure do |config|
   # Default timeout for HTTP requests in seconds (default: 60).
   config.request_timeout = 60
 
+  # Default maximum number of seconds to wait for data from the server
+  # (default: nil, no limit). The timer covers the wait for the response
+  # headers and starts again each time a body chunk arrives. See "Streamed and
+  # long-running responses".
+  config.read_timeout = nil
+
   # Timeout for graceful shutdown in seconds (default: 30).
   config.shutdown_timeout = 30
 
   # Maximum response body size in bytes (default: 1MB). Larger responses raise
-  # ResponseTooLargeError.
+  # ResponseTooLargeError. A request can set its own max_response_size.
   config.max_response_size = 1024 * 1024
 
   # Default User-Agent header for all requests (default: "PatientHttp").
@@ -369,11 +400,12 @@ For how the processor name is kept through retries and crash recovery, see the d
 - `max_connections`: Set this based on your system's resources. Each connection uses memory and a file descriptor. A tuned system with enough resources can handle thousands of concurrent connections.
 - `max_connections_per_host`: Limits the sockets open to each host. The default is no limit. For high concurrency, set a value such as 32, so that one host can't use every file descriptor. Make sure that the process file descriptor limit covers `max_connections`, plus idle pooled connections, plus the application's own connections.
 - `request_timeout`: Set this based on the response times of the APIs that you call. AI APIs can take minutes to respond while they generate content.
+- `read_timeout`: Limits each wait for data from the server, including the wait for the response headers. Set it on requests that stream their response, so that a stream that stops fails before `request_timeout`. Do not set it as a default if the APIs that you call do their work before they send the response headers.
 - `connection_timeout`: Limits only the TCP connect and the TLS handshake. Set it to fail fast when a host doesn't answer. It doesn't limit the wait for a response, because `request_timeout` controls the full exchange.
 - `tcp_keepalive`: The kernel sends probes on an idle pooled connection. The probes keep NAT and firewall mappings open, and let the kernel find a dead peer before the pool sends a request on the connection. Set this option when connections stay idle in the pool between requests.
 - `tcp_user_timeout`: The kernel closes a connection when the peer doesn't acknowledge sent data. This option is available only on Linux. A request to a peer that stopped without notice fails after this timeout, without waiting for `request_timeout`. Acknowledged data isn't affected, so a slow response continues.
 - `connection_pool_size`: Sets the maximum number of hosts whose connections are kept open. Increase it if your application calls many different hosts.
-- `max_response_size`: Limits the size of HTTP responses to prevent high memory use from unexpectedly large responses. For a compressed response, the limit applies to the decompressed body. For large responses, consider a [payload store](#payload-stores).
+- `max_response_size`: Limits the size of HTTP responses to prevent high memory use from unexpectedly large responses. For a compressed response, the limit applies to the decompressed body. To increase the limit for some requests only, set `max_response_size` on those requests. For large responses, consider a [payload store](#payload-stores).
 - `completion_threads`: Increase this when result delivery does heavy work, such as serialization or encryption, and finished requests wait for a thread. If the value is greater than 1, results are delivered concurrently, so `TaskHandler` callbacks and completion-time observers must be thread-safe. Set it to 1 to deliver results one at a time.
 - `completion_retries`: The number of times to retry result delivery before the failure is reported to observers through `completion_failed`. A retry calls `on_complete` or `on_error` again. As a result, a handler that raises an error *after* it enqueues its message delivers that message twice. Make handlers idempotent, or set `completion_retries` to 0 to report the first failure without a retry.
 - `shutdown_timeout`: Must be less than the process supervisor's stop timeout, so that in-flight requests and their results finish before a hard kill.

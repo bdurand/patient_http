@@ -15,6 +15,14 @@ class TestWebServer
     @port = nil
     @shutdown = false
     @ready = false
+    @hits = Hash.new(0)
+    @hits_mutex = Mutex.new
+  end
+
+  # Returns the number of requests the server received with the given `key`
+  # query parameter.
+  def hits(key)
+    @hits_mutex.synchronize { @hits[key] }
   end
 
   def start(port = nil)
@@ -105,6 +113,10 @@ class TestWebServer
       elsif (match = path.match(%r{\A/delay/(\d+)\z}))
         delay = match[1].to_f / 1000.0
         delay_response(delay)
+      elsif path == "/stream"
+        stream_response(env)
+      elsif path == "/gzip"
+        gzip_response(env)
       else
         [404, {"Content-Type" => "text/plain"}, ["404 page not found\n"]]
       end
@@ -147,6 +159,70 @@ class TestWebServer
     # Create a streaming body that sends chunks with delays between them
     # This simulates a slow-streaming server response
     [200, {"Content-Type" => "application/json"}, StreamingBody.new(delay)]
+  end
+
+  # Streams chunks with controlled delays. The query parameters are:
+  #
+  # - key: A value to count the requests with (see #hits).
+  # - header_delay: Milliseconds to wait before the response headers are sent.
+  # - chunks: The number of chunks to send (default 3).
+  # - size: The size of each chunk in bytes (default 16).
+  # - interval: Milliseconds to wait before each chunk after the first.
+  # - stall: Milliseconds to wait after the first chunk, before the next one.
+  def stream_response(env)
+    params = URI.decode_www_form(env["QUERY_STRING"].to_s).to_h
+    count_hit(params["key"])
+    read_body(env)
+
+    header_delay = params["header_delay"].to_f / 1000.0
+    sleep(header_delay) if header_delay > 0
+
+    body = ControlledStreamingBody.new(
+      chunks: (params["chunks"] || 3).to_i,
+      size: (params["size"] || 16).to_i,
+      interval: params["interval"].to_f / 1000.0,
+      stall: params["stall"].to_f / 1000.0
+    )
+    [200, {"Content-Type" => "text/event-stream"}, body]
+  end
+
+  # Returns a gzip-compressed body of `size` bytes.
+  def gzip_response(env)
+    params = URI.decode_www_form(env["QUERY_STRING"].to_s).to_h
+    body = Zlib.gzip("a" * params.fetch("size", "1000").to_i)
+    headers = {
+      "Content-Type" => "text/plain",
+      "Content-Encoding" => "gzip",
+      "Content-Length" => body.bytesize.to_s
+    }
+    [200, headers, [body]]
+  end
+
+  def count_hit(key)
+    return if key.nil?
+
+    @hits_mutex.synchronize { @hits[key] += 1 }
+  end
+
+  class ControlledStreamingBody
+    def initialize(chunks:, size:, interval:, stall:)
+      @chunks = chunks
+      @size = size
+      @interval = interval
+      @stall = stall
+    end
+
+    def each
+      @chunks.times do |i|
+        if i == 1 && @stall > 0
+          sleep(@stall)
+        elsif i > 0 && @interval > 0
+          sleep(@interval)
+        end
+
+        yield i.to_s.ljust(@size, ".")
+      end
+    end
   end
 
   # Rack-compatible streaming body

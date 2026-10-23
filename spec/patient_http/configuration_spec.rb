@@ -291,6 +291,36 @@ RSpec.describe PatientHttp::Configuration do
     end
   end
 
+  describe "#read_timeout=" do
+    it "defaults to nil" do
+      expect(config.read_timeout).to be_nil
+    end
+
+    it "accepts a positive number of seconds" do
+      config.read_timeout = 2.5
+      expect(config.read_timeout).to eq(2.5)
+    end
+
+    it "accepts nil to turn off the limit" do
+      config.read_timeout = 30
+      config.read_timeout = nil
+      expect(config.read_timeout).to be_nil
+    end
+
+    it "rejects a non-positive value" do
+      expect { config.read_timeout = 0 }.to raise_error(ArgumentError, /read_timeout/)
+    end
+
+    it "can be set through the constructor" do
+      expect(described_class.new(read_timeout: 45).read_timeout).to eq(45)
+    end
+
+    it "is included in to_h" do
+      config.read_timeout = 10
+      expect(config.to_h["read_timeout"]).to eq(10)
+    end
+  end
+
   describe "#tcp_user_timeout=" do
     it "defaults to nil" do
       expect(config.tcp_user_timeout).to be_nil

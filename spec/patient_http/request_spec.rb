@@ -243,6 +243,72 @@ RSpec.describe PatientHttp::Request do
     end
   end
 
+  describe "streaming options" do
+    it "defaults read_timeout and max_response_size to nil" do
+      request = described_class.new(:get, "https://api.example.com")
+      expect(request.read_timeout).to be_nil
+      expect(request.max_response_size).to be_nil
+    end
+
+    it "sets read_timeout and max_response_size" do
+      request = described_class.new(:post, "https://api.example.com", read_timeout: 2.5, max_response_size: 5_000_000)
+      expect(request.read_timeout).to eq(2.5)
+      expect(request.max_response_size).to eq(5_000_000)
+    end
+
+    [0, -1, "10"].each do |value|
+      it "rejects a read_timeout of #{value.inspect}" do
+        expect {
+          described_class.new(:get, "https://api.example.com", read_timeout: value)
+        }.to raise_error(ArgumentError, /read_timeout/)
+      end
+    end
+
+    [0, -1, 1.5, "10"].each do |value|
+      it "rejects a max_response_size of #{value.inspect}" do
+        expect {
+          described_class.new(:get, "https://api.example.com", max_response_size: value)
+        }.to raise_error(ArgumentError, /max_response_size/)
+      end
+    end
+
+    it "serializes and reloads read_timeout and max_response_size" do
+      request = described_class.new(:post, "https://api.example.com", read_timeout: 30, max_response_size: 8_000_000)
+      json = JSON.parse(JSON.generate(request.as_json))
+
+      expect(json["read_timeout"]).to eq(30)
+      expect(json["max_response_size"]).to eq(8_000_000)
+
+      reloaded = described_class.load(json)
+      expect(reloaded.read_timeout).to eq(30)
+      expect(reloaded.max_response_size).to eq(8_000_000)
+    end
+
+    it "omits read_timeout and max_response_size from as_json when they are not set" do
+      json = described_class.new(:get, "https://api.example.com").as_json
+      expect(json).not_to have_key("read_timeout")
+      expect(json).not_to have_key("max_response_size")
+    end
+
+    it "loads a serialized request that has no read_timeout or max_response_size keys" do
+      legacy_json = {
+        "http_method" => "post",
+        "url" => "https://api.example.com/data",
+        "headers" => {"content-type" => "application/json"},
+        "body" => {"encoding" => "text", "value" => "{}", "charset" => "UTF-8"},
+        "timeout" => 15,
+        "max_redirects" => 5
+      }
+
+      request = described_class.load(legacy_json)
+
+      expect(request.read_timeout).to be_nil
+      expect(request.max_response_size).to be_nil
+      expect(request.timeout).to eq(15)
+      expect(request.body).to eq("{}")
+    end
+  end
+
   describe "#as_json" do
     it "returns a hash representation of the request" do
       request = described_class.new(

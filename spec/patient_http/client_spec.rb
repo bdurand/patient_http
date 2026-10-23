@@ -432,6 +432,49 @@ RSpec.describe PatientHttp::Client do
       end
     end
 
+    context "with a max_response_size for the request" do
+      let(:body) { "a" * 50_000 }
+
+      before do
+        config.max_response_size = 10_000
+        stub_request(:get, "https://api.example.com/users")
+          .to_return(status: 200, body: Zlib.gzip(body), headers: {"Content-Encoding" => "gzip"})
+      end
+
+      it "returns the limit with the raw response data" do
+        request = PatientHttp::Request.new(:get, "https://api.example.com/users", max_response_size: 100_000)
+
+        result = Async { client.make_request(request, request_id) }.wait
+
+        expect(result[:max_response_size]).to eq(100_000)
+      end
+
+      it "returns the configured limit when the request does not set one" do
+        result = Async { client.make_request(request, request_id) }.wait
+
+        expect(result[:max_response_size]).to eq(10_000)
+      end
+
+      it "applies the request limit when it inflates the body" do
+        request = PatientHttp::Request.new(:get, "https://api.example.com/users", max_response_size: 100_000)
+
+        raw = Async { client.make_request(request, request_id) }.wait
+        result = client.decode_response(raw)
+
+        expect(result[:body]).to eq(body)
+        expect(result).not_to have_key(:max_response_size)
+      end
+
+      it "rejects an inflated body larger than the request limit" do
+        config.max_response_size = 1_000_000
+        request = PatientHttp::Request.new(:get, "https://api.example.com/users", max_response_size: 1000)
+
+        raw = Async { client.make_request(request, request_id) }.wait
+
+        expect { client.decode_response(raw) }.to raise_error(PatientHttp::ResponseTooLargeError, /\(1000 bytes\)/)
+      end
+    end
+
     context "when network error occurs" do
       it "raises the error" do
         stub_request(:get, "https://api.example.com/users")

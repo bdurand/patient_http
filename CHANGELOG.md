@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.8.0
+
+### Added
+
+- `read_timeout` request option and `Configuration#read_timeout` default (default `nil`, no limit): the maximum number of seconds to wait for data from the server. The first timer starts before the connection opens and covers opening the connection, sending the request, and waiting for the response headers. The timer starts again for each body chunk, so a streamed response that keeps sending data can run longer than the read timeout while a stalled stream fails fast. The request timeout still limits the full exchange. When the read timeout fires, the error is a `PatientHttp::ReadTimeoutError`, a subclass of `Async::TimeoutError`, so `RequestError#error_type` is `:timeout`. It is never retried. Don't use it for requests where the server does all of its work before it sends the headers.
+- `max_response_size` request option: a per-request override of `Configuration#max_response_size`. It applies to the declared body length, to the bytes read, and to the inflated body.
+- `RequestTemplate` and `RequestHelper.request_template` accept `read_timeout` and `max_response_size` defaults. The `RequestHelper` `async_*` methods and the `PatientHttp` request methods accept both options.
+- Both options are serialized with the request only when they are set. Requests serialized by earlier versions load with both options unset.
+
+### Fixed
+
+- The response size check before the body is read now works on HTTP/1 connections. The HTTP/1 parser removes `Content-Length` from the response headers, so the check only ran when the header was present, as it is in test stubs. The declared length of the body is now used when the header is missing.
+- The response body is closed when the size check before the read fails. Before, `SynchronousExecutor` left the connection checked out and waited forever when it closed its client pool.
+
 ## 1.7.0
 
 ### Added
