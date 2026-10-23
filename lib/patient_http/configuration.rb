@@ -42,6 +42,10 @@ module PatientHttp
     # @return [Numeric] The default request timeout in seconds.
     attr_reader :request_timeout
 
+    # @return [Numeric, nil] The default maximum number of seconds to wait for
+    #   data from the server, or `nil` for no limit. See {#read_timeout=}.
+    attr_reader :read_timeout
+
     # @return [Numeric] The graceful shutdown timeout in seconds.
     attr_reader :shutdown_timeout
 
@@ -113,6 +117,9 @@ module PatientHttp
     #
     # @param max_connections [Integer] The maximum number of concurrent requests.
     # @param request_timeout [Numeric] The default request timeout in seconds.
+    # @param read_timeout [Numeric, nil] The default maximum number of seconds to
+    #   wait for data from the server. If `nil`, there is no limit. See
+    #   {#read_timeout=}.
     # @param shutdown_timeout [Numeric] The graceful shutdown timeout in seconds.
     # @param logger [Logger, nil] The logger. If `nil`, errors are logged to
     #   standard error.
@@ -157,6 +164,7 @@ module PatientHttp
     def initialize(
       max_connections: 256,
       request_timeout: 60,
+      read_timeout: nil,
       shutdown_timeout: 30,
       logger: nil,
       max_response_size: 1024 * 1024,
@@ -195,6 +203,7 @@ module PatientHttp
 
       self.max_connections = max_connections
       self.request_timeout = request_timeout
+      self.read_timeout = read_timeout
       self.shutdown_timeout = shutdown_timeout
       self.logger = logger || Logger.new($stderr, level: Logger::ERROR)
       self.max_response_size = max_response_size
@@ -293,6 +302,27 @@ module PatientHttp
       @request_timeout = value
     end
 
+    # Sets the default read timeout. This is the maximum number of seconds to
+    # wait for data from the server. The timer starts when the request is sent
+    # and covers the wait for the response headers. It starts again each time a
+    # body chunk arrives. A response that sends data at regular intervals can
+    # thus continue for longer than the read timeout. The request timeout
+    # continues to limit the full request.
+    #
+    # Use it for streamed responses, such as server-sent events. Do not use it
+    # for requests where the server does all of its work before it sends the
+    # response headers, because the wait for the headers must then be shorter
+    # than the read timeout.
+    #
+    # @param value [Numeric, nil] A positive number of seconds, or `nil` for no
+    #   limit.
+    # @return [void]
+    # @raise [ArgumentError] If the value isn't positive or `nil`.
+    def read_timeout=(value)
+      validate_positive(:read_timeout, value) unless value.nil?
+      @read_timeout = value
+    end
+
     # Sets the graceful shutdown timeout. Keep it less than the stop timeout of
     # the process supervisor, so that in-flight requests finish before a hard
     # kill.
@@ -307,7 +337,8 @@ module PatientHttp
 
     # Sets the maximum response body size. For a compressed response, the limit
     # applies to the decompressed body. A larger response raises
-    # {ResponseTooLargeError}.
+    # {ResponseTooLargeError}. A request can set its own limit with
+    # {Request#max_response_size}.
     #
     # @param value [Integer] A positive number of bytes.
     # @return [void]
@@ -695,6 +726,7 @@ module PatientHttp
       {
         "max_connections" => max_connections,
         "request_timeout" => request_timeout,
+        "read_timeout" => read_timeout,
         "shutdown_timeout" => shutdown_timeout,
         "logger" => logger,
         "max_response_size" => max_response_size,

@@ -274,6 +274,8 @@ module PatientHttp
         headers: redirect_headers,
         body: redirect_body,
         timeout: request.timeout,
+        read_timeout: request.read_timeout,
+        max_response_size: request.max_response_size,
         max_redirects: request.max_redirects,
         follow_method_changing_redirects: request.follow_method_changing_redirects,
         redirect_strip_headers: request.redirect_strip_headers,

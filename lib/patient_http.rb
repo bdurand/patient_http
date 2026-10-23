@@ -37,6 +37,12 @@ module PatientHttp
   # Raised when a response body is larger than `max_response_size`.
   class ResponseTooLargeError < StandardError; end
 
+  # Raised when no data arrives from the server for `read_timeout` seconds. It
+  # is a subclass of `Async::TimeoutError`, so the error type of the
+  # {RequestError} is `:timeout`. Use the class name to tell it apart from the
+  # timeout for the full request.
+  class ReadTimeoutError < Async::TimeoutError; end
+
   # Raised when a request names a processor that isn't configured. The job
   # system then retries the job instead of dropping it.
   class UnknownProcessorError < StandardError; end
@@ -369,6 +375,12 @@ module PatientHttp
     #   combined with `body`.
     # @param params [Hash, nil] The query parameters to add to the URL.
     # @param timeout [Numeric, nil] The request timeout in seconds.
+    # @param read_timeout [Numeric, nil] The maximum number of seconds to wait for
+    #   data from the server. The timer covers the wait for the response headers
+    #   and starts again each time a body chunk arrives. If `nil`, the
+    #   configuration value applies.
+    # @param max_response_size [Integer, nil] The maximum response body size in
+    #   bytes. If `nil`, the configuration value applies.
     # @param raise_error_responses [Boolean, nil] If `true`, non-2xx responses go
     #   to the `on_error` callback as an {HttpError}. If `nil`, the configuration
     #   value applies.
@@ -397,6 +409,8 @@ module PatientHttp
       json: nil,
       params: nil,
       timeout: nil,
+      read_timeout: nil,
+      max_response_size: nil,
       raise_error_responses: nil,
       callback_args: nil,
       max_redirects: nil,
@@ -413,6 +427,8 @@ module PatientHttp
         headers: headers,
         params: params,
         timeout: timeout,
+        read_timeout: read_timeout,
+        max_response_size: max_response_size,
         max_redirects: max_redirects,
         follow_method_changing_redirects: follow_method_changing_redirects,
         redirect_strip_headers: redirect_strip_headers,

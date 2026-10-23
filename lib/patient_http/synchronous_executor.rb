@@ -121,26 +121,43 @@ module PatientHttp
     # wrapper isn't used, because it replaces an `accept-encoding` header that
     # the caller set to turn off compression.
     #
+    # The request timeout limits the full exchange. The read timeout, if set,
+    # limits the wait for the response headers and the wait for each body
+    # chunk.
+    #
     # @return [Hash] The response data, with the `:status`, `:headers`, and
     #   `:body` keys.
     def perform_request
       outgoing = @request_preparer.prepare(@task.request, @task.id)
       timeout = @task.request.timeout || @config.request_timeout
+      read_timeout = @task.request.read_timeout || @config.read_timeout
+      max_response_size = @task.request.max_response_size || @config.max_response_size
 
       Async::Task.current.with_timeout(timeout) do
         headers = outgoing.headers.to_h
         body = Protocol::HTTP::Body::Buffered.wrap([@task.request.body.to_s]) if @task.request.body
 
         endpoint = Async::HTTP::Endpoint.parse(outgoing.url)
-        async_response = request_with_immediate_retries(
-          @client_pool, @task.request, endpoint, headers, body
-        )
+        async_response = ResponseReader.with_read_timeout(read_timeout) do
+          request_with_immediate_retries(
+            @client_pool, @task.request, endpoint, headers, body
+          )
+        end
         # Note: headers that appear multiple times (e.g. set-cookie) are
         # flattened to a single joined string value.
         headers_hash = async_response.headers.to_h.transform_values(&:to_s)
 
-        chunks = @response_reader.read_raw_body(async_response, headers_hash)
-        body_content = @response_reader.decode_body(chunks, headers_hash)
+        chunks = @response_reader.read_raw_body(
+          async_response,
+          headers_hash,
+          max_response_size: max_response_size,
+          read_timeout: read_timeout
+        )
+        body_content = @response_reader.decode_body(
+          chunks,
+          headers_hash,
+          max_response_size: max_response_size
+        )
 
         {
           status: async_response.status,

@@ -206,6 +206,8 @@ erDiagram
         hash headers
         string body
         float timeout
+        float read_timeout
+        int max_response_size
     }
 
     REQUEST-TASK {
@@ -283,6 +285,12 @@ The processor uses Ruby's Fiber scheduler (`async` gem) for non-blocking I/O:
 4. **Completion worker threads** decode response bodies (join, inflate, charset), build responses, and execute TaskHandler callbacks and `request_end` observers off the reactor. Decoding is CPU-bound and has no fiber yield point, so running it inline on the reactor would stop every other in-flight request until it finished. On a worker thread the Ruby scheduler can preempt it, and Zlib releases the GVL for part of the inflate
 5. **Delivery is concurrent, not serialized.** Callbacks and completion-time observers run on any of the `completion_threads` workers, so they must be thread-safe. Completions are also bounded: a task stays in the capacity count until a worker claims its result, so the completion backlog can never exceed `max_connections`
 
+## Timeouts and Response Size
+
+A request can have two timeouts. The request timeout limits the full exchange. The read timeout limits each wait for data: the wait for the response headers, and then the wait for each body chunk. Each wait has its own timer, so a slow but steady stream continues until the request timeout stops it. The read timeout raises `ReadTimeoutError`, a subclass of `Async::TimeoutError`. The immediate retries never retry either timeout.
+
+The response size limit comes from the request, or from the configuration if the request doesn't set one. The reactor applies the limit to the declared body length before the read starts and to the raw bytes as they arrive. The raw response data that goes to the completion worker includes the limit, so the worker applies the same limit to the inflated body.
+
 ## State Management
 
 The processor maintains state through its lifecycle:
@@ -307,7 +315,8 @@ When the processor is stopped with in-flight requests:
 All behavior is controlled through a central `Configuration` object:
 
 - Maximum concurrent connections
-- Request timeouts
+- Request timeouts and read timeouts
+- Response size limits
 - Connection pool settings
 - Retry policies
 - Proxy configuration

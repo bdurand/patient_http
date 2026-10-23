@@ -27,6 +27,14 @@ module PatientHttp
     #   the configured `request_timeout` applies.
     attr_accessor :timeout
 
+    # @return [Numeric, nil] The default read timeout in seconds. If `nil`, the
+    #   configured `read_timeout` applies.
+    attr_accessor :read_timeout
+
+    # @return [Integer, nil] The default maximum response body size in bytes. If
+    #   `nil`, the configured `max_response_size` applies.
+    attr_accessor :max_response_size
+
     # Creates a template.
     #
     # @param base_url [String, URI::HTTP, nil] The base URL that relative paths
@@ -35,15 +43,31 @@ module PatientHttp
     # @param params [Hash, nil] The default query parameters for all requests.
     # @param timeout [Numeric, nil] The default request timeout in seconds. If
     #   `nil`, the configured `request_timeout` applies.
+    # @param read_timeout [Numeric, nil] The default maximum number of seconds to
+    #   wait for data from the server. If `nil`, the configured `read_timeout`
+    #   applies.
+    # @param max_response_size [Integer, nil] The default maximum response body
+    #   size in bytes. If `nil`, the configured `max_response_size` applies.
     # @param preprocessors [String, Symbol, Array<String, Symbol>, nil] The names
     #   of the default preprocessors for all requests.
     # @param processor [String, Symbol, nil] The name of the default processor for
     #   all requests.
-    def initialize(base_url: nil, headers: {}, params: nil, timeout: nil, preprocessors: nil, processor: nil)
+    def initialize(
+      base_url: nil,
+      headers: {},
+      params: nil,
+      timeout: nil,
+      read_timeout: nil,
+      max_response_size: nil,
+      preprocessors: nil,
+      processor: nil
+    )
       @base_url = base_url
       @headers = HttpHeaders.new(headers)
       @params = params
       @timeout = timeout
+      @read_timeout = read_timeout
+      @max_response_size = max_response_size
       @preprocessors = preprocessors
       @processor = processor
     end
@@ -62,6 +86,10 @@ module PatientHttp
     #   parameters.
     # @param timeout [Numeric, nil] The request timeout in seconds. Overrides the
     #   template timeout.
+    # @param read_timeout [Numeric, nil] The maximum number of seconds to wait for
+    #   data from the server. Overrides the template read timeout.
+    # @param max_response_size [Integer, nil] The maximum response body size in
+    #   bytes. Overrides the template value.
     # @param max_redirects [Integer, nil] The maximum number of redirects to
     #   follow. If `0`, redirects aren't followed. If `nil`, the configuration
     #   value applies.
@@ -84,6 +112,8 @@ module PatientHttp
       headers: nil,
       params: nil,
       timeout: nil,
+      read_timeout: nil,
+      max_response_size: nil,
       max_redirects: nil,
       follow_method_changing_redirects: nil,
       redirect_strip_headers: nil,
@@ -104,6 +134,8 @@ module PatientHttp
         json: json,
         params: merged_params,
         timeout: timeout || @timeout,
+        read_timeout: read_timeout || @read_timeout,
+        max_response_size: max_response_size || @max_response_size,
         max_redirects: max_redirects,
         follow_method_changing_redirects: follow_method_changing_redirects,
         redirect_strip_headers: redirect_strip_headers,

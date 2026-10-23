@@ -23,9 +23,15 @@ module PatientHttp
     # use {#decode_response} to produce the final body string. Splitting the
     # decode out keeps CPU-bound work off the reactor thread.
     #
+    # The request timeout limits the full exchange. The read timeout, if set,
+    # limits the wait for the response headers and the wait for each body
+    # chunk.
+    #
     # @param request [Request] The request to make.
     # @param request_id [String] Unique request identifier.
-    # @return [Hash] The response data with keys for :status, :headers, and :body.
+    # @return [Hash] The response data with keys for :status, :headers, :body,
+    #   and :max_response_size. The size limit goes with the data so that
+    #   {#decode_response} applies the same limit to the inflated body.
     def make_request(request, request_id)
       async_response = nil
       client = nil
@@ -36,21 +42,31 @@ module PatientHttp
         headers = outgoing.headers.to_h
         body = Protocol::HTTP::Body::Buffered.wrap([request.body.to_s]) if request.body
         timeout = request.timeout || config.request_timeout
+        read_timeout = request.read_timeout || config.read_timeout
+        max_response_size = request.max_response_size || config.max_response_size
 
         Async::Task.current.with_timeout(timeout) do
           endpoint = Async::HTTP::Endpoint.parse(url)
-          async_response = request_with_immediate_retries(
-            @client_pool, request, endpoint, headers, body
-          ) { |pooled_client| client = pooled_client }
+          async_response = ResponseReader.with_read_timeout(read_timeout) do
+            request_with_immediate_retries(
+              @client_pool, request, endpoint, headers, body
+            ) { |pooled_client| client = pooled_client }
+          end
           # Note: headers that appear multiple times (e.g. set-cookie) are
           # flattened to a single joined string value.
           headers_hash = async_response.headers.to_h.transform_values(&:to_s)
-          body = @response_reader.read_raw_body(async_response, headers_hash)
+          body = @response_reader.read_raw_body(
+            async_response,
+            headers_hash,
+            max_response_size: max_response_size,
+            read_timeout: read_timeout
+          )
 
           {
             status: async_response.status,
             headers: headers_hash,
-            body: body
+            body: body,
+            max_response_size: max_response_size
           }
         end
       rescue => e
@@ -75,14 +91,19 @@ module PatientHttp
     # intended to run on a completion worker thread.
     #
     # @param response_data [Hash] Raw response data from {#make_request}.
-    # @return [Hash] Response data with the decoded body string.
+    # @return [Hash] Response data with the :status, :headers, and decoded
+    #   :body keys.
     # @raise [ResponseTooLargeError] If the inflated body exceeds max_response_size.
     def decode_response(response_data)
       headers = response_data[:headers]
-      body = @response_reader.decode_body(response_data[:body], headers)
+      body = @response_reader.decode_body(
+        response_data[:body],
+        headers,
+        max_response_size: response_data[:max_response_size]
+      )
       headers = ResponseReader.rewrite_content_encoding(headers)
 
-      response_data.merge(headers: headers, body: body)
+      response_data.except(:max_response_size).merge(headers: headers, body: body)
     end
 
     # Closes all clients and releases their resources.

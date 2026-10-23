@@ -400,6 +400,19 @@ RSpec.describe PatientHttp do
         expect(@captured_request.redirect_strip_headers).to eq(["x-api-key"])
       end
 
+      it "passes read_timeout and max_response_size through to the handler's request" do
+        described_class.request(
+          :post,
+          "https://api.example.com/test",
+          callback: "TestCallback",
+          read_timeout: 12,
+          max_response_size: 6_000_000
+        )
+
+        expect(@captured_request.read_timeout).to eq(12)
+        expect(@captured_request.max_response_size).to eq(6_000_000)
+      end
+
       it "passes max_redirects through to the handler's request" do
         described_class.request(
           :get,

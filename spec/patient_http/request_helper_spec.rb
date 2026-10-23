@@ -249,6 +249,42 @@ RSpec.describe PatientHttp::RequestHelper do
     end
   end
 
+  describe "streaming options" do
+    before do
+      @captured_request = nil
+      PatientHttp.register_handler do |request:, callback:, callback_args: nil, raise_error_responses: nil|
+        @captured_request = request
+      end
+    end
+
+    it "passes read_timeout and max_response_size through async_request" do
+      TestService.async_post("/path", callback: TestCallback, read_timeout: 10, max_response_size: 2_000_000)
+
+      expect(@captured_request.read_timeout).to eq(10)
+      expect(@captured_request.max_response_size).to eq(2_000_000)
+    end
+
+    it "passes read_timeout and max_response_size through instance-level async_request" do
+      TestService.new.async_post("/path", callback: TestCallback, read_timeout: 10, max_response_size: 2_000_000)
+
+      expect(@captured_request.read_timeout).to eq(10)
+      expect(@captured_request.max_response_size).to eq(2_000_000)
+    end
+
+    it "uses the request_template defaults" do
+      service_class = Class.new do
+        include PatientHttp::RequestHelper
+
+        request_template base_url: "https://api.example.com", read_timeout: 30, max_response_size: 3_000_000
+      end
+
+      service_class.async_post("/path", callback: TestCallback)
+
+      expect(@captured_request.read_timeout).to eq(30)
+      expect(@captured_request.max_response_size).to eq(3_000_000)
+    end
+  end
+
   describe "redirect options" do
     before do
       @captured_request = nil

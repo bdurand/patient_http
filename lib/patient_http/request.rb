@@ -39,6 +39,16 @@ module PatientHttp
     # @return [Numeric, nil] The timeout in seconds for the full request.
     attr_reader :timeout
 
+    # @return [Numeric, nil] The maximum number of seconds to wait for data from
+    #   the server. The timer covers the wait for the response headers and
+    #   starts again each time a body chunk arrives. If `nil`, the configuration
+    #   value applies.
+    attr_reader :read_timeout
+
+    # @return [Integer, nil] The maximum response body size in bytes for this
+    #   request. If `nil`, the configuration value applies.
+    attr_reader :max_response_size
+
     # @return [Integer, nil] The maximum number of redirects to follow. If `0`,
     #   redirects aren't followed. If `nil`, the configuration value applies.
     attr_reader :max_redirects
@@ -79,6 +89,8 @@ module PatientHttp
           body: Payload.load(hash["body"])&.value,
           params: load_secret_params(hash["secret_params"]),
           timeout: hash["timeout"],
+          read_timeout: hash["read_timeout"],
+          max_response_size: hash["max_response_size"],
           max_redirects: hash["max_redirects"],
           follow_method_changing_redirects: hash["follow_method_changing_redirects"],
           redirect_strip_headers: hash["redirect_strip_headers"],
@@ -118,6 +130,14 @@ module PatientHttp
     #   with `body`.
     # @param params [Hash, nil] The query parameters to add to the URL.
     # @param timeout [Numeric, nil] The timeout in seconds for the full request.
+    # @param read_timeout [Numeric, nil] The maximum number of seconds to wait
+    #   for data from the server. The timer covers the wait for the response
+    #   headers and starts again each time a body chunk arrives. Use it for
+    #   streamed responses. Do not use it when the server does all of its work
+    #   before it sends the headers. If `nil`, the configuration value applies.
+    # @param max_response_size [Integer, nil] The maximum response body size in
+    #   bytes. For a compressed response, the limit also applies to the
+    #   decompressed body. If `nil`, the configuration value applies.
     # @param max_redirects [Integer, nil] The maximum number of redirects to
     #   follow. If `0`, redirects aren't followed. If `nil`, the configuration
     #   value applies.
@@ -132,8 +152,8 @@ module PatientHttp
     # @param processor [String, Symbol, nil] The name of the processor that runs
     #   the request. Integrations use this value to send the request to a named
     #   processor.
-    # @raise [ArgumentError] If the HTTP method, URL, or body isn't valid, or if
-    #   both `body` and `json` are given.
+    # @raise [ArgumentError] If the HTTP method, URL, body, `read_timeout`, or
+    #   `max_response_size` isn't valid, or if both `body` and `json` are given.
     def initialize(
       http_method,
       url,
@@ -142,6 +162,8 @@ module PatientHttp
       json: nil,
       params: nil,
       timeout: nil,
+      read_timeout: nil,
+      max_response_size: nil,
       max_redirects: nil,
       follow_method_changing_redirects: nil,
       redirect_strip_headers: nil,
@@ -161,6 +183,8 @@ module PatientHttp
       @headers = headers.is_a?(HttpHeaders) ? headers.dup : HttpHeaders.new(headers)
       @body = (body == "") ? nil : body
       @timeout = timeout
+      @read_timeout = normalized_read_timeout(read_timeout)
+      @max_response_size = normalized_max_response_size(max_response_size)
       @max_redirects = max_redirects
       @follow_method_changing_redirects = normalized_follow_method_changing_redirects(follow_method_changing_redirects)
       @redirect_strip_headers = RedirectHelper.normalize_header_names(redirect_strip_headers)
@@ -210,6 +234,9 @@ module PatientHttp
         "max_redirects" => @max_redirects
       }
 
+      hash["read_timeout"] = @read_timeout if @read_timeout
+      hash["max_response_size"] = @max_response_size if @max_response_size
+
       if @secret_params.any?
         hash["secret_params"] = @secret_params.transform_values(&:as_json)
       end
@@ -241,6 +268,26 @@ module PatientHttp
       return value if value == true || value == false
 
       raise ArgumentError.new("follow_method_changing_redirects must be true, false, or nil, got: #{value.inspect}")
+    end
+
+    # Validate the read timeout is a positive number or nil.
+    def normalized_read_timeout(value)
+      return nil if value.nil?
+      return value if value.is_a?(Numeric) && value > 0
+
+      raise ArgumentError.new(
+        "read_timeout must be a positive number or nil, got: #{value.inspect}"
+      )
+    end
+
+    # Validate the maximum response size is a positive integer or nil.
+    def normalized_max_response_size(value)
+      return nil if value.nil?
+      return value if value.is_a?(Integer) && value > 0
+
+      raise ArgumentError.new(
+        "max_response_size must be a positive integer or nil, got: #{value.inspect}"
+      )
     end
 
     # Normalize the processor name to a frozen string or nil.
